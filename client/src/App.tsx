@@ -554,6 +554,7 @@ function Admin() {
   const { user: me } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [newTeam, setNewTeam] = useState('');
@@ -562,7 +563,13 @@ function Admin() {
 
   function load() {
     api.listUsers().then(setUsers).catch((e) => setError(e.message));
-    api.getTeams().then(setTeams).catch((e) => setError(e.message));
+    api
+      .getTeams()
+      .then((next) => {
+        setTeams(next);
+        setDrafts(Object.fromEntries(next.map((t) => [t.id, t.name])));
+      })
+      .catch((e) => setError(e.message));
   }
   useEffect(load, []);
 
@@ -591,11 +598,40 @@ function Admin() {
     }
   }
 
+  async function renameTeam(e: React.FormEvent, teamId: string) {
+    e.preventDefault();
+    setError(null);
+    setMessage(null);
+    try {
+      const updated = await api.renameTeam(teamId, drafts[teamId] ?? '');
+      setMessage(`Renamed to ${updated.name}.`);
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   return (
     <section className="card">
       <h2>League Admin</h2>
       {error && <p className="error inline-error">{error}</p>}
       {message && <p className="message">{message}</p>}
+
+      <h3>Teams</h3>
+      <ul className="user-list">
+        {teams.map((t) => (
+          <li key={t.id} className="user-row">
+            <form className="add-row team-rename-row" onSubmit={(e) => renameTeam(e, t.id)}>
+              <input
+                aria-label={`Name for ${t.name}`}
+                value={drafts[t.id] ?? t.name}
+                onChange={(e) => setDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))}
+              />
+              <button type="submit">Rename</button>
+            </form>
+          </li>
+        ))}
+      </ul>
 
       <h3>Add a team</h3>
       <form className="add-row" onSubmit={addTeam}>

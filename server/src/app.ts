@@ -178,6 +178,19 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
+  api.put('/teams/:id', requireAdmin, (req: Request, res: Response) => {
+    if (!store.getTeam(req.params.id)) {
+      res.status(404).json({ error: 'Team not found' });
+      return;
+    }
+    try {
+      const team = store.renameTeam(req.params.id, (req.body ?? {}).name);
+      res.json(team);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   // ---- Roster management (admin or the team's captain) ------------------
 
   api.post('/players', requireAuth, (req: Request, res: Response) => {
