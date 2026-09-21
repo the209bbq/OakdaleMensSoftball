@@ -1,6 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { Game, LeagueData, Player, PublicUser, Role, StandingRow, Team, User } from './types.js';
+import type {
+  Game,
+  LeagueData,
+  Player,
+  PlayerAccount,
+  PublicUser,
+  Role,
+  StandingRow,
+  Team,
+  TeamMember,
+  User,
+} from './types.js';
 import { createSeedData } from './seed.js';
 import { DEFAULT_LOCATION, generateRoundRobin, type GenerateOptions } from './schedule.js';
 import { hashPassword, verifyPassword } from './auth.js';
@@ -332,6 +343,62 @@ export class LeagueStore {
 
   toPublicUser(user: User): PublicUser {
     return toPublicUser(user);
+  }
+
+  /**
+   * Set a player account's team association. Only player-role users can be
+   * attached to (or detached from) a team this way.
+   */
+  setUserTeam(userId: string, teamId: string | null): PublicUser {
+    const user = this.getUserById(userId);
+    if (!user) throw new Error('Unknown user');
+    if (user.role !== 'player') {
+      throw new Error('Only player accounts can join a team');
+    }
+    if (teamId !== null) {
+      if (typeof teamId !== 'string' || !teamId) throw new Error('Unknown team');
+      if (!this.getTeam(teamId)) throw new Error(`Unknown team: ${teamId}`);
+    }
+    user.teamId = teamId;
+    this.persist();
+    return toPublicUser(user);
+  }
+
+  /** Player-role accounts on this team, public-safe (no email), sorted by number then name. */
+  getTeamMembers(teamId: string): TeamMember[] {
+    return this.data.users
+      .filter((u) => u.role === 'player' && u.teamId === teamId)
+      .map(
+        (u): TeamMember => ({
+          id: u.id,
+          name: u.name,
+          number: u.number ?? null,
+          position: u.position,
+          photoUrl: u.photoUrl,
+        }),
+      )
+      .sort((a, b) => {
+        const aHas = a.number != null;
+        const bHas = b.number != null;
+        if (aHas && bHas && a.number !== b.number) return a.number! - b.number!;
+        if (aHas && !bHas) return -1;
+        if (!aHas && bHas) return 1;
+        return a.name.localeCompare(b.name);
+      });
+  }
+
+  /** All player-role accounts as a picker list (no email). */
+  listPlayerAccounts(): PlayerAccount[] {
+    return this.data.users
+      .filter((u) => u.role === 'player')
+      .map((u) => ({ id: u.id, name: u.name, teamId: u.teamId }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Manager-role user assigned to this team, or null. Name only — never email. */
+  getTeamManager(teamId: string): { name: string } | null {
+    const manager = this.data.users.find((u) => u.role === 'manager' && u.teamId === teamId);
+    return manager ? { name: manager.name } : null;
   }
 
   /**

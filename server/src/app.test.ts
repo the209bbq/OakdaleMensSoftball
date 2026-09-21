@@ -93,6 +93,7 @@ describe('Public read endpoints', () => {
     expect(res.body.team.id).toBe(TEAM_OWN);
     const numbers = res.body.roster.map((p: { number: number }) => p.number);
     expect(numbers).toEqual([...numbers].sort((a: number, b: number) => a - b));
+    expect(Array.isArray(res.body.members)).toBe(true);
   });
 });
 
@@ -598,5 +599,168 @@ describe('LeagueStore role backfill and ensureUser', () => {
     expect(stored.name).toBe('Demo Manager');
     expect(store.authenticate('mgr@b.com', 'longenough')).not.toBeNull();
     expect(store.authenticate('mgr@b.com', 'different-password-that-should-not-apply')).toBeNull();
+  });
+});
+
+describe('Player team membership', () => {
+  it('lets a player self-join and leave; roster members are public-safe', async () => {
+    const { app } = makeApp();
+    const player = request.agent(app);
+    const reg = await player
+      .post('/api/auth/register')
+      .send({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    expect(reg.status).toBe(201);
+
+    await player.put('/api/auth/profile').send({
+      name: 'Pat Shortstop',
+      position: 'SS',
+      number: 12,
+      photoUrl: TINY_PNG,
+    });
+
+    const join = await player.put('/api/auth/team').send({ teamId: TEAM_OWN });
+    expect(join.status).toBe(200);
+    expect(join.body.teamId).toBe(TEAM_OWN);
+    expect(join.body.role).toBe('player');
+    expect(join.body.passwordHash).toBeUndefined();
+
+    const roster = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
+    expect(roster.status).toBe(200);
+    expect(Array.isArray(roster.body.roster)).toBe(true);
+    expect(roster.body.members).toHaveLength(1);
+    const member = roster.body.members[0];
+    expect(member).toMatchObject({
+      id: join.body.id,
+      name: 'Pat Shortstop',
+      number: 12,
+      position: 'SS',
+      photoUrl: TINY_PNG,
+    });
+    expect(member.email).toBeUndefined();
+    expect(member.passwordHash).toBeUndefined();
+    expect('email' in member).toBe(false);
+    expect('passwordHash' in member).toBe(false);
+
+    const leave = await player.put('/api/auth/team').send({ teamId: null });
+    expect(leave.status).toBe(200);
+    expect(leave.body.teamId).toBeNull();
+
+    const after = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
+    expect(after.body.members).toHaveLength(0);
+  });
+
+  it('rejects self-join from a manager or admin', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const adminJoin = await admin.put('/api/auth/team').send({ teamId: TEAM_OWN });
+    expect(adminJoin.status).toBe(400);
+    expect(adminJoin.body.error).toMatch(/managed by the league/i);
+
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+    const mgrJoin = await manager.put('/api/auth/team').send({ teamId: TEAM_OTHER });
+    expect(mgrJoin.status).toBe(400);
+    expect(mgrJoin.body.error).toMatch(/managed by the league/i);
+  });
+
+  it('lets an admin assign a player to any team and clear it', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    const playerId = store.getUserByEmail('p@b.com')!.id;
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+
+    const assign = await admin.post(`/api/users/${playerId}/team`).send({ teamId: TEAM_OTHER });
+    expect(assign.status).toBe(200);
+    expect(assign.body.teamId).toBe(TEAM_OTHER);
+    expect(assign.body.passwordHash).toBeUndefined();
+
+    const roster = await request(app).get(`/api/teams/${TEAM_OTHER}/roster`);
+    expect(roster.body.members.some((m: { id: string }) => m.id === playerId)).toBe(true);
+
+    const other = await admin.post(`/api/users/${playerId}/team`).send({ teamId: TEAM_OWN });
+    expect(other.status).toBe(200);
+    expect(other.body.teamId).toBe(TEAM_OWN);
+
+    const clear = await admin.post(`/api/users/${playerId}/team`).send({ teamId: null });
+    expect(clear.status).toBe(200);
+    expect(clear.body.teamId).toBeNull();
+  });
+
+  it('lets a manager assign and remove only on their own team', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'a@b.com', name: 'Amy', password: 'longenough' });
+    store.registerUser({ email: 'b@b.com', name: 'Ben', password: 'longenough' });
+    const amy = store.getUserByEmail('a@b.com')!;
+    const ben = store.getUserByEmail('b@b.com')!;
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    await admin.post(`/api/users/${ben.id}/team`).send({ teamId: TEAM_OTHER });
+
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+
+    const own = await manager.post(`/api/users/${amy.id}/team`).send({ teamId: TEAM_OWN });
+    expect(own.status).toBe(200);
+    expect(own.body.teamId).toBe(TEAM_OWN);
+
+    const other = await manager.post(`/api/users/${amy.id}/team`).send({ teamId: TEAM_OTHER });
+    expect(other.status).toBe(403);
+
+    const removeOwn = await manager.post(`/api/users/${amy.id}/team`).send({ teamId: null });
+    expect(removeOwn.status).toBe(200);
+    expect(removeOwn.body.teamId).toBeNull();
+
+    const removeOther = await manager.post(`/api/users/${ben.id}/team`).send({ teamId: null });
+    expect(removeOther.status).toBe(403);
+  });
+
+  it('rejects assigning a non-player and anonymous assignment', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    const managerId = store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN).id;
+    const adminId = store.getUserByEmail('admin@oakdale.local')!.id;
+
+    const anon = await request(app).post(`/api/users/${adminId}/team`).send({ teamId: TEAM_OWN });
+    expect(anon.status).toBe(401);
+
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const asAdmin = await admin.post(`/api/users/${adminId}/team`).send({ teamId: TEAM_OWN });
+    expect([400, 403]).toContain(asAdmin.status);
+
+    const asManager = await admin.post(`/api/users/${managerId}/team`).send({ teamId: TEAM_OWN });
+    expect([400, 403]).toContain(asManager.status);
+  });
+
+  it('lists player accounts for admin/manager and blocks players and anonymous callers', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'p@b.com', name: 'Pat Player', password: 'longenough' });
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+
+    const anon = await request(app).get('/api/members');
+    expect(anon.status).toBe(401);
+
+    const player = await loginAs(app, 'p@b.com', 'longenough');
+    const playerList = await player.get('/api/members');
+    expect(playerList.status).toBe(403);
+
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+    const managerList = await manager.get('/api/members');
+    expect(managerList.status).toBe(200);
+    expect(Array.isArray(managerList.body)).toBe(true);
+    expect(managerList.body.some((m: { name: string }) => m.name === 'Pat Player')).toBe(true);
+    for (const row of managerList.body) {
+      expect(row).toHaveProperty('id');
+      expect(row).toHaveProperty('name');
+      expect(row).toHaveProperty('teamId');
+      expect(row.email).toBeUndefined();
+      expect('email' in row).toBe(false);
+    }
+
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const adminList = await admin.get('/api/members');
+    expect(adminList.status).toBe(200);
   });
 });

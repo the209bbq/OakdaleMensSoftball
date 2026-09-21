@@ -53,6 +53,33 @@ export interface User {
   photoUrl?: string;
 }
 
+/** Public-safe player account on a team roster (no email). */
+export interface TeamMember {
+  id: string;
+  name: string;
+  number: number | null;
+  position?: string;
+  photoUrl?: string;
+}
+
+/** Player-account picker row (no email). */
+export interface PlayerAccount {
+  id: string;
+  name: string;
+  teamId: string | null;
+}
+
+export interface TeamManagerSummary {
+  name: string;
+}
+
+export interface RosterResponse {
+  team: Team;
+  roster: Player[];
+  members: TeamMember[];
+  manager: TeamManagerSummary | null;
+}
+
 export interface ProfileUpdate {
   name: string;
   position?: string;
@@ -78,7 +105,7 @@ export const api = {
   getStandings: () => request<StandingRow[]>('/api/standings'),
   getSchedule: () => request<Game[]>('/api/schedule'),
   getTeams: () => request<Team[]>('/api/teams'),
-  getRoster: (teamId: string) => request<{ team: Team; roster: Player[] }>(`/api/teams/${teamId}/roster`),
+  getRoster: (teamId: string) => request<RosterResponse>(`/api/teams/${teamId}/roster`),
   getRules: () => request<{ rules: string }>('/api/rules'),
 
   // Auth
@@ -123,6 +150,11 @@ export const api = {
     request<Team>(`/api/teams/${id}/photo`, { method: 'PUT', body: JSON.stringify({ photoUrl }) }),
   updateProfile: (payload: ProfileUpdate) =>
     request<User>('/api/auth/profile', { method: 'PUT', body: JSON.stringify(payload) }),
+  joinTeam: (teamId: string | null) =>
+    request<User>('/api/auth/team', { method: 'PUT', body: JSON.stringify({ teamId }) }),
+  setUserTeam: (userId: string, teamId: string | null) =>
+    request<User>(`/api/users/${userId}/team`, { method: 'POST', body: JSON.stringify({ teamId }) }),
+  listMembers: () => request<PlayerAccount[]>('/api/members'),
   updateRules: (rules: string) =>
     request<{ rules: string }>('/api/rules', { method: 'PUT', body: JSON.stringify({ rules }) }),
 };

@@ -25,6 +25,15 @@ const scheduleGames = [
   },
 ];
 
+const teams = [{ id: 'tigers', name: 'Oakdale Tigers' }];
+
+const rosterPayload = {
+  team: teams[0],
+  roster: [{ id: 'p1', teamId: 'tigers', name: 'Placeholder Guy', number: 9, position: 'OF' }],
+  members: [{ id: 'u1', name: 'Pat Shortstop', number: 12, position: 'SS' }],
+  manager: { name: 'Coach' },
+};
+
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
@@ -37,6 +46,12 @@ beforeEach(() => {
       }
       if (url.includes('/api/schedule')) {
         return { ok: true, json: async () => scheduleGames } as Response;
+      }
+      if (url.includes('/roster')) {
+        return { ok: true, json: async () => rosterPayload } as Response;
+      }
+      if (url.includes('/api/teams')) {
+        return { ok: true, json: async () => teams } as Response;
       }
       return { ok: true, json: async () => [] } as Response;
     }),
@@ -98,5 +113,18 @@ describe('App', () => {
     expect(screen.getByText('Field 1')).toBeInTheDocument();
     expect(screen.getByText('6:00 PM')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /hide details/i })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('shows registered members with profiles and unregistered placeholders on Rosters', async () => {
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Rosters' }));
+    await waitFor(() => {
+      expect(screen.getByText('Pat Shortstop')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Members')).toBeInTheDocument();
+    expect(screen.getByText('Unregistered')).toBeInTheDocument();
+    expect(screen.getByText('Placeholder Guy')).toBeInTheDocument();
+    expect(screen.getByText('#12 · SS')).toBeInTheDocument();
+    expect(screen.getByText('Manager: Coach')).toBeInTheDocument();
   });
 });

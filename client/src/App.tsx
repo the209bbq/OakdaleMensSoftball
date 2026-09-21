@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type Game, type Player, type Role, type StandingRow, type Team, type User } from './api';
+import { api, type Game, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamMember, type User } from './api';
 import { useAuth } from './auth';
 import { fileToSquareDataUrl } from './image';
 
@@ -606,10 +606,15 @@ function Schedule() {
 }
 
 function Rosters() {
-  const { user } = useAuth();
+  const { user, refresh } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [roster, setRoster] = useState<Player[]>([]);
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [managerName, setManagerName] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<PlayerAccount[]>([]);
+  const [pickMember, setPickMember] = useState('');
+  const [joinPick, setJoinPick] = useState('');
   const [name, setName] = useState('');
   const [number, setNumber] = useState('');
   const [position, setPosition] = useState('');
@@ -620,16 +625,27 @@ function Rosters() {
   useEffect(() => {
     api.getTeams().then((t) => {
       setTeams(t);
-      // Team managers default to their own team.
-      const initial = user?.role === 'manager' && user.teamId ? user.teamId : t[0]?.id ?? '';
+      const pinned =
+        user?.teamId && (user.role === 'manager' || user.role === 'player') ? user.teamId : '';
+      const initial = pinned || t[0]?.id || '';
       setSelected(initial);
+      setJoinPick(pinned || t[0]?.id || '');
     });
   }, [user]);
+
+  const canManage = user?.role === 'admin' || user?.role === 'manager';
+
+  useEffect(() => {
+    if (!canManage) return;
+    api.listMembers().then(setAccounts).catch(() => setAccounts([]));
+  }, [canManage, selected]);
 
   function loadRoster(teamId: string) {
     if (!teamId) return;
     api.getRoster(teamId).then((r) => {
       setRoster(r.roster);
+      setMembers(r.members ?? []);
+      setManagerName(r.manager?.name ?? null);
       setTeams((prev) => prev.map((t) => (t.id === r.team.id ? r.team : t)));
     });
   }
@@ -637,6 +653,10 @@ function Rosters() {
 
   const selectedTeam = teams.find((t) => t.id === selected);
   const canEdit = canManageTeam(user, selected);
+  const availableAccounts = accounts.filter((a) => a.teamId !== selected);
+  const pickValue = availableAccounts.some((a) => a.id === pickMember)
+    ? pickMember
+    : availableAccounts[0]?.id ?? '';
 
   useEffect(() => {
     setTeamNameDraft(selectedTeam?.name ?? '');
@@ -697,9 +717,131 @@ function Rosters() {
     }
   }
 
+  async function handleJoin(e: React.FormEvent) {
+    e.preventDefault();
+    setMessage(null);
+    try {
+      await api.joinTeam(joinPick || null);
+      await refresh();
+      if (joinPick) setSelected(joinPick);
+      loadRoster(joinPick);
+      setMessage('Joined the team.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    }
+  }
+
+  async function handleChangeTeam(e: React.FormEvent) {
+    e.preventDefault();
+    setMessage(null);
+    try {
+      await api.joinTeam(joinPick || null);
+      await refresh();
+      if (joinPick) setSelected(joinPick);
+      loadRoster(joinPick);
+      setMessage('Team updated.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    }
+  }
+
+  async function handleLeave() {
+    setMessage(null);
+    try {
+      await api.joinTeam(null);
+      await refresh();
+      loadRoster(selected);
+      setMessage('You left the team.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    }
+  }
+
+  async function handleAddMember(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pickValue) return;
+    setMessage(null);
+    try {
+      await api.setUserTeam(pickValue, selected);
+      loadRoster(selected);
+      const next = await api.listMembers();
+      setAccounts(next);
+      setMessage('Player added to the team.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    }
+  }
+
+  async function handleRemoveMember(memberId: string) {
+    setMessage(null);
+    try {
+      await api.setUserTeam(memberId, null);
+      loadRoster(selected);
+      const next = await api.listMembers();
+      setAccounts(next);
+    } catch (err) {
+      setMessage((err as Error).message);
+    }
+  }
+
+  const playerTeamName = user?.teamId
+    ? teams.find((t) => t.id === user.teamId)?.name ?? user.teamId
+    : null;
+
   return (
     <section className="card">
       <h2>Team Rosters</h2>
+
+      {user?.role === 'player' && (
+        <div className="join-bar">
+          {user.teamId && playerTeamName ? (
+            <>
+              <p className="join-status">
+                You&apos;re on {playerTeamName} — Change / Leave
+              </p>
+              <form className="add-row" onSubmit={handleChangeTeam}>
+                <label className="field inline">
+                  Change team:{' '}
+                  <select
+                    aria-label="Change team"
+                    value={joinPick}
+                    onChange={(e) => setJoinPick(e.target.value)}
+                  >
+                    {teams.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button type="submit">Change</button>
+                <button type="button" className="link-btn danger" onClick={handleLeave}>
+                  Leave
+                </button>
+              </form>
+            </>
+          ) : (
+            <form className="add-row" onSubmit={handleJoin}>
+              <label className="field inline">
+                Join a team:{' '}
+                <select
+                  aria-label="Join a team"
+                  value={joinPick}
+                  onChange={(e) => setJoinPick(e.target.value)}
+                >
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="submit">Join</button>
+            </form>
+          )}
+        </div>
+      )}
+
       <label className="field">
         Team:{' '}
         <select value={selected} onChange={(e) => setSelected(e.target.value)}>
@@ -720,7 +862,10 @@ function Rosters() {
               {initials(selectedTeam.name)}
             </span>
           )}
-          <h3 className="roster-team-name">{selectedTeam.name}</h3>
+          <div>
+            <h3 className="roster-team-name">{selectedTeam.name}</h3>
+            {managerName && <p className="roster-manager">Manager: {managerName}</p>}
+          </div>
         </div>
       )}
 
@@ -746,6 +891,67 @@ function Rosters() {
 
       {message && <p className="message">{message}</p>}
 
+      <h3 className="roster-heading">Members</h3>
+      {members.length === 0 ? (
+        <p className="member-empty">No registered members yet.</p>
+      ) : (
+        <ul className="member-list">
+          {members.map((m) => (
+            <li key={m.id} className="member-row">
+              {m.photoUrl ? (
+                <img className="avatar member-avatar" src={m.photoUrl} alt="" />
+              ) : (
+                <span className="avatar avatar-initials member-avatar" aria-hidden="true">
+                  {initials(m.name)}
+                </span>
+              )}
+              <div className="member-info">
+                <span className="member-name">{m.name}</span>
+                <span className="member-meta">
+                  {m.number != null ? `#${m.number}` : ''}
+                  {m.number != null && m.position ? ' · ' : ''}
+                  {m.position ?? ''}
+                </span>
+              </div>
+              {canEdit && (
+                <button
+                  className="link-btn danger"
+                  onClick={() => handleRemoveMember(m.id)}
+                  aria-label={`Remove ${m.name} from team`}
+                >
+                  Remove from team
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canEdit && (
+        <form className="add-form" onSubmit={handleAddMember}>
+          <h3>Add a registered player</h3>
+          {availableAccounts.length === 0 ? (
+            <p className="member-empty">Every registered player is already on this team.</p>
+          ) : (
+            <div className="add-row">
+              <select
+                aria-label="Registered player"
+                value={pickValue}
+                onChange={(e) => setPickMember(e.target.value)}
+              >
+                {availableAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+              <button type="submit">Add to team</button>
+            </div>
+          )}
+        </form>
+      )}
+
+      <h3 className="roster-heading">Unregistered</h3>
       <table className="table">
         <thead>
           <tr>
