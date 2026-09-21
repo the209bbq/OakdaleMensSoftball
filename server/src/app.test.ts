@@ -74,6 +74,28 @@ describe('Oakdale Men\'s Softball API', () => {
     expect(res.status).toBe(400);
   });
 
+  it('generates a fresh round-robin schedule from the teams', async () => {
+    const res = await request(app)
+      .post('/api/schedule/generate')
+      .send({ startDate: '2026-07-04' });
+    expect(res.status).toBe(201);
+    // 4 seeded teams -> 6 games, none played yet, with team names attached.
+    expect(res.body).toHaveLength(6);
+    expect(res.body.every((g: { played: boolean }) => g.played === false)).toBe(true);
+    expect(res.body[0].homeTeamName).toBeTruthy();
+
+    const schedule = await request(app).get('/api/schedule');
+    expect(schedule.body).toHaveLength(6);
+    expect(schedule.body[0].date).toBe('2026-07-04');
+  });
+
+  it('rejects an invalid opener date', async () => {
+    const res = await request(app)
+      .post('/api/schedule/generate')
+      .send({ startDate: 'not-a-date' });
+    expect(res.status).toBe(400);
+  });
+
   it('records a game result and updates standings', async () => {
     const res = await request(app)
       .post('/api/games/g5/result')

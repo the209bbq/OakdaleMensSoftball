@@ -43,6 +43,18 @@ async function getJson<T>(url: string): Promise<T> {
 export const api = {
   getStandings: () => getJson<StandingRow[]>('/api/standings'),
   getSchedule: () => getJson<Game[]>('/api/schedule'),
+  generateSchedule: async (startDate?: string) => {
+    const res = await fetch('/api/schedule/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(startDate ? { startDate } : {}),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `Request failed: ${res.status}`);
+    }
+    return res.json() as Promise<Game[]>;
+  },
   getTeams: () => getJson<Team[]>('/api/teams'),
   getRoster: (teamId: string) => getJson<{ team: Team; roster: Player[] }>(`/api/teams/${teamId}/roster`),
   addPlayer: async (input: { teamId: string; name: string; number: number; position: string }) => {

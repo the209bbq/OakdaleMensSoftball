@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Game, LeagueData, Player, StandingRow, Team } from './types.js';
 import { createSeedData } from './seed.js';
+import { generateRoundRobin, type GenerateOptions } from './schedule.js';
 
 /**
  * Simple JSON-file-backed data store. Zero native dependencies so it builds and
@@ -44,6 +45,19 @@ export class LeagueStore {
 
   getSchedule(): Game[] {
     return [...this.data.games].sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Replace the season schedule with a freshly generated single round-robin
+   * built from the current teams. The first round is the season opener.
+   */
+  generateSchedule(options: GenerateOptions = {}): Game[] {
+    if (this.data.teams.length < 2) {
+      throw new Error('Need at least two teams to generate a schedule');
+    }
+    this.data.games = generateRoundRobin(this.data.teams, options);
+    this.persist();
+    return this.getSchedule();
   }
 
   addPlayer(input: Omit<Player, 'id'>): Player {

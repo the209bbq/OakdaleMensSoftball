@@ -89,16 +89,49 @@ function Standings() {
 function Schedule() {
   const [games, setGames] = useState<Game[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [startDate, setStartDate] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     api.getSchedule().then(setGames).catch((e) => setError(e.message));
   }, []);
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const next = await api.generateSchedule(startDate || undefined);
+      setGames(next);
+      setMessage(`Generated ${next.length} games from the current teams.`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   if (error) return <p className="error">{error}</p>;
 
   return (
     <section className="card">
       <h2>Season Schedule</h2>
+      <div className="generate-bar">
+        <label className="field inline">
+          Opener date:{' '}
+          <input
+            aria-label="Opener date"
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+        </label>
+        <button className="generate-btn" onClick={handleGenerate} disabled={generating}>
+          {generating ? 'Generating…' : 'Generate schedule from teams'}
+        </button>
+      </div>
+      {message && <p className="message">{message}</p>}
       <ul className="games">
         {games.map((g) => (
           <li key={g.id} className={`game ${g.played ? 'played' : 'upcoming'}`}>

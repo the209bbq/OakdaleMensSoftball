@@ -136,6 +136,47 @@ body {
   font-weight: 600;
 }
 
+.generate-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.field.inline {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.field.inline input {
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.95rem;
+  margin-left: 0.4rem;
+}
+
+.generate-btn {
+  background: var(--accent);
+  color: var(--navy);
+  border: none;
+  padding: 0.55rem 1.2rem;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.generate-btn:hover {
+  background: var(--accent-dark);
+}
+
+.generate-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .games {
   list-style: none;
   margin: 0;
