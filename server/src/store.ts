@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs';
+import { dirname, extname, join } from 'node:path';
+import Database from 'better-sqlite3';
 import type {
   Game,
   LeagueData,
@@ -17,6 +18,85 @@ import { createSeedData } from './seed.js';
 import { DEFAULT_LOCATION, generateRoundRobin, type GenerateOptions } from './schedule.js';
 import { hashPassword, verifyPassword } from './auth.js';
 
+export const MAX_PHOTO_URL_CHARS = 800000;
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS teams (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  photoUrl TEXT
+);
+CREATE TABLE IF NOT EXISTS players (
+  id TEXT PRIMARY KEY,
+  teamId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  position TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS games (
+  id TEXT PRIMARY KEY,
+  date TEXT NOT NULL,
+  homeTeamId TEXT NOT NULL,
+  awayTeamId TEXT NOT NULL,
+  homeScore INTEGER,
+  awayScore INTEGER,
+  played INTEGER NOT NULL,
+  field TEXT NOT NULL,
+  time TEXT NOT NULL,
+  location TEXT NOT NULL,
+  week INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  teamId TEXT,
+  passwordHash TEXT NOT NULL,
+  position TEXT,
+  number INTEGER,
+  photoUrl TEXT,
+  createdAt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pending_managers (
+  email TEXT PRIMARY KEY,
+  teamId TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`;
+
+type TeamRow = { id: string; name: string; photoUrl: string | null };
+type PlayerRow = { id: string; teamId: string; name: string; number: number; position: string };
+type GameRow = {
+  id: string;
+  date: string;
+  homeTeamId: string;
+  awayTeamId: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  played: number;
+  field: string;
+  time: string;
+  location: string;
+  week: number;
+};
+type UserRow = {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  teamId: string | null;
+  passwordHash: string;
+  position: string | null;
+  number: number | null;
+  photoUrl: string | null;
+  createdAt: string;
+};
+type PendingRow = { email: string; teamId: string };
+
 function normalizeGame(g: Game): Game {
   return {
     ...g,
@@ -26,8 +106,6 @@ function normalizeGame(g: Game): Game {
     week: typeof g.week === 'number' ? g.week : 0,
   };
 }
-
-export const MAX_PHOTO_URL_CHARS = 800000;
 
 function toPublicUser(user: User): PublicUser {
   const { passwordHash: _passwordHash, ...pub } = user;
@@ -56,57 +134,273 @@ function normalizeJerseyNumber(value: unknown): number | null {
   return Math.trunc(n);
 }
 
+function backfillRole(role: string): Role {
+  if (role === 'captain') return 'manager';
+  if (role === 'member') return 'player';
+  return role as Role;
+}
+
 /**
- * Simple JSON-file-backed data store. Zero native dependencies so it builds and
- * runs reliably in any environment. When no persistence path is provided the
- * store stays in memory (used by tests).
+ * Historically the constructor took a `league.json` path (or null for memory).
+ * SQLite files live next to that location as `league.db`. A directory path
+ * (e.g. DATA_DIR) also resolves to `<dir>/league.db`.
+ */
+export function resolveSqlitePath(pathOrNull: string | null): string | null {
+  if (!pathOrNull) return null;
+  if (existsSync(pathOrNull) && statSync(pathOrNull).isDirectory()) {
+    return join(pathOrNull, 'league.db');
+  }
+  if (pathOrNull.endsWith('.db')) return pathOrNull;
+  const ext = extname(pathOrNull);
+  if (!ext) return join(pathOrNull, 'league.db');
+  return join(dirname(pathOrNull), 'league.db');
+}
+
+function teamFromRow(row: TeamRow): Team {
+  const team: Team = { id: row.id, name: row.name };
+  if (row.photoUrl) team.photoUrl = row.photoUrl;
+  return team;
+}
+
+function playerFromRow(row: PlayerRow): Player {
+  return {
+    id: row.id,
+    teamId: row.teamId,
+    name: row.name,
+    number: row.number,
+    position: row.position,
+  };
+}
+
+function gameFromRow(row: GameRow): Game {
+  return normalizeGame({
+    id: row.id,
+    date: row.date,
+    homeTeamId: row.homeTeamId,
+    awayTeamId: row.awayTeamId,
+    homeScore: row.homeScore,
+    awayScore: row.awayScore,
+    played: Number(row.played) === 1,
+    field: row.field,
+    time: row.time,
+    location: row.location,
+    week: row.week,
+  });
+}
+
+function userFromRow(row: UserRow): User {
+  const user: User = {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: backfillRole(row.role),
+    teamId: row.teamId,
+    passwordHash: row.passwordHash,
+    createdAt: row.createdAt,
+  };
+  if (row.position) user.position = row.position;
+  if (row.number != null) user.number = row.number;
+  if (row.photoUrl) user.photoUrl = row.photoUrl;
+  return user;
+}
+
+/**
+ * SQLite-backed data store. The public interface matches the previous
+ * JSON-file LeagueStore: `null` is an in-memory DB (tests); a path opens
+ * `<dir>/league.db` and one-time-imports a sibling `league.json` if present.
  */
 export class LeagueStore {
-  private data: LeagueData;
-  private readonly persistPath: string | null;
+  private readonly db: Database.Database;
 
-  constructor(persistPath: string | null = null) {
-    this.persistPath = persistPath;
-    if (persistPath && existsSync(persistPath)) {
-      this.data = JSON.parse(readFileSync(persistPath, 'utf-8')) as LeagueData;
-      // Backfill fields added after a data file was first written.
-      if (!Array.isArray(this.data.users)) this.data.users = [];
-      if (!Array.isArray(this.data.pendingManagers)) this.data.pendingManagers = [];
-      if (typeof this.data.rules !== 'string') this.data.rules = createSeedData().rules;
-      this.data.games = (this.data.games ?? []).map(normalizeGame);
-      for (const user of this.data.users) {
-        const legacy = user.role as string;
-        if (legacy === 'captain') user.role = 'manager';
-        else if (legacy === 'member') user.role = 'player';
-      }
+  constructor(pathOrNull: string | null = null) {
+    const sqlitePath = resolveSqlitePath(pathOrNull);
+    if (sqlitePath) {
+      mkdirSync(dirname(sqlitePath), { recursive: true });
+      this.db = new Database(sqlitePath);
+      this.db.pragma('journal_mode = WAL');
     } else {
-      this.data = createSeedData();
-      this.persist();
+      this.db = new Database(':memory:');
     }
+    this.db.pragma('busy_timeout = 5000');
+    this.db.exec(SCHEMA);
+    if (sqlitePath) this.importLegacyJsonIfNeeded(sqlitePath);
+    this.seedIfEmpty();
   }
 
-  private persist(): void {
-    if (!this.persistPath) return;
-    mkdirSync(dirname(this.persistPath), { recursive: true });
-    writeFileSync(this.persistPath, JSON.stringify(this.data, null, 2), 'utf-8');
+  /** Close the SQLite connection. Safe to call more than once. */
+  close(): void {
+    if (this.db.open) this.db.close();
+  }
+
+  private countTeams(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS c FROM teams').get() as { c: number };
+    return row.c;
+  }
+
+  private seedIfEmpty(): void {
+    if (this.countTeams() > 0) return;
+    const seed = createSeedData();
+    const insertTeam = this.db.prepare(
+      'INSERT INTO teams (id, name, photoUrl) VALUES (@id, @name, @photoUrl)',
+    );
+    const tx = this.db.transaction(() => {
+      for (const team of seed.teams) {
+        insertTeam.run({ id: team.id, name: team.name, photoUrl: team.photoUrl ?? null });
+      }
+      this.db
+        .prepare("INSERT INTO settings (key, value) VALUES ('rules', ?) ON CONFLICT(key) DO NOTHING")
+        .run(seed.rules);
+    });
+    tx();
+  }
+
+  private importLegacyJsonIfNeeded(sqlitePath: string): void {
+    if (this.countTeams() > 0) return;
+    const jsonPath = join(dirname(sqlitePath), 'league.json');
+    if (!existsSync(jsonPath)) return;
+    this.importLegacyJson(jsonPath);
+    renameSync(jsonPath, `${jsonPath}.imported`);
+  }
+
+  private importLegacyJson(jsonPath: string): void {
+    const parsed = JSON.parse(readFileSync(jsonPath, 'utf-8')) as Partial<LeagueData>;
+    const data: LeagueData = {
+      teams: Array.isArray(parsed.teams) ? parsed.teams : [],
+      players: Array.isArray(parsed.players) ? parsed.players : [],
+      games: Array.isArray(parsed.games) ? parsed.games.map(normalizeGame) : [],
+      users: Array.isArray(parsed.users) ? parsed.users : [],
+      pendingManagers: Array.isArray(parsed.pendingManagers) ? parsed.pendingManagers : [],
+      rules: typeof parsed.rules === 'string' ? parsed.rules : createSeedData().rules,
+    };
+
+    for (const user of data.users) {
+      user.role = backfillRole(user.role as string);
+    }
+
+    const insertTeam = this.db.prepare(
+      'INSERT INTO teams (id, name, photoUrl) VALUES (@id, @name, @photoUrl)',
+    );
+    const insertPlayer = this.db.prepare(
+      'INSERT INTO players (id, teamId, name, number, position) VALUES (@id, @teamId, @name, @number, @position)',
+    );
+    const insertGame = this.db.prepare(
+      `INSERT INTO games (id, date, homeTeamId, awayTeamId, homeScore, awayScore, played, field, time, location, week)
+       VALUES (@id, @date, @homeTeamId, @awayTeamId, @homeScore, @awayScore, @played, @field, @time, @location, @week)`,
+    );
+    const insertUser = this.db.prepare(
+      `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, createdAt)
+       VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @createdAt)`,
+    );
+    const insertPending = this.db.prepare(
+      'INSERT INTO pending_managers (email, teamId) VALUES (@email, @teamId)',
+    );
+
+    const tx = this.db.transaction(() => {
+      for (const team of data.teams) {
+        insertTeam.run({ id: team.id, name: team.name, photoUrl: team.photoUrl ?? null });
+      }
+      for (const player of data.players) {
+        insertPlayer.run(player);
+      }
+      for (const game of data.games) {
+        insertGame.run({
+          ...game,
+          played: game.played ? 1 : 0,
+        });
+      }
+      for (const user of data.users) {
+        insertUser.run({
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          teamId: user.teamId ?? null,
+          passwordHash: user.passwordHash,
+          position: user.position ?? null,
+          number: user.number ?? null,
+          photoUrl: user.photoUrl ?? null,
+          createdAt: user.createdAt,
+        });
+      }
+      for (const pending of data.pendingManagers) {
+        insertPending.run({ email: pending.email, teamId: pending.teamId });
+      }
+      this.db
+        .prepare(
+          "INSERT INTO settings (key, value) VALUES ('rules', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .run(data.rules);
+    });
+    tx();
+  }
+
+  private insertUserRow(user: User): void {
+    this.db
+      .prepare(
+        `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, createdAt)
+         VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @createdAt)`,
+      )
+      .run({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        teamId: user.teamId,
+        passwordHash: user.passwordHash,
+        position: user.position ?? null,
+        number: user.number ?? null,
+        photoUrl: user.photoUrl ?? null,
+        createdAt: user.createdAt,
+      });
+  }
+
+  private updateUserRow(user: User): void {
+    this.db
+      .prepare(
+        `UPDATE users SET email = @email, name = @name, role = @role, teamId = @teamId,
+         passwordHash = @passwordHash, position = @position, number = @number, photoUrl = @photoUrl, createdAt = @createdAt
+         WHERE id = @id`,
+      )
+      .run({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        teamId: user.teamId,
+        passwordHash: user.passwordHash,
+        position: user.position ?? null,
+        number: user.number ?? null,
+        photoUrl: user.photoUrl ?? null,
+        createdAt: user.createdAt,
+      });
   }
 
   getTeams(): Team[] {
-    return [...this.data.teams].sort((a, b) => a.name.localeCompare(b.name));
+    const rows = this.db.prepare('SELECT id, name, photoUrl FROM teams').all() as TeamRow[];
+    return rows.map(teamFromRow).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   getTeam(teamId: string): Team | undefined {
-    return this.data.teams.find((t) => t.id === teamId);
+    const row = this.db
+      .prepare('SELECT id, name, photoUrl FROM teams WHERE id = ?')
+      .get(teamId) as TeamRow | undefined;
+    return row ? teamFromRow(row) : undefined;
   }
 
   getRoster(teamId: string): Player[] {
-    return this.data.players
-      .filter((p) => p.teamId === teamId)
-      .sort((a, b) => a.number - b.number);
+    const rows = this.db
+      .prepare('SELECT id, teamId, name, number, position FROM players WHERE teamId = ?')
+      .all(teamId) as PlayerRow[];
+    return rows.map(playerFromRow).sort((a, b) => a.number - b.number);
   }
 
   getSchedule(): Game[] {
-    return [...this.data.games].sort((a, b) => {
+    const rows = this.db
+      .prepare(
+        'SELECT id, date, homeTeamId, awayTeamId, homeScore, awayScore, played, field, time, location, week FROM games',
+      )
+      .all() as GameRow[];
+    return rows.map(gameFromRow).sort((a, b) => {
       if (a.week !== b.week) return a.week - b.week;
       const byDate = a.date.localeCompare(b.date);
       if (byDate !== 0) return byDate;
@@ -117,16 +411,23 @@ export class LeagueStore {
   }
 
   getRules(): string {
-    return this.data.rules;
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'rules'").get() as
+      | { value: string }
+      | undefined;
+    return row?.value ?? '';
   }
 
   setRules(text: string): string {
     if (typeof text !== 'string') {
       throw new Error('Rules must be text');
     }
-    this.data.rules = text.trim();
-    this.persist();
-    return this.data.rules;
+    const rules = text.trim();
+    this.db
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('rules', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(rules);
+    return rules;
   }
 
   /**
@@ -134,11 +435,22 @@ export class LeagueStore {
    * (one Wednesday-night round per week) built from the current teams.
    */
   generateSchedule(options: GenerateOptions = {}): Game[] {
-    if (this.data.teams.length < 2) {
+    const teams = this.db.prepare('SELECT id, name, photoUrl FROM teams ORDER BY rowid').all() as TeamRow[];
+    if (teams.length < 2) {
       throw new Error('Need at least two teams to generate a schedule');
     }
-    this.data.games = generateRoundRobin(this.data.teams, options);
-    this.persist();
+    const games = generateRoundRobin(teams.map(teamFromRow), options);
+    const insert = this.db.prepare(
+      `INSERT INTO games (id, date, homeTeamId, awayTeamId, homeScore, awayScore, played, field, time, location, week)
+       VALUES (@id, @date, @homeTeamId, @awayTeamId, @homeScore, @awayScore, @played, @field, @time, @location, @week)`,
+    );
+    const tx = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM games').run();
+      for (const game of games) {
+        insert.run({ ...game, played: game.played ? 1 : 0 });
+      }
+    });
+    tx();
     return this.getSchedule();
   }
 
@@ -156,29 +468,34 @@ export class LeagueStore {
       number: Number(input.number) || 0,
       position: input.position?.trim() || 'Utility',
     };
-    this.data.players.push(player);
-    this.persist();
+    this.db
+      .prepare(
+        'INSERT INTO players (id, teamId, name, number, position) VALUES (@id, @teamId, @name, @number, @position)',
+      )
+      .run(player);
     return player;
   }
 
   recordResult(gameId: string, homeScore: number, awayScore: number): Game {
-    const game = this.data.games.find((g) => g.id === gameId);
+    const game = this.getGame(gameId);
     if (!game) {
       throw new Error(`Unknown game: ${gameId}`);
     }
     if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore) || homeScore < 0 || awayScore < 0) {
       throw new Error('Scores must be non-negative numbers');
     }
+    this.db
+      .prepare('UPDATE games SET homeScore = ?, awayScore = ?, played = 1 WHERE id = ?')
+      .run(homeScore, awayScore, gameId);
     game.homeScore = homeScore;
     game.awayScore = awayScore;
     game.played = true;
-    this.persist();
     return game;
   }
 
   getStandings(): StandingRow[] {
     const rows = new Map<string, StandingRow>();
-    for (const team of this.data.teams) {
+    for (const team of this.db.prepare('SELECT id, name FROM teams').all() as Array<{ id: string; name: string }>) {
       rows.set(team.id, {
         teamId: team.id,
         teamName: team.name,
@@ -191,8 +508,20 @@ export class LeagueStore {
       });
     }
 
-    for (const game of this.data.games) {
-      if (!game.played || game.homeScore === null || game.awayScore === null) continue;
+    const games = this.db
+      .prepare(
+        'SELECT homeTeamId, awayTeamId, homeScore, awayScore, played FROM games',
+      )
+      .all() as Array<{
+      homeTeamId: string;
+      awayTeamId: string;
+      homeScore: number | null;
+      awayScore: number | null;
+      played: number;
+    }>;
+
+    for (const game of games) {
+      if (Number(game.played) !== 1 || game.homeScore === null || game.awayScore === null) continue;
       const home = rows.get(game.homeTeamId);
       const away = rows.get(game.awayTeamId);
       if (!home || !away) continue;
@@ -219,7 +548,7 @@ export class LeagueStore {
     return [...rows.values()].sort((a, b) => {
       if (b.wins !== a.wins) return b.wins - a.wins;
       const aDiff = a.runsFor - a.runsAgainst;
-      const bDiff = b.runsFor - b.runsAgainst;
+      const bDiff = a.runsFor - a.runsAgainst;
       if (bDiff !== aDiff) return bDiff - aDiff;
       return a.teamName.localeCompare(b.teamName);
     });
@@ -228,16 +557,17 @@ export class LeagueStore {
   createTeam(name: string): Team {
     const trimmed = (name ?? '').trim();
     if (!trimmed) throw new Error('Team name is required');
-    const id = trimmed
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || `team${Date.now()}`;
-    if (this.data.teams.some((t) => t.id === id)) {
+    const id =
+      trimmed
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || `team${Date.now()}`;
+    const existing = this.db.prepare('SELECT id FROM teams WHERE id = ?').get(id);
+    if (existing) {
       throw new Error('A team with a similar name already exists');
     }
     const team: Team = { id, name: trimmed };
-    this.data.teams.push(team);
-    this.persist();
+    this.db.prepare('INSERT INTO teams (id, name, photoUrl) VALUES (?, ?, NULL)').run(id, trimmed);
     return team;
   }
 
@@ -245,56 +575,66 @@ export class LeagueStore {
   renameTeam(teamId: string, name: string): Team {
     const trimmed = (name ?? '').trim();
     if (!trimmed) throw new Error('Team name is required');
-    const team = this.data.teams.find((t) => t.id === teamId);
+    const team = this.getTeam(teamId);
     if (!team) throw new Error(`Unknown team: ${teamId}`);
+    this.db.prepare('UPDATE teams SET name = ? WHERE id = ?').run(trimmed, teamId);
     team.name = trimmed;
-    this.persist();
     return team;
   }
 
   /** Set or clear a team's photo (data:image URL, max 800000 chars). */
   setTeamPhoto(teamId: string, photoUrl: string | null): Team {
-    const team = this.data.teams.find((t) => t.id === teamId);
+    const team = this.getTeam(teamId);
     if (!team) throw new Error(`Unknown team: ${teamId}`);
     const normalized = normalizePhotoUrl(photoUrl);
+    this.db.prepare('UPDATE teams SET photoUrl = ? WHERE id = ?').run(normalized, teamId);
     if (normalized) team.photoUrl = normalized;
     else delete team.photoUrl;
-    this.persist();
     return team;
   }
 
   removePlayer(playerId: string): void {
-    const before = this.data.players.length;
-    this.data.players = this.data.players.filter((p) => p.id !== playerId);
-    if (this.data.players.length === before) {
+    const result = this.db.prepare('DELETE FROM players WHERE id = ?').run(playerId);
+    if (result.changes === 0) {
       throw new Error(`Unknown player: ${playerId}`);
     }
-    this.persist();
   }
 
   getPlayer(playerId: string): Player | undefined {
-    return this.data.players.find((p) => p.id === playerId);
+    const row = this.db
+      .prepare('SELECT id, teamId, name, number, position FROM players WHERE id = ?')
+      .get(playerId) as PlayerRow | undefined;
+    return row ? playerFromRow(row) : undefined;
   }
 
   getGame(gameId: string): Game | undefined {
-    return this.data.games.find((g) => g.id === gameId);
+    const row = this.db
+      .prepare(
+        'SELECT id, date, homeTeamId, awayTeamId, homeScore, awayScore, played, field, time, location, week FROM games WHERE id = ?',
+      )
+      .get(gameId) as GameRow | undefined;
+    return row ? gameFromRow(row) : undefined;
   }
 
   // ---- Users & auth ------------------------------------------------------
 
   listUsers(): PublicUser[] {
-    return [...this.data.users]
+    const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
+    return rows
+      .map(userFromRow)
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(toPublicUser);
   }
 
   getUserById(id: string): User | undefined {
-    return this.data.users.find((u) => u.id === id);
+    const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
+    return row ? userFromRow(row) : undefined;
   }
 
   getUserByEmail(email: string): User | undefined {
     const normalized = email.trim().toLowerCase();
-    return this.data.users.find((u) => u.email === normalized);
+    const row = this.db.prepare('SELECT * FROM users WHERE email = ?').get(normalized) as UserRow | undefined;
+    return row ? userFromRow(row) : undefined;
   }
 
   registerUser(input: { email: string; name: string; password: string; role?: Role; teamId?: string | null }): PublicUser {
@@ -316,19 +656,19 @@ export class LeagueStore {
       passwordHash: hashPassword(input.password),
       createdAt: new Date().toISOString(),
     };
-    this.data.users.push(user);
 
-    // Pre-authorized managers: auto-grant the pending team on signup.
-    const pending = this.data.pendingManagers.find((p) => p.email === email);
+    const pending = this.db
+      .prepare('SELECT email, teamId FROM pending_managers WHERE email = ?')
+      .get(email) as PendingRow | undefined;
     if (pending) {
-      this.data.pendingManagers = this.data.pendingManagers.filter((p) => p.email !== email);
+      this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
       if (this.getTeam(pending.teamId)) {
         user.role = 'manager';
         user.teamId = pending.teamId;
       }
     }
 
-    this.persist();
+    this.insertUserRow(user);
     return toPublicUser(user);
   }
 
@@ -350,7 +690,7 @@ export class LeagueStore {
       user.teamId = null;
     }
     user.role = role;
-    this.persist();
+    this.updateUserRow(user);
     return toPublicUser(user);
   }
 
@@ -373,7 +713,7 @@ export class LeagueStore {
       if (!this.getTeam(teamId)) throw new Error(`Unknown team: ${teamId}`);
     }
     user.teamId = teamId;
-    this.persist();
+    this.updateUserRow(user);
     return toPublicUser(user);
   }
 
@@ -382,7 +722,9 @@ export class LeagueStore {
    * Managers sort first (they also play); then by number, then name.
    */
   getTeamMembers(teamId: string): TeamMember[] {
-    return this.data.users
+    const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
+    return rows
+      .map(userFromRow)
       .filter((u) => (u.role === 'player' || u.role === 'manager') && u.teamId === teamId)
       .map(
         (u): TeamMember => ({
@@ -407,7 +749,9 @@ export class LeagueStore {
 
   /** All player-role accounts as a picker list (no email). */
   listPlayerAccounts(): PlayerAccount[] {
-    return this.data.users
+    const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
+    return rows
+      .map(userFromRow)
       .filter((u) => u.role === 'player')
       .map((u) => ({ id: u.id, name: u.name, teamId: u.teamId }))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -415,7 +759,8 @@ export class LeagueStore {
 
   /** Manager-role user assigned to this team, or null. Name only — never email. */
   getTeamManager(teamId: string): { name: string } | null {
-    const manager = this.data.users.find((u) => u.role === 'manager' && u.teamId === teamId);
+    const rows = this.db.prepare('SELECT * FROM users ORDER BY rowid').all() as UserRow[];
+    const manager = rows.map(userFromRow).find((u) => u.role === 'manager' && u.teamId === teamId);
     return manager ? { name: manager.name } : null;
   }
 
@@ -429,26 +774,32 @@ export class LeagueStore {
     const pending: string[] = [];
     const seen = new Set<string>();
 
-    for (const raw of emails) {
-      const email = (raw ?? '').trim().toLowerCase();
-      if (!email) continue;
-      if (seen.has(email)) continue;
-      seen.add(email);
+    const tx = this.db.transaction(() => {
+      for (const raw of emails) {
+        const email = (raw ?? '').trim().toLowerCase();
+        if (!email) continue;
+        if (seen.has(email)) continue;
+        seen.add(email);
 
-      const existing = this.getUserByEmail(email);
-      if (existing) {
-        this.setUserRole(existing.id, 'manager', teamId);
-        this.data.pendingManagers = this.data.pendingManagers.filter((p) => p.email !== email);
-        promoted.push(email);
-      } else {
-        const already = this.data.pendingManagers.find((p) => p.email === email);
-        if (already) already.teamId = teamId;
-        else this.data.pendingManagers.push({ email, teamId });
-        pending.push(email);
+        const existing = this.getUserByEmail(email);
+        if (existing) {
+          this.setUserRole(existing.id, 'manager', teamId);
+          this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
+          promoted.push(email);
+        } else {
+          const already = this.db
+            .prepare('SELECT email FROM pending_managers WHERE email = ?')
+            .get(email) as { email: string } | undefined;
+          if (already) {
+            this.db.prepare('UPDATE pending_managers SET teamId = ? WHERE email = ?').run(teamId, email);
+          } else {
+            this.db.prepare('INSERT INTO pending_managers (email, teamId) VALUES (?, ?)').run(email, teamId);
+          }
+          pending.push(email);
+        }
       }
-    }
-
-    this.persist();
+    });
+    tx();
     return { promoted, pending };
   }
 
@@ -457,7 +808,8 @@ export class LeagueStore {
     const rows: ManagerAuthorization[] = [];
     const activeEmails = new Set<string>();
 
-    for (const user of this.data.users) {
+    const users = (this.db.prepare('SELECT * FROM users').all() as UserRow[]).map(userFromRow);
+    for (const user of users) {
       if (user.role !== 'manager' || !user.teamId) continue;
       const team = this.getTeam(user.teamId);
       rows.push({
@@ -469,7 +821,8 @@ export class LeagueStore {
       activeEmails.add(user.email);
     }
 
-    for (const entry of this.data.pendingManagers) {
+    const pending = this.db.prepare('SELECT email, teamId FROM pending_managers').all() as PendingRow[];
+    for (const entry of pending) {
       if (activeEmails.has(entry.email)) continue;
       if (this.getUserByEmail(entry.email)) continue;
       const team = this.getTeam(entry.teamId);
@@ -493,12 +846,12 @@ export class LeagueStore {
    */
   revokeManagerAuthorization(email: string): { ok: true } {
     const normalized = (email ?? '').trim().toLowerCase();
-    this.data.pendingManagers = this.data.pendingManagers.filter((p) => p.email !== normalized);
+    this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(normalized);
     const user = this.getUserByEmail(normalized);
     if (user && user.role === 'manager') {
       user.role = 'player';
+      this.updateUserRow(user);
     }
-    this.persist();
     return { ok: true };
   }
 
@@ -528,7 +881,7 @@ export class LeagueStore {
       if (photo) user.photoUrl = photo;
       else delete user.photoUrl;
     }
-    this.persist();
+    this.updateUserRow(user);
     return toPublicUser(user);
   }
 

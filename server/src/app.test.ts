@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, beforeEach } from 'vitest';
@@ -599,6 +599,112 @@ describe('LeagueStore role backfill and ensureUser', () => {
     expect(stored.name).toBe('Demo Manager');
     expect(store.authenticate('mgr@b.com', 'longenough')).not.toBeNull();
     expect(store.authenticate('mgr@b.com', 'different-password-that-should-not-apply')).toBeNull();
+  });
+});
+
+describe('LeagueStore SQLite persistence and JSON import', () => {
+  it('persists data across LeagueStore instances on the same file DB', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oakdale-sqlite-persist-'));
+    try {
+      const store = new LeagueStore(dir);
+      const team = store.createTeam('Night Owls');
+      store.addPlayer({ teamId: team.id, name: 'Sam', number: 9, position: 'P' });
+      store.registerUser({ email: 'sam@oakdale.local', name: 'Sam', password: 'longenough' });
+      store.setRules('Persisted rules');
+      store.close();
+
+      expect(existsSync(join(dir, 'league.db'))).toBe(true);
+
+      const reopened = new LeagueStore(dir);
+      expect(reopened.getTeam(team.id)?.name).toBe('Night Owls');
+      expect(reopened.getRoster(team.id)).toEqual([
+        expect.objectContaining({ name: 'Sam', number: 9, position: 'P' }),
+      ]);
+      expect(reopened.getUserByEmail('sam@oakdale.local')?.name).toBe('Sam');
+      expect(reopened.getRules()).toBe('Persisted rules');
+      expect(reopened.getTeams().map((t) => t.name)).toContain('Nothin but Dingers');
+      reopened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('imports a legacy league.json into SQLite and backfills captain/member roles', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oakdale-sqlite-import-'));
+    const jsonPath = join(dir, 'league.json');
+    writeFileSync(
+      jsonPath,
+      JSON.stringify({
+        teams: [{ id: 'legacy-squad', name: 'Legacy Squad' }],
+        players: [{ id: 'p-1', teamId: 'legacy-squad', name: 'Imported Player', number: 3, position: 'SS' }],
+        games: [
+          {
+            id: 'g-1',
+            date: '2026-05-06',
+            homeTeamId: 'legacy-squad',
+            awayTeamId: 'legacy-squad',
+            homeScore: 4,
+            awayScore: 2,
+            played: true,
+            field: 'Field 1',
+            time: '6:00 PM',
+            location: 'Kerr Park',
+            week: 1,
+          },
+        ],
+        users: [
+          {
+            id: 'u-cap',
+            email: 'legacy.cap@oakdale.local',
+            name: 'Old Captain',
+            role: 'captain',
+            teamId: 'legacy-squad',
+            passwordHash: 'scrypt$00$00',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+          {
+            id: 'u-mem',
+            email: 'legacy.mem@oakdale.local',
+            name: 'Old Member',
+            role: 'member',
+            teamId: null,
+            passwordHash: 'scrypt$imported',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        rules: 'Imported league rules stay intact',
+        pendingManagers: [{ email: 'soon@oakdale.local', teamId: 'legacy-squad' }],
+      }),
+    );
+
+    try {
+      const store = new LeagueStore(jsonPath);
+      expect(store.getTeams()).toEqual([{ id: 'legacy-squad', name: 'Legacy Squad' }]);
+      expect(store.getRoster('legacy-squad')[0]).toMatchObject({ name: 'Imported Player', number: 3 });
+      expect(store.getUserByEmail('legacy.cap@oakdale.local')?.role).toBe('manager');
+      expect(store.getUserByEmail('legacy.cap@oakdale.local')?.teamId).toBe('legacy-squad');
+      expect(store.getUserByEmail('legacy.mem@oakdale.local')?.role).toBe('player');
+      expect(store.getUserByEmail('legacy.mem@oakdale.local')?.passwordHash).toBe('scrypt$imported');
+      expect(store.getRules()).toBe('Imported league rules stay intact');
+      expect(store.listManagerAuthorizations()).toEqual([
+        expect.objectContaining({
+          email: 'soon@oakdale.local',
+          teamId: 'legacy-squad',
+          status: 'pending',
+        }),
+        expect.objectContaining({
+          email: 'legacy.cap@oakdale.local',
+          teamId: 'legacy-squad',
+          status: 'active',
+        }),
+      ]);
+      expect(existsSync(join(dir, 'league.json.imported'))).toBe(true);
+      expect(existsSync(jsonPath)).toBe(false);
+      expect(existsSync(join(dir, 'league.db'))).toBe(true);
+      store.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

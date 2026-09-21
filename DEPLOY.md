@@ -1,6 +1,8 @@
 # Deploying Oakdale Men's Softball
 
-The API serves the built React client and writes league data to a JSON file at `$DATA_DIR/league.json` (default `/data` in production). Point `DATA_DIR` at a **persistent volume** so standings, rosters, and accounts survive redeploys. Do not run production without `ADMIN_PASSWORD` and `SESSION_SECRET`.
+The API serves the built React client and writes league data to a SQLite database at `$DATA_DIR/league.db` (default `/data` in production). Point `DATA_DIR` at a **persistent volume** so standings, rosters, and accounts survive redeploys. Do not run production without `ADMIN_PASSWORD` and `SESSION_SECRET`.
+
+On first boot, if `league.db` is empty and a legacy `$DATA_DIR/league.json` is present, that file is imported into SQLite and renamed to `league.json.imported` (it is not deleted). Subsequent boots use only the SQLite file.
 
 ## Render (Blueprint)
 
@@ -11,7 +13,7 @@ The API serves the built React client and writes league data to a JSON file at `
    - `ADMIN_NAME` — display name
    - `ADMIN_PASSWORD` — strong password
 4. Confirm `SESSION_SECRET` was generated (`generateValue: true`) and `DATA_DIR=/data`.
-5. Confirm the `data` disk is attached at `/data` (1 GB). League JSON lives there across deploys.
+5. Confirm the `data` disk is attached at `/data` (1 GB). `league.db` lives there across deploys. A leftover `league.json` is imported once on first boot.
 6. After the first deploy, open `/api/health` then sign in at the site with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
 
 Render sets `PORT` automatically. `npm start` serves the production build from `client/dist`.
@@ -37,7 +39,7 @@ docker run --name oakdale \
   oakdale-softball
 ```
 
-- Data is stored in `/data` inside the container (`league.json`). The `-v oakdale-data:/data` mount keeps it on a persistent volume.
+- Data is stored in `/data` inside the container (`league.db`, plus WAL sidecar files). The `-v oakdale-data:/data` mount keeps it on a persistent volume. If you are upgrading from the JSON store, leave `league.json` in that volume for the first boot so it can be imported.
 - Listen port is `3001` (`EXPOSE 3001`); map it however you like (`-p 80:3001`).
 - Behind HTTPS, leave cookies secure (default when `NODE_ENV=production`). For local HTTP only, set `INSECURE_COOKIES=true`.
 

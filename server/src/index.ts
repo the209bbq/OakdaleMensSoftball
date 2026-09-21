@@ -8,10 +8,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
 
 const dataDir = process.env.DATA_DIR || join(__dirname, '..', '..', 'data');
-const dataFile = join(dataDir, 'league.json');
 const clientDist = join(__dirname, '..', '..', 'client', 'dist');
 
-const store = new LeagueStore(dataFile);
+// LeagueStore treats this as a data directory and opens `${DATA_DIR}/league.db`.
+// A sibling `league.json` is imported once on first boot if the DB is empty.
+const store = new LeagueStore(dataDir);
 
 // Bootstrap the commissioner (admin) account from the environment.
 const adminEmail = process.env.ADMIN_EMAIL || 'admin@oakdale.local';
