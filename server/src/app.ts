@@ -34,7 +34,9 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
   const app = express();
   app.use(cors({ origin: true, credentials: true }));
-  app.use(express.json());
+  // Photos are stored as data:image URLs (up to 800000 chars), so the JSON
+  // body limit has to be well above Express's 100kb default.
+  app.use(express.json({ limit: '2mb' }));
   app.use(cookieParser());
 
   // Attach the current user (if any) to every request.
@@ -125,6 +127,16 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     res.json({ user: req.user ?? null });
   });
 
+  api.put('/auth/profile', requireAuth, (req: Request, res: Response) => {
+    try {
+      const { name, position, number, photoUrl } = req.body ?? {};
+      const updated = store.updateProfile(req.user!.id, { name, position, number, photoUrl });
+      res.json(updated);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   // ---- Public reads ------------------------------------------------------
 
   api.get('/teams', (_req: Request, res: Response) => {
@@ -167,7 +179,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     res.json({ rules: store.setRules(rules) });
   });
 
-  // ---- Team management (admin) ------------------------------------------
+  // ---- Team management (admin creates; admin or the team's manager edits) --
 
   api.post('/teams', requireAdmin, (req: Request, res: Response) => {
     try {
@@ -178,13 +190,35 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
-  api.put('/teams/:id', requireAdmin, (req: Request, res: Response) => {
+  api.put('/teams/:id', requireAuth, (req: Request, res: Response) => {
     if (!store.getTeam(req.params.id)) {
       res.status(404).json({ error: 'Team not found' });
       return;
     }
+    if (!canManageTeam(req.user, req.params.id)) {
+      res.status(403).json({ error: 'You can only manage your own team' });
+      return;
+    }
     try {
       const team = store.renameTeam(req.params.id, (req.body ?? {}).name);
+      res.json(team);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.put('/teams/:id/photo', requireAuth, (req: Request, res: Response) => {
+    if (!store.getTeam(req.params.id)) {
+      res.status(404).json({ error: 'Team not found' });
+      return;
+    }
+    if (!canManageTeam(req.user, req.params.id)) {
+      res.status(403).json({ error: 'You can only manage your own team' });
+      return;
+    }
+    try {
+      const { photoUrl } = req.body ?? {};
+      const team = store.setTeamPhoto(req.params.id, photoUrl ?? null);
       res.json(team);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });

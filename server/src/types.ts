@@ -1,6 +1,8 @@
 export interface Team {
   id: string;
   name: string;
+  /** Data-URL thumbnail (data:image/...), set by admin or the team's manager. */
+  photoUrl?: string;
 }
 
 export interface Player {
@@ -51,6 +53,10 @@ export interface User {
   teamId: string | null;
   passwordHash: string;
   createdAt: string;
+  /** Self-editable profile fields. */
+  position?: string;
+  number?: number | null;
+  photoUrl?: string;
 }
 
 /** User shape safe to return over the API (no password hash). */
