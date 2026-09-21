@@ -48,3 +48,9 @@ Then open http://localhost:5173. The Vite dev server proxies `/api/*` to the API
 ## Data
 
 Seed data lives in `server/src/seed.ts`. At runtime the API persists to `data/league.db` (git-ignored), so changes made through the app survive restarts. A leftover `data/league.json` is imported once on first boot.
+
+## Deploy (self-host, including free)
+
+Production is a single Node process that serves the built client and stores data in SQLite. Copy `.env.example` to `.env`, set a strong `ADMIN_PASSWORD` and `SESSION_SECRET`, and keep `SEED_DEMO_USERS=false`.
+
+**Free and cheap options** (Oracle Always Free VM, Cloudflare Tunnel, Fly.io, Render) with copy-paste steps are in [`DEPLOY.md`](DEPLOY.md). The one-command path on a VM is `docker compose up -d --build`.
