@@ -49,7 +49,7 @@ export interface User {
   email: string;
   name: string;
   role: Role;
-  /** For managers: the team they manage. Null for admins/players. */
+  /** For managers: the team they manage. For players: the team they belong to. Null for admins. */
   teamId: string | null;
   passwordHash: string;
   createdAt: string;
@@ -61,6 +61,22 @@ export interface User {
 
 /** User shape safe to return over the API (no password hash). */
 export type PublicUser = Omit<User, 'passwordHash'>;
+
+/** Public-safe player-account row on a team roster (no email). */
+export interface TeamMember {
+  id: string;
+  name: string;
+  number: number | null;
+  position?: string;
+  photoUrl?: string;
+}
+
+/** Player-account picker row (no email). */
+export interface PlayerAccount {
+  id: string;
+  name: string;
+  teamId: string | null;
+}
 
 export interface LeagueData {
   teams: Team[];

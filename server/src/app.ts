@@ -137,6 +137,24 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
+  api.put('/auth/team', requireAuth, (req: Request, res: Response) => {
+    if (req.user!.role !== 'player') {
+      res.status(400).json({ error: 'Your team is managed by the league' });
+      return;
+    }
+    const { teamId } = req.body ?? {};
+    if (teamId !== null && typeof teamId !== 'string') {
+      res.status(400).json({ error: 'teamId must be a string or null' });
+      return;
+    }
+    try {
+      const updated = store.setUserTeam(req.user!.id, teamId);
+      res.json(updated);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   // ---- Public reads ------------------------------------------------------
 
   api.get('/teams', (_req: Request, res: Response) => {
@@ -157,7 +175,12 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       res.status(404).json({ error: 'Team not found' });
       return;
     }
-    res.json({ team, roster: store.getRoster(team.id) });
+    res.json({
+      team,
+      roster: store.getRoster(team.id),
+      members: store.getTeamMembers(team.id),
+      manager: store.getTeamManager(team.id),
+    });
   });
 
   api.get('/rules', (_req: Request, res: Response) => {
@@ -303,6 +326,58 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
   });
 
   // ---- User & role management (admin only) ------------------------------
+
+  api.get('/members', requireAuth, (req: Request, res: Response) => {
+    if (req.user!.role !== 'admin' && req.user!.role !== 'manager') {
+      res.status(403).json({ error: 'Admin or team manager access required' });
+      return;
+    }
+    res.json(store.listPlayerAccounts());
+  });
+
+  api.post('/users/:id/team', requireAuth, (req: Request, res: Response) => {
+    const target = store.getUserById(req.params.id);
+    if (!target) {
+      res.status(400).json({ error: 'Unknown user' });
+      return;
+    }
+    if (target.role !== 'player') {
+      res.status(400).json({ error: 'Only player accounts can be assigned to a team' });
+      return;
+    }
+    const { teamId } = req.body ?? {};
+    if (teamId !== null && typeof teamId !== 'string') {
+      res.status(400).json({ error: 'teamId must be a string or null' });
+      return;
+    }
+
+    const actor = req.user!;
+    if (actor.role === 'admin') {
+      // Admins may assign a player to any team (or none).
+    } else if (actor.role === 'manager') {
+      const ownTeam = actor.teamId;
+      if (!ownTeam) {
+        res.status(403).json({ error: 'You can only manage your own team' });
+        return;
+      }
+      const addingToOwn = teamId === ownTeam;
+      const removingFromOwn = teamId === null && target.teamId === ownTeam;
+      if (!addingToOwn && !removingFromOwn) {
+        res.status(403).json({ error: 'You can only add or remove players on your own team' });
+        return;
+      }
+    } else {
+      res.status(403).json({ error: 'Admin or team manager access required' });
+      return;
+    }
+
+    try {
+      const updated = store.setUserTeam(target.id, teamId);
+      res.json(updated);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
 
   api.get('/users', requireAdmin, (_req: Request, res: Response) => {
     res.json(store.listUsers());
