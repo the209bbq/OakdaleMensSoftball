@@ -1,6 +1,7 @@
 export interface Team {
   id: string;
   name: string;
+  photoUrl?: string;
 }
 
 export interface Player {
@@ -47,6 +48,16 @@ export interface User {
   role: Role;
   teamId: string | null;
   createdAt: string;
+  position?: string;
+  number?: number | null;
+  photoUrl?: string;
+}
+
+export interface ProfileUpdate {
+  name: string;
+  position?: string;
+  number?: number | null;
+  photoUrl?: string | null;
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -108,6 +119,10 @@ export const api = {
     request<Team>('/api/teams', { method: 'POST', body: JSON.stringify({ name }) }),
   renameTeam: (id: string, name: string) =>
     request<Team>('/api/teams/' + id, { method: 'PUT', body: JSON.stringify({ name }) }),
+  setTeamPhoto: (id: string, photoUrl: string | null) =>
+    request<Team>(`/api/teams/${id}/photo`, { method: 'PUT', body: JSON.stringify({ photoUrl }) }),
+  updateProfile: (payload: ProfileUpdate) =>
+    request<User>('/api/auth/profile', { method: 'PUT', body: JSON.stringify(payload) }),
   updateRules: (rules: string) =>
     request<{ rules: string }>('/api/rules', { method: 'PUT', body: JSON.stringify({ rules }) }),
 };

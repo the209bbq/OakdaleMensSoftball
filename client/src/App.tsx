@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Game, type Player, type Role, type StandingRow, type Team, type User } from './api';
 import { useAuth } from './auth';
+import { fileToSquareDataUrl } from './image';
 
 type Tab = 'standings' | 'schedule' | 'rosters' | 'rules' | 'admin';
 
@@ -25,10 +26,18 @@ function roleLabel(role: Role): string {
   return 'Player';
 }
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 export default function App() {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('standings');
   const [authOpen, setAuthOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   // If a non-admin lands on the admin tab (e.g. after logout), bounce them out.
   useEffect(() => {
@@ -44,7 +53,7 @@ export default function App() {
             <span className="app-bar-title">Oakdale MSB</span>
             <span className="app-bar-sub">{TAB_TITLES[tab]}</span>
           </div>
-          <AuthControl onSignIn={() => setAuthOpen(true)} />
+          <AuthControl onSignIn={() => setAuthOpen(true)} onEditProfile={() => setProfileOpen(true)} />
         </div>
       </header>
 
@@ -67,11 +76,12 @@ export default function App() {
       </nav>
 
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
+      {profileOpen && user && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </div>
   );
 }
 
-function AuthControl({ onSignIn }: { onSignIn: () => void }) {
+function AuthControl({ onSignIn, onEditProfile }: { onSignIn: () => void; onEditProfile: () => void }) {
   const { user, logout } = useAuth();
   if (!user) {
     return (
@@ -82,10 +92,19 @@ function AuthControl({ onSignIn }: { onSignIn: () => void }) {
   }
   return (
     <div className="user-chip">
-      <div className="user-meta">
-        <span className="user-name">{user.name}</span>
-        <span className="user-role">{roleLabel(user.role)}</span>
-      </div>
+      <button className="user-chip-btn" type="button" onClick={onEditProfile} aria-label="Edit profile">
+        {user.photoUrl ? (
+          <img className="avatar" src={user.photoUrl} alt="" />
+        ) : (
+          <span className="avatar avatar-initials" aria-hidden="true">
+            {initials(user.name)}
+          </span>
+        )}
+        <div className="user-meta">
+          <span className="user-name">{user.name}</span>
+          <span className="user-role">{roleLabel(user.role)}</span>
+        </div>
+      </button>
       <button className="signout-btn" onClick={() => logout()} aria-label="Sign out">
         Sign out
       </button>
@@ -163,6 +182,135 @@ function AuthModal({ onClose }: { onClose: () => void }) {
           ×
         </button>
       </div>
+    </div>
+  );
+}
+
+function ProfileModal({ onClose }: { onClose: () => void }) {
+  const { user, refresh } = useAuth();
+  const [name, setName] = useState(user?.name ?? '');
+  const [position, setPosition] = useState(user?.position ?? '');
+  const [number, setNumber] = useState(user?.number != null ? String(user.number) : '');
+  const [photoUrl, setPhotoUrl] = useState<string | null>(user?.photoUrl ?? null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onPickPhoto(file: File) {
+    try {
+      setPhotoUrl(await fileToSquareDataUrl(file));
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const parsedNumber = number.trim() === '' ? null : Number(number);
+      await api.updateProfile({
+        name,
+        position,
+        number: parsedNumber,
+        photoUrl,
+      });
+      await refresh();
+      onClose();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2 className="modal-title">Your profile</h2>
+        <form onSubmit={submit} className="modal-form">
+          <PhotoPicker
+            id="profile-photo"
+            label="Profile photo"
+            value={photoUrl}
+            onFile={onPickPhoto}
+          />
+          <label className="field">
+            Name
+            <input
+              aria-label="Full name"
+              placeholder="Full name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </label>
+          <label className="field">
+            Position
+            <input
+              aria-label="Position"
+              placeholder="Position"
+              value={position}
+              onChange={(e) => setPosition(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            Number
+            <input
+              aria-label="Jersey number"
+              placeholder="#"
+              type="number"
+              min={0}
+              value={number}
+              onChange={(e) => setNumber(e.target.value)}
+            />
+          </label>
+          {error && <p className="error inline-error">{error}</p>}
+          <button className="primary-btn" type="submit" disabled={busy}>
+            {busy ? 'Saving…' : 'Save profile'}
+          </button>
+        </form>
+        <button className="modal-close" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PhotoPicker({
+  id,
+  label,
+  value,
+  onFile,
+}: {
+  id: string;
+  label: string;
+  value: string | null | undefined;
+  onFile: (file: File) => void | Promise<void>;
+}) {
+  return (
+    <div className="photo-picker">
+      {value ? (
+        <img className="photo-preview" src={value} alt="" />
+      ) : (
+        <div className="photo-preview photo-preview-empty" aria-hidden="true" />
+      )}
+      <label className="photo-picker-label" htmlFor={id}>
+        {label}
+        <input
+          id={id}
+          type="file"
+          accept="image/*"
+          aria-label={label}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void onFile(file);
+            e.target.value = '';
+          }}
+        />
+      </label>
     </div>
   );
 }
@@ -466,6 +614,8 @@ function Rosters() {
   const [number, setNumber] = useState('');
   const [position, setPosition] = useState('');
   const [message, setMessage] = useState<string | null>(null);
+  const [teamNameDraft, setTeamNameDraft] = useState('');
+  const [teamPhotoPreview, setTeamPhotoPreview] = useState<string | null>(null);
 
   useEffect(() => {
     api.getTeams().then((t) => {
@@ -478,11 +628,49 @@ function Rosters() {
 
   function loadRoster(teamId: string) {
     if (!teamId) return;
-    api.getRoster(teamId).then((r) => setRoster(r.roster));
+    api.getRoster(teamId).then((r) => {
+      setRoster(r.roster);
+      setTeams((prev) => prev.map((t) => (t.id === r.team.id ? r.team : t)));
+    });
   }
   useEffect(() => loadRoster(selected), [selected]);
 
+  const selectedTeam = teams.find((t) => t.id === selected);
   const canEdit = canManageTeam(user, selected);
+
+  useEffect(() => {
+    setTeamNameDraft(selectedTeam?.name ?? '');
+    setTeamPhotoPreview(selectedTeam?.photoUrl ?? null);
+  }, [selectedTeam?.id, selectedTeam?.name, selectedTeam?.photoUrl]);
+
+  function patchTeam(updated: Team) {
+    setTeams((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+  }
+
+  async function handleRename(e: React.FormEvent) {
+    e.preventDefault();
+    setMessage(null);
+    try {
+      const updated = await api.renameTeam(selected, teamNameDraft);
+      patchTeam(updated);
+      setMessage(`Renamed to ${updated.name}.`);
+    } catch (err) {
+      setMessage((err as Error).message);
+    }
+  }
+
+  async function handleTeamPhoto(file: File) {
+    setMessage(null);
+    try {
+      const dataUrl = await fileToSquareDataUrl(file);
+      setTeamPhotoPreview(dataUrl);
+      const updated = await api.setTeamPhoto(selected, dataUrl);
+      patchTeam(updated);
+      setMessage('Team photo saved.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    }
+  }
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -523,6 +711,41 @@ function Rosters() {
         </select>
       </label>
 
+      {selectedTeam && (
+        <div className="roster-team-header">
+          {selectedTeam.photoUrl ? (
+            <img className="team-logo" src={selectedTeam.photoUrl} alt="" />
+          ) : (
+            <span className="team-logo team-logo-placeholder" aria-hidden="true">
+              {initials(selectedTeam.name)}
+            </span>
+          )}
+          <h3 className="roster-team-name">{selectedTeam.name}</h3>
+        </div>
+      )}
+
+      {canEdit && (
+        <div className="team-manage">
+          <form className="add-row team-rename-row" onSubmit={handleRename}>
+            <input
+              aria-label="Team name"
+              value={teamNameDraft}
+              onChange={(e) => setTeamNameDraft(e.target.value)}
+              required
+            />
+            <button type="submit">Save name</button>
+          </form>
+          <PhotoPicker
+            id="team-photo"
+            label="Team photo"
+            value={teamPhotoPreview ?? selectedTeam?.photoUrl}
+            onFile={handleTeamPhoto}
+          />
+        </div>
+      )}
+
+      {message && <p className="message">{message}</p>}
+
       <table className="table">
         <thead>
           <tr>
@@ -559,11 +782,8 @@ function Rosters() {
             <input aria-label="Position" placeholder="Position" value={position} onChange={(e) => setPosition(e.target.value)} />
             <button type="submit">Add</button>
           </div>
-          {message && <p className="message">{message}</p>}
         </form>
-      ) : (
-        message && <p className="message">{message}</p>
-      )}
+      ) : null}
     </section>
   );
 }

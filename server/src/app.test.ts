@@ -288,7 +288,10 @@ describe('Admin user management', () => {
   });
 });
 
-describe('Admin team rename', () => {
+const TINY_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+describe('Team rename', () => {
   it('lets an admin rename a team and keeps the id stable', async () => {
     const { app } = makeApp();
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
@@ -300,6 +303,28 @@ describe('Admin team rename', () => {
     const list = await request(app).get('/api/teams');
     const renamed = list.body.find((t: { id: string }) => t.id === TEAM_OWN);
     expect(renamed.name).toBe('Dingers United');
+  });
+
+  it('lets a manager rename their own team', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+
+    const put = await manager.put(`/api/teams/${TEAM_OWN}`).send({ name: 'Dingers FC' });
+    expect(put.status).toBe(200);
+    expect(put.body.id).toBe(TEAM_OWN);
+    expect(put.body.name).toBe('Dingers FC');
+  });
+
+  it('blocks a manager from renaming another team', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+
+    const res = await manager.put(`/api/teams/${TEAM_OTHER}`).send({ name: 'Stolen Name' });
+    expect(res.status).toBe(403);
   });
 
   it('blocks anonymous team renames', async () => {
@@ -327,6 +352,116 @@ describe('Admin team rename', () => {
     const { app } = makeApp();
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
     const res = await admin.put(`/api/teams/${TEAM_OWN}`).send({ name: '   ' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('Team photo', () => {
+  it('lets a manager set their own team photo and reflects it on GET', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+
+    const put = await manager.put(`/api/teams/${TEAM_OWN}/photo`).send({ photoUrl: TINY_PNG });
+    expect(put.status).toBe(200);
+    expect(put.body.id).toBe(TEAM_OWN);
+    expect(put.body.photoUrl).toBe(TINY_PNG);
+
+    const list = await request(app).get('/api/teams');
+    const team = list.body.find((t: { id: string }) => t.id === TEAM_OWN);
+    expect(team.photoUrl).toBe(TINY_PNG);
+
+    const roster = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
+    expect(roster.body.team.photoUrl).toBe(TINY_PNG);
+  });
+
+  it('blocks a manager from setting another team photo', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+
+    const res = await manager.put(`/api/teams/${TEAM_OTHER}/photo`).send({ photoUrl: TINY_PNG });
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects a non-data-url team photo', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+
+    const res = await manager
+      .put(`/api/teams/${TEAM_OWN}/photo`)
+      .send({ photoUrl: 'https://example.com/logo.png' });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an oversized team photo', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+
+    const res = await manager
+      .put(`/api/teams/${TEAM_OWN}/photo`)
+      .send({ photoUrl: `data:image/png;base64,${'A'.repeat(800000)}` });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('Player profile', () => {
+  it('requires auth to update a profile', async () => {
+    const { app } = makeApp();
+    const res = await request(app).put('/api/auth/profile').send({ name: 'Nope' });
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects an empty name', async () => {
+    const { app } = makeApp();
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    const res = await player.put('/api/auth/profile').send({ name: '   ' });
+    expect(res.status).toBe(400);
+  });
+
+  it('updates name, position, number, and photo and reflects them on /me', async () => {
+    const { app } = makeApp();
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+
+    const put = await player.put('/api/auth/profile').send({
+      name: 'Pat Shortstop',
+      position: 'SS',
+      number: 12,
+      photoUrl: TINY_PNG,
+    });
+    expect(put.status).toBe(200);
+    expect(put.body.name).toBe('Pat Shortstop');
+    expect(put.body.position).toBe('SS');
+    expect(put.body.number).toBe(12);
+    expect(put.body.photoUrl).toBe(TINY_PNG);
+    expect(put.body.passwordHash).toBeUndefined();
+    expect('passwordHash' in put.body).toBe(false);
+
+    const me = await player.get('/api/auth/me');
+    expect(me.status).toBe(200);
+    expect(me.body.user.name).toBe('Pat Shortstop');
+    expect(me.body.user.position).toBe('SS');
+    expect(me.body.user.number).toBe(12);
+    expect(me.body.user.photoUrl).toBe(TINY_PNG);
+    expect(me.body.user.passwordHash).toBeUndefined();
+  });
+
+  it('rejects an invalid profile photo', async () => {
+    const { app } = makeApp();
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    const res = await player.put('/api/auth/profile').send({
+      name: 'Pat',
+      photoUrl: 'not-a-data-url',
+    });
     expect(res.status).toBe(400);
   });
 });

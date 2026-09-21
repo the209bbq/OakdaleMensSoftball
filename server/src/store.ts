@@ -15,9 +15,33 @@ function normalizeGame(g: Game): Game {
   };
 }
 
+export const MAX_PHOTO_URL_CHARS = 800000;
+
 function toPublicUser(user: User): PublicUser {
   const { passwordHash: _passwordHash, ...pub } = user;
   return pub;
+}
+
+/** Validate a stored data-URL thumbnail. Empty/null means "clear". */
+function normalizePhotoUrl(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') {
+    throw new Error('photoUrl must be a data:image URL or empty');
+  }
+  if (!value.startsWith('data:image/')) {
+    throw new Error('photoUrl must start with data:image/');
+  }
+  if (value.length > MAX_PHOTO_URL_CHARS) {
+    throw new Error(`photoUrl must be ${MAX_PHOTO_URL_CHARS} characters or fewer`);
+  }
+  return value;
+}
+
+function normalizeJerseyNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.trunc(n);
 }
 
 /**
@@ -215,6 +239,17 @@ export class LeagueStore {
     return team;
   }
 
+  /** Set or clear a team's photo (data:image URL, max 800000 chars). */
+  setTeamPhoto(teamId: string, photoUrl: string | null): Team {
+    const team = this.data.teams.find((t) => t.id === teamId);
+    if (!team) throw new Error(`Unknown team: ${teamId}`);
+    const normalized = normalizePhotoUrl(photoUrl);
+    if (normalized) team.photoUrl = normalized;
+    else delete team.photoUrl;
+    this.persist();
+    return team;
+  }
+
   removePlayer(playerId: string): void {
     const before = this.data.players.length;
     this.data.players = this.data.players.filter((p) => p.id !== playerId);
@@ -296,6 +331,36 @@ export class LeagueStore {
   }
 
   toPublicUser(user: User): PublicUser {
+    return toPublicUser(user);
+  }
+
+  /**
+   * Update the signed-in user's own profile. Name is required; position, jersey
+   * number, and photoUrl are optional. photoUrl must be a data:image URL ≤ 800000 chars.
+   */
+  updateProfile(
+    userId: string,
+    input: { name: string; position?: string; number?: number | null; photoUrl?: string | null },
+  ): PublicUser {
+    const user = this.getUserById(userId);
+    if (!user) throw new Error('Unknown user');
+    const name = (input.name ?? '').trim();
+    if (!name) throw new Error('Name is required');
+    user.name = name;
+    if (input.position !== undefined) {
+      const position = (input.position ?? '').trim();
+      if (position) user.position = position;
+      else delete user.position;
+    }
+    if (input.number !== undefined) {
+      user.number = normalizeJerseyNumber(input.number);
+    }
+    if (input.photoUrl !== undefined) {
+      const photo = normalizePhotoUrl(input.photoUrl);
+      if (photo) user.photoUrl = photo;
+      else delete user.photoUrl;
+    }
+    this.persist();
     return toPublicUser(user);
   }
 
