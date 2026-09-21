@@ -23,9 +23,17 @@ afterEach(() => {
 });
 
 describe('App', () => {
-  it('renders the league title', () => {
+  it('renders the app bar title', () => {
     render(<App />);
-    expect(screen.getByText(/Oakdale Men's Softball League/i)).toBeInTheDocument();
+    expect(screen.getByText(/Oakdale MSB/i)).toBeInTheDocument();
+  });
+
+  it('renders bottom tab navigation', () => {
+    render(<App />);
+    const tablist = screen.getByRole('tablist');
+    expect(tablist).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Schedule' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Rosters' })).toBeInTheDocument();
   });
 
   it('shows standings loaded from the API', async () => {

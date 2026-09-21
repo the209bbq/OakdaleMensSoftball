@@ -17,82 +17,110 @@
 body {
   margin: 0;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: var(--bg);
+  background: var(--navy);
   color: var(--text);
+  overscroll-behavior-y: none;
 }
 
-.app {
-  max-width: 900px;
+/* App shell: fixed top app bar, scrollable content, fixed bottom tab bar. */
+.app-shell {
+  max-width: 480px;
   margin: 0 auto;
-  padding-bottom: 3rem;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.25);
 }
 
-.hero {
+.app-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
   color: #fff;
-  padding: 3rem 1.5rem 2.5rem;
-  text-align: center;
+  padding-top: env(safe-area-inset-top);
 }
 
-.hero-inner {
-  max-width: 640px;
-  margin: 0 auto;
-}
-
-.badge {
-  display: inline-block;
-  background: var(--accent);
-  color: var(--navy);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  font-size: 0.72rem;
-  padding: 0.25rem 0.7rem;
-  border-radius: 999px;
-  margin-bottom: 0.75rem;
-}
-
-.hero h1 {
-  margin: 0 0 0.5rem;
-  font-size: 2.1rem;
-}
-
-.hero p {
-  margin: 0;
-  color: #cbd5e1;
-}
-
-.tabs {
+.app-bar-inner {
   display: flex;
-  gap: 0.5rem;
-  justify-content: center;
-  margin: -1.25rem auto 1.5rem;
-  padding: 0 1rem;
-  position: relative;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.9rem 1.1rem;
 }
 
-.tabs button {
-  border: none;
-  background: var(--card);
-  color: var(--muted);
+.app-logo {
+  border-radius: 8px;
+  flex: none;
+}
+
+.app-bar-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.app-bar-title {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.app-bar-sub {
+  font-size: 0.8rem;
+  color: var(--accent);
   font-weight: 600;
-  padding: 0.7rem 1.4rem;
-  border-radius: 999px;
+}
+
+.app-content {
+  flex: 1;
+  padding: 1rem 1rem calc(5rem + env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+
+.tab-bar {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 20;
+  box-shadow: 0 -4px 18px rgba(11, 37, 69, 0.08);
+}
+
+.tab-item {
+  flex: 1;
+  border: none;
+  background: none;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.6rem 0 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 6px 16px rgba(11, 37, 69, 0.12);
-  transition: all 0.15s ease;
+  transition: color 0.15s ease;
 }
 
-.tabs button:hover {
+.tab-item svg {
+  transition: transform 0.15s ease;
+}
+
+.tab-item.active {
   color: var(--navy);
 }
 
-.tabs button.active {
-  background: var(--accent);
-  color: var(--navy);
-}
-
-.content {
-  padding: 0 1.5rem;
+.tab-item.active svg {
+  color: var(--accent-dark);
+  transform: translateY(-1px);
 }
 
 .card {

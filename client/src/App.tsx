@@ -3,39 +3,96 @@ import { api, type Game, type Player, type StandingRow, type Team } from './api'
 
 type Tab = 'standings' | 'schedule' | 'rosters';
 
+const TAB_TITLES: Record<Tab, string> = {
+  standings: 'Standings',
+  schedule: 'Schedule',
+  rosters: 'Rosters',
+};
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('standings');
 
   return (
-    <div className="app">
-      <header className="hero">
-        <div className="hero-inner">
-          <span className="badge">EST. 2026</span>
-          <h1>Oakdale Men's Softball League</h1>
-          <p>Standings, schedules, and team rosters for the Oakdale summer season.</p>
+    <div className="app-shell">
+      <header className="app-bar">
+        <div className="app-bar-inner">
+          <img className="app-logo" src="/app-icon.svg" alt="" width="28" height="28" />
+          <div className="app-bar-text">
+            <span className="app-bar-title">Oakdale MSB</span>
+            <span className="app-bar-sub">{TAB_TITLES[tab]}</span>
+          </div>
         </div>
       </header>
 
-      <nav className="tabs">
-        <button className={tab === 'standings' ? 'active' : ''} onClick={() => setTab('standings')}>
-          Standings
-        </button>
-        <button className={tab === 'schedule' ? 'active' : ''} onClick={() => setTab('schedule')}>
-          Schedule
-        </button>
-        <button className={tab === 'rosters' ? 'active' : ''} onClick={() => setTab('rosters')}>
-          Rosters
-        </button>
-      </nav>
-
-      <main className="content">
+      <main className="app-content">
         {tab === 'standings' && <Standings />}
         {tab === 'schedule' && <Schedule />}
         {tab === 'rosters' && <Rosters />}
       </main>
 
-      <footer className="footer">Oakdale Men's Softball &middot; Play ball!</footer>
+      <nav className="tab-bar" role="tablist" aria-label="Main navigation">
+        <TabButton tab="standings" current={tab} onSelect={setTab} label="Standings" icon={TrophyIcon} />
+        <TabButton tab="schedule" current={tab} onSelect={setTab} label="Schedule" icon={CalendarIcon} />
+        <TabButton tab="rosters" current={tab} onSelect={setTab} label="Rosters" icon={RosterIcon} />
+      </nav>
     </div>
+  );
+}
+
+function TabButton({
+  tab,
+  current,
+  onSelect,
+  label,
+  icon: Icon,
+}: {
+  tab: Tab;
+  current: Tab;
+  onSelect: (t: Tab) => void;
+  label: string;
+  icon: () => JSX.Element;
+}) {
+  const active = tab === current;
+  return (
+    <button
+      className={`tab-item ${active ? 'active' : ''}`}
+      role="tab"
+      aria-selected={active}
+      aria-label={label}
+      onClick={() => onSelect(tab)}
+    >
+      <Icon />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function TrophyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 4h12v3a6 6 0 0 1-12 0V4z" />
+      <path d="M6 6H4a2 2 0 0 0 0 4h2M18 6h2a2 2 0 0 1 0 4h-2" />
+      <path d="M9 17h6M10 17v3M14 17v3M8 20h8" />
+    </svg>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <path d="M3 9h18M8 2v4M16 2v4" />
+    </svg>
+  );
+}
+
+function RosterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3 20a6 6 0 0 1 12 0" />
+      <path d="M16 6a3 3 0 0 1 0 6M18 20a6 6 0 0 0-3-5.2" />
+    </svg>
   );
 }
 
