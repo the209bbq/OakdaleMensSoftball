@@ -60,6 +60,14 @@ export interface TeamMember {
   number: number | null;
   position?: string;
   photoUrl?: string;
+  isManager?: boolean;
+}
+
+export interface ManagerAuthorization {
+  email: string;
+  teamId: string;
+  teamName: string;
+  status: 'active' | 'pending';
 }
 
 /** Player-account picker row (no email). */
@@ -157,4 +165,12 @@ export const api = {
   listMembers: () => request<PlayerAccount[]>('/api/members'),
   updateRules: (rules: string) =>
     request<{ rules: string }>('/api/rules', { method: 'PUT', body: JSON.stringify({ rules }) }),
+  listManagerEmails: () => request<ManagerAuthorization[]>('/api/manager-emails'),
+  authorizeManagers: (emails: string | string[], teamId: string) =>
+    request<{ promoted: string[]; pending: string[] }>('/api/manager-emails', {
+      method: 'POST',
+      body: JSON.stringify({ emails, teamId }),
+    }),
+  revokeManagerEmail: (email: string) =>
+    request<{ ok: boolean }>(`/api/manager-emails/${encodeURIComponent(email)}`, { method: 'DELETE' }),
 };

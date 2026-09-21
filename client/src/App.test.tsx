@@ -30,7 +30,10 @@ const teams = [{ id: 'tigers', name: 'Oakdale Tigers' }];
 const rosterPayload = {
   team: teams[0],
   roster: [{ id: 'p1', teamId: 'tigers', name: 'Placeholder Guy', number: 9, position: 'OF' }],
-  members: [{ id: 'u1', name: 'Pat Shortstop', number: 12, position: 'SS' }],
+  members: [
+    { id: 'u-mgr', name: 'Coach', number: 1, position: 'P', isManager: true },
+    { id: 'u1', name: 'Pat Shortstop', number: 12, position: 'SS', isManager: false },
+  ],
   manager: { name: 'Coach' },
 };
 
@@ -126,5 +129,6 @@ describe('App', () => {
     expect(screen.getByText('Placeholder Guy')).toBeInTheDocument();
     expect(screen.getByText('#12 · SS')).toBeInTheDocument();
     expect(screen.getByText('Manager: Coach')).toBeInTheDocument();
+    expect(screen.getByText('Manager')).toBeInTheDocument();
   });
 });

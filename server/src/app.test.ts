@@ -764,3 +764,173 @@ describe('Player team membership', () => {
     expect(adminList.status).toBe(200);
   });
 });
+
+describe('Manager email authorizations', () => {
+  it('queues an unknown email as pending, then auto-grants manager on register', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+
+    const post = await admin
+      .post('/api/manager-emails')
+      .send({ emails: 'NewMgr@oakdale.local', teamId: TEAM_OTHER });
+    expect(post.status).toBe(200);
+    expect(post.body.pending).toEqual(['newmgr@oakdale.local']);
+    expect(post.body.promoted).toEqual([]);
+
+    const listed = await admin.get('/api/manager-emails');
+    expect(listed.status).toBe(200);
+    const pendingRow = listed.body.find((r: { email: string }) => r.email === 'newmgr@oakdale.local');
+    expect(pendingRow).toMatchObject({
+      email: 'newmgr@oakdale.local',
+      teamId: TEAM_OTHER,
+      teamName: 'Da Beers',
+      status: 'pending',
+    });
+
+    const agent = request.agent(app);
+    const reg = await agent.post('/api/auth/register').send({
+      email: 'NewMgr@oakdale.local',
+      name: 'New Manager',
+      password: 'longenough',
+    });
+    expect(reg.status).toBe(201);
+    expect(reg.body.role).toBe('manager');
+    expect(reg.body.teamId).toBe(TEAM_OTHER);
+    expect(reg.body.email).toBe('newmgr@oakdale.local');
+
+    const after = await admin.get('/api/manager-emails');
+    const row = after.body.find((r: { email: string }) => r.email === 'newmgr@oakdale.local');
+    expect(row).toMatchObject({ status: 'active', teamId: TEAM_OTHER });
+    expect(
+      after.body.some(
+        (r: { email: string; status: string }) => r.email === 'newmgr@oakdale.local' && r.status === 'pending',
+      ),
+    ).toBe(false);
+  });
+
+  it('promotes an existing account immediately to active manager', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'already@oakdale.local', name: 'Already', password: 'longenough' });
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+
+    const post = await admin
+      .post('/api/manager-emails')
+      .send({ emails: 'already@oakdale.local', teamId: TEAM_OWN });
+    expect(post.status).toBe(200);
+    expect(post.body.promoted).toEqual(['already@oakdale.local']);
+    expect(post.body.pending).toEqual([]);
+
+    const user = store.getUserByEmail('already@oakdale.local')!;
+    expect(user.role).toBe('manager');
+    expect(user.teamId).toBe(TEAM_OWN);
+
+    const listed = await admin.get('/api/manager-emails');
+    const row = listed.body.find((r: { email: string }) => r.email === 'already@oakdale.local');
+    expect(row).toMatchObject({ status: 'active', teamId: TEAM_OWN, teamName: 'Nothin but Dingers' });
+  });
+
+  it('processes multiple emails in one request', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'one@oakdale.local', name: 'One', password: 'longenough' });
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+
+    const post = await admin.post('/api/manager-emails').send({
+      emails: 'one@oakdale.local, two@oakdale.local\nthree@oakdale.local',
+      teamId: TEAM_OTHER,
+    });
+    expect(post.status).toBe(200);
+    expect(post.body.promoted).toEqual(['one@oakdale.local']);
+    expect(post.body.pending.sort()).toEqual(['three@oakdale.local', 'two@oakdale.local']);
+
+    const listed = await admin.get('/api/manager-emails');
+    const emails = listed.body
+      .filter((r: { email: string }) =>
+        ['one@oakdale.local', 'two@oakdale.local', 'three@oakdale.local'].includes(r.email),
+      )
+      .map((r: { email: string; status: string }) => `${r.email}:${r.status}`)
+      .sort();
+    expect(emails).toEqual([
+      'one@oakdale.local:active',
+      'three@oakdale.local:pending',
+      'two@oakdale.local:pending',
+    ]);
+  });
+
+  it('DELETE removes a pending entry and demotes an active manager while keeping teamId', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+
+    await admin.post('/api/manager-emails').send({ emails: 'pending@oakdale.local', teamId: TEAM_OTHER });
+    const dropPending = await admin.delete('/api/manager-emails/pending%40oakdale.local');
+    expect(dropPending.status).toBe(200);
+    expect(dropPending.body.ok).toBe(true);
+    const afterPending = await admin.get('/api/manager-emails');
+    expect(afterPending.body.some((r: { email: string }) => r.email === 'pending@oakdale.local')).toBe(false);
+
+    store.registerUser({ email: 'active.mgr@oakdale.local', name: 'Active', password: 'longenough' });
+    await admin.post('/api/manager-emails').send({ emails: 'active.mgr@oakdale.local', teamId: TEAM_OWN });
+    expect(store.getUserByEmail('active.mgr@oakdale.local')?.role).toBe('manager');
+    expect(store.getUserByEmail('active.mgr@oakdale.local')?.teamId).toBe(TEAM_OWN);
+
+    const dropActive = await admin.delete(`/api/manager-emails/${encodeURIComponent('active.mgr@oakdale.local')}`);
+    expect(dropActive.status).toBe(200);
+    const demoted = store.getUserByEmail('active.mgr@oakdale.local')!;
+    expect(demoted.role).toBe('player');
+    expect(demoted.teamId).toBe(TEAM_OWN);
+
+    const afterActive = await admin.get('/api/manager-emails');
+    expect(afterActive.body.some((r: { email: string }) => r.email === 'active.mgr@oakdale.local')).toBe(false);
+  });
+
+  it('restricts manager-emails endpoints to admins', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+
+    const anonGet = await request(app).get('/api/manager-emails');
+    expect(anonGet.status).toBe(401);
+    const anonPost = await request(app).post('/api/manager-emails').send({ emails: 'x@y.com', teamId: TEAM_OWN });
+    expect(anonPost.status).toBe(401);
+    const anonDel = await request(app).delete('/api/manager-emails/x%40y.com');
+    expect(anonDel.status).toBe(401);
+
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'p@b.com', name: 'P', password: 'longenough' });
+    expect((await player.get('/api/manager-emails')).status).toBe(403);
+    expect((await player.post('/api/manager-emails').send({ emails: 'x@y.com', teamId: TEAM_OWN })).status).toBe(403);
+    expect((await player.delete('/api/manager-emails/x%40y.com')).status).toBe(403);
+
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+    expect((await manager.get('/api/manager-emails')).status).toBe(403);
+    expect((await manager.post('/api/manager-emails').send({ emails: 'x@y.com', teamId: TEAM_OWN })).status).toBe(403);
+    expect((await manager.delete('/api/manager-emails/x%40y.com')).status).toBe(403);
+  });
+
+  it('includes the team manager on the roster with isManager true and no email', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr Player', password: 'longenough' });
+    const mgr = store.getUserByEmail('mgr@b.com')!;
+    store.setUserRole(mgr.id, 'manager', TEAM_OWN);
+    store.updateProfile(mgr.id, { name: 'Mgr Player', position: 'P', number: 7 });
+
+    store.registerUser({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    store.setUserTeam(store.getUserByEmail('p@b.com')!.id, TEAM_OWN);
+
+    const roster = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
+    expect(roster.status).toBe(200);
+    expect(roster.body.manager).toEqual({ name: 'Mgr Player' });
+    expect(roster.body.members).toHaveLength(2);
+    const managerRow = roster.body.members[0];
+    expect(managerRow).toMatchObject({
+      id: mgr.id,
+      name: 'Mgr Player',
+      number: 7,
+      position: 'P',
+      isManager: true,
+    });
+    expect(managerRow.email).toBeUndefined();
+    expect('email' in managerRow).toBe(false);
+    expect(managerRow.passwordHash).toBeUndefined();
+    expect(roster.body.members[1]).toMatchObject({ name: 'Pat', isManager: false });
+  });
+});
