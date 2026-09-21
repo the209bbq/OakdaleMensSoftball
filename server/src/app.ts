@@ -70,11 +70,11 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     next();
   };
 
-  /** Admins can edit any team; captains only their assigned team. */
+  /** Admins can edit any team; managers only their assigned team. */
   const canManageTeam = (user: PublicUser | undefined, teamId: string): boolean => {
     if (!user) return false;
     if (user.role === 'admin') return true;
-    return user.role === 'captain' && user.teamId === teamId;
+    return user.role === 'manager' && user.teamId === teamId;
   };
 
   const setSessionCookie = (res: Response, userId: string) => {
@@ -191,7 +191,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
-  // ---- Roster management (admin or the team's captain) ------------------
+  // ---- Roster management (admin or the team's manager) ------------------
 
   api.post('/players', requireAuth, (req: Request, res: Response) => {
     try {
@@ -246,7 +246,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
-  // ---- Score reporting (admin, or a captain of one of the two teams) ----
+  // ---- Score reporting (admin, or a manager of one of the two teams) ----
 
   api.post('/games/:id/result', requireAuth, (req: Request, res: Response) => {
     try {
@@ -277,8 +277,8 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
   api.post('/users/:id/role', requireAdmin, (req: Request, res: Response) => {
     try {
       const { role, teamId } = req.body ?? {};
-      if (!['admin', 'captain', 'member'].includes(role)) {
-        res.status(400).json({ error: 'role must be admin, captain, or member' });
+      if (!['admin', 'manager', 'player'].includes(role)) {
+        res.status(400).json({ error: 'role must be admin, manager, or player' });
         return;
       }
       if (req.params.id === req.user!.id && role !== 'admin') {

@@ -38,7 +38,7 @@ export interface StandingRow {
   gamesPlayed: number;
 }
 
-export type Role = 'admin' | 'captain' | 'member';
+export type Role = 'admin' | 'manager' | 'player';
 
 export interface User {
   id: string;

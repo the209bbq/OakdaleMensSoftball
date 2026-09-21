@@ -12,11 +12,17 @@ const TAB_TITLES: Record<Tab, string> = {
   admin: 'Admin',
 };
 
-/** Admins manage any team; captains only their assigned team. */
+/** Admins manage any team; team managers only their assigned team. */
 function canManageTeam(user: User | null, teamId: string | null): boolean {
   if (!user || !teamId) return false;
   if (user.role === 'admin') return true;
-  return user.role === 'captain' && user.teamId === teamId;
+  return user.role === 'manager' && user.teamId === teamId;
+}
+
+function roleLabel(role: Role): string {
+  if (role === 'admin') return 'Admin';
+  if (role === 'manager') return 'Team Manager';
+  return 'Player';
 }
 
 export default function App() {
@@ -74,12 +80,11 @@ function AuthControl({ onSignIn }: { onSignIn: () => void }) {
       </button>
     );
   }
-  const roleLabel = user.role === 'captain' ? 'Captain' : user.role === 'admin' ? 'Admin' : 'Member';
   return (
     <div className="user-chip">
       <div className="user-meta">
         <span className="user-name">{user.name}</span>
-        <span className="user-role">{roleLabel}</span>
+        <span className="user-role">{roleLabel(user.role)}</span>
       </div>
       <button className="signout-btn" onClick={() => logout()} aria-label="Sign out">
         Sign out
@@ -465,8 +470,8 @@ function Rosters() {
   useEffect(() => {
     api.getTeams().then((t) => {
       setTeams(t);
-      // Captains default to their own team.
-      const initial = user?.role === 'captain' && user.teamId ? user.teamId : t[0]?.id ?? '';
+      // Team managers default to their own team.
+      const initial = user?.role === 'manager' && user.teamId ? user.teamId : t[0]?.id ?? '';
       setSelected(initial);
     });
   }, [user]);
@@ -735,7 +740,7 @@ function Admin() {
         <button type="submit">Create team</button>
       </form>
 
-      <h3 className="admin-users-heading">Members &amp; roles</h3>
+      <h3 className="admin-users-heading">Players &amp; roles</h3>
       <ul className="user-list">
         {users.map((u) => (
           <li key={u.id} className="user-row">
@@ -750,18 +755,18 @@ function Admin() {
                 disabled={u.id === me?.id}
                 onChange={(e) => {
                   const role = e.target.value as Role;
-                  changeRole(u, role, role === 'captain' ? u.teamId ?? teams[0]?.id ?? null : null);
+                  changeRole(u, role, role === 'manager' ? u.teamId ?? teams[0]?.id ?? null : null);
                 }}
               >
-                <option value="member">Member</option>
-                <option value="captain">Captain</option>
+                <option value="player">Player</option>
+                <option value="manager">Team Manager</option>
                 <option value="admin">Admin</option>
               </select>
-              {u.role === 'captain' && (
+              {u.role === 'manager' && (
                 <select
                   aria-label={`Team for ${u.name}`}
                   value={u.teamId ?? ''}
-                  onChange={(e) => changeRole(u, 'captain', e.target.value)}
+                  onChange={(e) => changeRole(u, 'manager', e.target.value)}
                 >
                   {teams.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -770,8 +775,8 @@ function Admin() {
                   ))}
                 </select>
               )}
-              {u.role === 'captain' && u.teamId && (
-                <span className="captain-of">of {teamName.get(u.teamId) ?? u.teamId}</span>
+              {u.role === 'manager' && u.teamId && (
+                <span className="manager-of">of {teamName.get(u.teamId) ?? u.teamId}</span>
               )}
             </div>
           </li>
