@@ -3,6 +3,19 @@ import request from 'supertest';
 import { createApp } from './app.js';
 import { LeagueStore } from './store.js';
 
+const TEAM_OWN = 'nothin-but-dingers';
+const TEAM_OTHER = 'da-beers';
+const SEEDED_TEAM_NAMES = [
+  'Nothin but Dingers',
+  'Sig & Twisted',
+  'Camp Boys',
+  'Moonlighters',
+  'Flying Demons',
+  'Da Beers',
+  'Here 4 Beer',
+  'Whiskey Rebels',
+];
+
 function makeApp() {
   const store = new LeagueStore(null);
   store.ensureAdmin('admin@oakdale.local', 'Commish', 'admin-password');
@@ -30,24 +43,53 @@ describe('Public read endpoints', () => {
     expect(res.body.status).toBe('ok');
   });
 
-  it('lists four seeded teams without auth', async () => {
+  it('lists eight seeded teams without auth', async () => {
     const res = await request(app).get('/api/teams');
     expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(4);
+    expect(res.body).toHaveLength(8);
+    expect(res.body.map((t: { name: string }) => t.name).sort()).toEqual([...SEEDED_TEAM_NAMES].sort());
   });
 
-  it('computes standings from played games without auth', async () => {
+  it('starts standings at all zeros until games are played', async () => {
     const res = await request(app).get('/api/standings');
     expect(res.status).toBe(200);
-    expect(res.body[0].teamName).toBe('Oakdale Tigers');
-    expect(res.body[0].wins).toBe(2);
+    expect(res.body).toHaveLength(8);
+    for (const row of res.body) {
+      expect(row.wins).toBe(0);
+      expect(row.losses).toBe(0);
+      expect(row.ties).toBe(0);
+      expect(row.gamesPlayed).toBe(0);
+      expect(row.runsFor).toBe(0);
+      expect(row.runsAgainst).toBe(0);
+    }
+  });
+
+  it('updates standings after an admin generates a schedule and reports a score', async () => {
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2026-05-02' });
+    expect(gen.status).toBe(201);
+    const game = gen.body[0];
+    const result = await admin
+      .post(`/api/games/${game.id}/result`)
+      .send({ homeScore: 7, awayScore: 2 });
+    expect(result.status).toBe(200);
+
+    const standings = await request(app).get('/api/standings');
+    expect(standings.status).toBe(200);
+    const home = standings.body.find((r: { teamId: string }) => r.teamId === game.homeTeamId);
+    const away = standings.body.find((r: { teamId: string }) => r.teamId === game.awayTeamId);
+    expect(home.wins).toBe(1);
+    expect(home.gamesPlayed).toBe(1);
+    expect(away.losses).toBe(1);
+    expect(away.gamesPlayed).toBe(1);
   });
 
   it('returns a roster sorted by number', async () => {
-    const res = await request(app).get('/api/teams/tigers/roster');
+    const res = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
     expect(res.status).toBe(200);
+    expect(res.body.team.id).toBe(TEAM_OWN);
     const numbers = res.body.roster.map((p: { number: number }) => p.number);
-    expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+    expect(numbers).toEqual([...numbers].sort((a: number, b: number) => a - b));
   });
 });
 
@@ -99,7 +141,7 @@ describe('Authentication', () => {
 describe('Authorization', () => {
   it('blocks anonymous writes', async () => {
     const { app } = makeApp();
-    const res = await request(app).post('/api/players').send({ teamId: 'tigers', name: 'X', number: 1 });
+    const res = await request(app).post('/api/players').send({ teamId: TEAM_OWN, name: 'X', number: 1 });
     expect(res.status).toBe(401);
   });
 
@@ -108,7 +150,7 @@ describe('Authorization', () => {
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
     const res = await admin
       .post('/api/players')
-      .send({ teamId: 'aces', name: 'New Guy', number: 42, position: 'Outfield' });
+      .send({ teamId: TEAM_OTHER, name: 'New Guy', number: 42, position: 'Outfield' });
     expect(res.status).toBe(201);
   });
 
@@ -116,30 +158,29 @@ describe('Authorization', () => {
     const { app } = makeApp();
     const member = request.agent(app);
     await member.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
-    const res = await member.post('/api/players').send({ teamId: 'tigers', name: 'X', number: 1 });
+    const res = await member.post('/api/players').send({ teamId: TEAM_OWN, name: 'X', number: 1 });
     expect(res.status).toBe(403);
   });
 
   it('lets a captain manage only their own team', async () => {
     const { app, store } = makeApp();
-    // Create a captain of the Tigers.
     store.registerUser({ email: 'cap@b.com', name: 'Cap', password: 'longenough' });
     const cap = store.getUserByEmail('cap@b.com')!;
-    store.setUserRole(cap.id, 'captain', 'tigers');
+    store.setUserRole(cap.id, 'captain', TEAM_OWN);
 
     const captain = await loginAs(app, 'cap@b.com', 'longenough');
 
-    const own = await captain.post('/api/players').send({ teamId: 'tigers', name: 'Rookie', number: 50 });
+    const own = await captain.post('/api/players').send({ teamId: TEAM_OWN, name: 'Rookie', number: 50 });
     expect(own.status).toBe(201);
 
-    const other = await captain.post('/api/players').send({ teamId: 'aces', name: 'Nope', number: 51 });
+    const other = await captain.post('/api/players').send({ teamId: TEAM_OTHER, name: 'Nope', number: 51 });
     expect(other.status).toBe(403);
   });
 
   it('only lets admins generate the schedule', async () => {
     const { app, store } = makeApp();
     store.registerUser({ email: 'cap@b.com', name: 'Cap', password: 'longenough' });
-    store.setUserRole(store.getUserByEmail('cap@b.com')!.id, 'captain', 'tigers');
+    store.setUserRole(store.getUserByEmail('cap@b.com')!.id, 'captain', TEAM_OWN);
 
     const captain = await loginAs(app, 'cap@b.com', 'longenough');
     const denied = await captain.post('/api/schedule/generate').send({ startDate: '2026-07-04' });
@@ -148,21 +189,31 @@ describe('Authorization', () => {
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
     const ok = await admin.post('/api/schedule/generate').send({ startDate: '2026-07-04' });
     expect(ok.status).toBe(201);
-    expect(ok.body).toHaveLength(6);
+    // 8 teams → C(8,2) = 28 games in a single round-robin.
+    expect(ok.body).toHaveLength(28);
   });
 
   it('lets a captain report only their own games', async () => {
     const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2026-05-02' });
+    expect(gen.status).toBe(201);
+    const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
+    const ownGame = games.find((g) => g.homeTeamId === TEAM_OWN || g.awayTeamId === TEAM_OWN)!;
+    const otherGame = games.find(
+      (g) => g.homeTeamId !== TEAM_OWN && g.awayTeamId !== TEAM_OWN,
+    )!;
+    expect(ownGame).toBeDefined();
+    expect(otherGame).toBeDefined();
+
     store.registerUser({ email: 'cap@b.com', name: 'Cap', password: 'longenough' });
-    store.setUserRole(store.getUserByEmail('cap@b.com')!.id, 'captain', 'tigers');
+    store.setUserRole(store.getUserByEmail('cap@b.com')!.id, 'captain', TEAM_OWN);
     const captain = await loginAs(app, 'cap@b.com', 'longenough');
 
-    // g5: Aces (home) vs Tigers (away) -> captain of Tigers may report.
-    const own = await captain.post('/api/games/g5/result').send({ homeScore: 3, awayScore: 9 });
+    const own = await captain.post(`/api/games/${ownGame.id}/result`).send({ homeScore: 3, awayScore: 9 });
     expect(own.status).toBe(200);
 
-    // g6: Sluggers vs Bombers -> Tigers captain may not.
-    const other = await captain.post('/api/games/g6/result').send({ homeScore: 1, awayScore: 2 });
+    const other = await captain.post(`/api/games/${otherGame.id}/result`).send({ homeScore: 1, awayScore: 2 });
     expect(other.status).toBe(403);
   });
 });
@@ -181,10 +232,10 @@ describe('Admin user management', () => {
 
     const assign = await admin
       .post(`/api/users/${target.id}/role`)
-      .send({ role: 'captain', teamId: 'bombers' });
+      .send({ role: 'captain', teamId: 'flying-demons' });
     expect(assign.status).toBe(200);
     expect(assign.body.role).toBe('captain');
-    expect(assign.body.teamId).toBe('bombers');
+    expect(assign.body.teamId).toBe('flying-demons');
 
     const badTeam = await admin.post(`/api/users/${target.id}/role`).send({ role: 'captain' });
     expect(badTeam.status).toBe(400);
@@ -199,6 +250,49 @@ describe('Admin user management', () => {
 
     const anon = await request(app).post('/api/teams').send({ name: 'Nope FC' });
     expect(anon.status).toBe(401);
+  });
+});
+
+describe('Admin team rename', () => {
+  it('lets an admin rename a team and keeps the id stable', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const put = await admin.put(`/api/teams/${TEAM_OWN}`).send({ name: '  Dingers United  ' });
+    expect(put.status).toBe(200);
+    expect(put.body.id).toBe(TEAM_OWN);
+    expect(put.body.name).toBe('Dingers United');
+
+    const list = await request(app).get('/api/teams');
+    const renamed = list.body.find((t: { id: string }) => t.id === TEAM_OWN);
+    expect(renamed.name).toBe('Dingers United');
+  });
+
+  it('blocks anonymous team renames', async () => {
+    const { app } = makeApp();
+    const res = await request(app).put(`/api/teams/${TEAM_OWN}`).send({ name: 'Hacked' });
+    expect(res.status).toBe(401);
+  });
+
+  it('blocks a plain member from renaming a team', async () => {
+    const { app } = makeApp();
+    const member = request.agent(app);
+    await member.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
+    const res = await member.put(`/api/teams/${TEAM_OWN}`).send({ name: 'Nope' });
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 404 for an unknown team id', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const res = await admin.put('/api/teams/no-such-team').send({ name: 'Ghosts' });
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 400 for an empty name', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const res = await admin.put(`/api/teams/${TEAM_OWN}`).send({ name: '   ' });
+    expect(res.status).toBe(400);
   });
 });
 

@@ -99,6 +99,8 @@ export const api = {
     }),
   createTeam: (name: string) =>
     request<Team>('/api/teams', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameTeam: (id: string, name: string) =>
+    request<Team>('/api/teams/' + id, { method: 'PUT', body: JSON.stringify({ name }) }),
   updateRules: (rules: string) =>
     request<{ rules: string }>('/api/rules', { method: 'PUT', body: JSON.stringify({ rules }) }),
 };

@@ -181,6 +181,17 @@ export class LeagueStore {
     return team;
   }
 
+  /** Update a team's display name. The id stays stable so player/game refs remain valid. */
+  renameTeam(teamId: string, name: string): Team {
+    const trimmed = (name ?? '').trim();
+    if (!trimmed) throw new Error('Team name is required');
+    const team = this.data.teams.find((t) => t.id === teamId);
+    if (!team) throw new Error(`Unknown team: ${teamId}`);
+    team.name = trimmed;
+    this.persist();
+    return team;
+  }
+
   removePlayer(playerId: string): void {
     const before = this.data.players.length;
     this.data.players = this.data.players.filter((p) => p.id !== playerId);
