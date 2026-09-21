@@ -53,4 +53,5 @@ export interface LeagueData {
   players: Player[];
   games: Game[];
   users: User[];
+  rules: string;
 }

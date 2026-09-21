@@ -148,6 +148,25 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     res.json({ team, roster: store.getRoster(team.id) });
   });
 
+  api.get('/rules', (_req: Request, res: Response) => {
+    res.json({ rules: store.getRules() });
+  });
+
+  // ---- Rules management (admin only) ------------------------------------
+
+  api.put('/rules', requireAdmin, (req: Request, res: Response) => {
+    const { rules } = req.body ?? {};
+    if (typeof rules !== 'string') {
+      res.status(400).json({ error: 'rules must be a string' });
+      return;
+    }
+    if (rules.length > 20000) {
+      res.status(400).json({ error: 'rules must be 20000 characters or fewer' });
+      return;
+    }
+    res.json({ rules: store.setRules(rules) });
+  });
+
   // ---- Team management (admin) ------------------------------------------
 
   api.post('/teams', requireAdmin, (req: Request, res: Response) => {

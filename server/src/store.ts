@@ -25,6 +25,7 @@ export class LeagueStore {
       this.data = JSON.parse(readFileSync(persistPath, 'utf-8')) as LeagueData;
       // Backfill fields added after a data file was first written.
       if (!Array.isArray(this.data.users)) this.data.users = [];
+      if (typeof this.data.rules !== 'string') this.data.rules = createSeedData().rules;
     } else {
       this.data = createSeedData();
       this.persist();
@@ -53,6 +54,19 @@ export class LeagueStore {
 
   getSchedule(): Game[] {
     return [...this.data.games].sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  getRules(): string {
+    return this.data.rules;
+  }
+
+  setRules(text: string): string {
+    if (typeof text !== 'string') {
+      throw new Error('Rules must be text');
+    }
+    this.data.rules = text.trim();
+    this.persist();
+    return this.data.rules;
   }
 
   /**
