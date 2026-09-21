@@ -52,6 +52,26 @@ export function createApp(store: LeagueStore, clientDist?: string): Express {
     }
   });
 
+  api.post('/schedule/generate', (req: Request, res: Response) => {
+    try {
+      const { startDate } = req.body ?? {};
+      if (startDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(startDate))) {
+        res.status(400).json({ error: 'startDate must be a YYYY-MM-DD date' });
+        return;
+      }
+      const games = store.generateSchedule({ startDate });
+      const teams = new Map(store.getTeams().map((t) => [t.id, t.name]));
+      const schedule = games.map((g) => ({
+        ...g,
+        homeTeamName: teams.get(g.homeTeamId) ?? g.homeTeamId,
+        awayTeamName: teams.get(g.awayTeamId) ?? g.awayTeamId,
+      }));
+      res.status(201).json(schedule);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   api.post('/games/:id/result', (req: Request, res: Response) => {
     try {
       const { homeScore, awayScore } = req.body ?? {};
