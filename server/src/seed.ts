@@ -29,5 +29,5 @@ export function createSeedData(): LeagueData {
     { id: 'g6', date: '2026-05-18', homeTeamId: 'sluggers', awayTeamId: 'bombers', homeScore: null, awayScore: null, played: false },
   ];
 
-  return { teams, players, games };
+  return { teams, players, games, users: [] };
 }

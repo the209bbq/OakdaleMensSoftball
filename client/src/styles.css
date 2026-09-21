@@ -73,10 +73,241 @@ body {
   font-weight: 600;
 }
 
+.app-bar-inner .app-bar-text {
+  flex: 1;
+}
+
+.signin-btn {
+  background: var(--accent);
+  color: var(--navy);
+  border: none;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.user-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.1;
+}
+
+.user-name {
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.user-role {
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.signout-btn {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 0.35rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .app-content {
   flex: 1;
   padding: 1rem 1rem calc(5rem + env(safe-area-inset-bottom));
   overflow-y: auto;
+}
+
+/* Auth modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 37, 69, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.modal {
+  background: var(--card);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 360px;
+  padding: 1.5rem;
+  position: relative;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.modal-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.modal-tabs button {
+  flex: 1;
+  border: none;
+  background: var(--bg);
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.modal-tabs button.active {
+  background: var(--navy);
+  color: #fff;
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.modal-form input {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.primary-btn {
+  background: var(--accent);
+  color: var(--navy);
+  border: none;
+  padding: 0.6rem;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 0.2rem;
+}
+
+.primary-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.modal-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.8rem;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.inline-error {
+  padding: 0.3rem 0;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+/* Score editing + inline actions */
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent-dark);
+  font-weight: 700;
+  font-size: 0.78rem;
+  cursor: pointer;
+  margin-left: 0.5rem;
+  padding: 0;
+}
+
+.link-btn.danger {
+  color: #c0392b;
+}
+
+.mini-btn {
+  background: var(--navy);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.score-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.score-edit input {
+  width: 44px;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-align: center;
+}
+
+/* Admin panel */
+.admin-users-heading {
+  margin-top: 1.5rem;
+}
+
+.user-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.user-row {
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.user-row-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.user-email {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.role-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.role-controls select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.captain-of {
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .tab-bar {
