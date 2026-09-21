@@ -441,6 +441,27 @@ body {
   cursor: default;
 }
 
+.field.inline input[type='number'] {
+  width: 4.2rem;
+}
+
+.week-group {
+  margin-top: 0.35rem;
+}
+
+.week-group + .week-group {
+  margin-top: 0.85rem;
+}
+
+.week-heading {
+  margin: 0.4rem 0 0.15rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .games {
   list-style: none;
   margin: 0;
@@ -448,21 +469,53 @@ body {
 }
 
 .game {
-  display: grid;
-  grid-template-columns: 90px 1fr auto;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.8rem 0.5rem;
+  display: block;
+  padding: 0;
   border-bottom: 1px solid var(--border);
+}
+
+.game-toggle {
+  display: grid;
+  grid-template-columns: 6.4rem 1fr auto auto;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.8rem 0.35rem;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.game-toggle:hover,
+.game.expanded .game-toggle {
+  background: var(--bg);
 }
 
 .game-date {
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .game-teams {
   font-weight: 600;
+  min-width: 0;
+}
+
+.game-chevron {
+  display: flex;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.game.expanded .game-chevron {
+  transform: rotate(180deg);
+  color: var(--navy);
 }
 
 .at {
@@ -473,11 +526,52 @@ body {
 .game-score {
   font-weight: 700;
   color: var(--navy);
+  white-space: nowrap;
+  font-size: 0.85rem;
 }
 
 .game.upcoming .game-score {
   color: var(--accent-dark);
   font-weight: 600;
+}
+
+.game-details {
+  padding: 0 0.5rem 0.9rem 0.5rem;
+}
+
+.game-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem 0.8rem;
+  margin: 0 0 0.65rem;
+}
+
+.game-meta div {
+  min-width: 0;
+}
+
+.game-meta dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.game-meta dd {
+  margin: 0.12rem 0 0;
+  font-weight: 600;
+  color: var(--navy);
+  font-size: 0.9rem;
+}
+
+.game-actions {
+  display: flex;
+  align-items: center;
+}
+
+.game-details .link-btn {
+  margin-left: 0;
 }
 
 .field {

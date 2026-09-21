@@ -21,6 +21,10 @@ export interface Game {
   homeScore: number | null;
   awayScore: number | null;
   played: boolean;
+  field: string;
+  time: string;
+  location: string;
+  week: number;
 }
 
 export interface StandingRow {
@@ -84,10 +88,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ homeScore, awayScore }),
     }),
-  generateSchedule: (startDate?: string) =>
+  generateSchedule: (startDate?: string, weeks?: number) =>
     request<Game[]>('/api/schedule/generate', {
       method: 'POST',
-      body: JSON.stringify(startDate ? { startDate } : {}),
+      body: JSON.stringify({
+        ...(startDate ? { startDate } : {}),
+        ...(weeks !== undefined ? { weeks } : {}),
+      }),
     }),
 
   // Admin
