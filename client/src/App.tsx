@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type Game, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamMember, type User } from './api';
+import { api, type Game, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamMember, type User } from './api';
 import { useAuth } from './auth';
 import { fileToSquareDataUrl } from './image';
 
@@ -906,14 +906,17 @@ function Rosters() {
                 </span>
               )}
               <div className="member-info">
-                <span className="member-name">{m.name}</span>
+                <span className="member-name">
+                  <span>{m.name}</span>
+                  {m.isManager ? <span className="manager-badge">Manager</span> : null}
+                </span>
                 <span className="member-meta">
                   {m.number != null ? `#${m.number}` : ''}
                   {m.number != null && m.position ? ' · ' : ''}
                   {m.position ?? ''}
                 </span>
               </div>
-              {canEdit && (
+              {canEdit && !m.isManager && (
                 <button
                   className="link-btn danger"
                   onClick={() => handleRemoveMember(m.id)}
@@ -1085,6 +1088,10 @@ function Admin() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [newTeam, setNewTeam] = useState('');
+  const [mgrEmails, setMgrEmails] = useState('');
+  const [mgrTeamId, setMgrTeamId] = useState('');
+  const [authorizations, setAuthorizations] = useState<ManagerAuthorization[]>([]);
+  const [authorizing, setAuthorizing] = useState(false);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
 
@@ -1095,8 +1102,10 @@ function Admin() {
       .then((next) => {
         setTeams(next);
         setDrafts(Object.fromEntries(next.map((t) => [t.id, t.name])));
+        setMgrTeamId((current) => current || next[0]?.id || '');
       })
       .catch((e) => setError(e.message));
+    api.listManagerEmails().then(setAuthorizations).catch((e) => setError(e.message));
   }
   useEffect(load, []);
 
@@ -1138,6 +1147,35 @@ function Admin() {
     }
   }
 
+  async function authorizeManagers(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setMessage(null);
+    setAuthorizing(true);
+    try {
+      const result = await api.authorizeManagers(mgrEmails, mgrTeamId);
+      setMessage(`Promoted ${result.promoted.length}, pending ${result.pending.length}`);
+      setMgrEmails('');
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setAuthorizing(false);
+    }
+  }
+
+  async function revokeAuthorization(email: string) {
+    setError(null);
+    setMessage(null);
+    try {
+      await api.revokeManagerEmail(email);
+      setMessage(`Removed ${email}.`);
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   return (
     <section className="card">
       <h2>League Admin</h2>
@@ -1165,6 +1203,66 @@ function Admin() {
         <input aria-label="New team name" placeholder="New team name" value={newTeam} onChange={(e) => setNewTeam(e.target.value)} required />
         <button type="submit">Create team</button>
       </form>
+
+      <h3 className="admin-users-heading">Team Managers (by email)</h3>
+      <form className="mgr-auth-form" onSubmit={authorizeManagers}>
+        <label className="field">
+          Emails
+          <textarea
+            aria-label="Manager emails"
+            placeholder="one@example.com, two@example.com"
+            value={mgrEmails}
+            onChange={(e) => setMgrEmails(e.target.value)}
+            rows={3}
+            required
+          />
+        </label>
+        <label className="field">
+          Team:{' '}
+          <select
+            aria-label="Manager team"
+            value={mgrTeamId}
+            onChange={(e) => setMgrTeamId(e.target.value)}
+            required
+          >
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button className="primary-btn" type="submit" disabled={authorizing || !mgrTeamId}>
+          {authorizing ? 'Authorizing…' : 'Authorize'}
+        </button>
+      </form>
+      {authorizations.length === 0 ? (
+        <p className="member-empty">No manager authorizations yet.</p>
+      ) : (
+        <ul className="user-list">
+          {authorizations.map((row) => (
+            <li key={`${row.status}:${row.email}:${row.teamId}`} className="user-row">
+              <div className="user-row-main">
+                <span className="team-cell">{row.email}</span>
+                <span className={`status-badge status-${row.status}`}>
+                  {row.status === 'active' ? 'Active' : 'Pending'}
+                </span>
+              </div>
+              <div className="role-controls">
+                <span className="manager-of">{row.teamName}</span>
+                <button
+                  type="button"
+                  className="link-btn danger"
+                  onClick={() => revokeAuthorization(row.email)}
+                  aria-label={`Remove ${row.email}`}
+                >
+                  Remove
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <h3 className="admin-users-heading">Players &amp; roles</h3>
       <ul className="user-list">

@@ -69,6 +69,22 @@ export interface TeamMember {
   number: number | null;
   position?: string;
   photoUrl?: string;
+  /** True when this member is the team's manager (managers also play). */
+  isManager: boolean;
+}
+
+/** Pre-authorization allowlist entry: email is granted manager of teamId on signup. */
+export interface PendingManager {
+  email: string;
+  teamId: string;
+}
+
+/** Combined active-manager + pending-authorization row for the admin UI. */
+export interface ManagerAuthorization {
+  email: string;
+  teamId: string;
+  teamName: string;
+  status: 'active' | 'pending';
 }
 
 /** Player-account picker row (no email). */
@@ -84,4 +100,5 @@ export interface LeagueData {
   games: Game[];
   users: User[];
   rules: string;
+  pendingManagers: PendingManager[];
 }

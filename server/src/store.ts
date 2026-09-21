@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import type {
   Game,
   LeagueData,
+  ManagerAuthorization,
   Player,
   PlayerAccount,
   PublicUser,
@@ -70,6 +71,7 @@ export class LeagueStore {
       this.data = JSON.parse(readFileSync(persistPath, 'utf-8')) as LeagueData;
       // Backfill fields added after a data file was first written.
       if (!Array.isArray(this.data.users)) this.data.users = [];
+      if (!Array.isArray(this.data.pendingManagers)) this.data.pendingManagers = [];
       if (typeof this.data.rules !== 'string') this.data.rules = createSeedData().rules;
       this.data.games = (this.data.games ?? []).map(normalizeGame);
       for (const user of this.data.users) {
@@ -315,6 +317,17 @@ export class LeagueStore {
       createdAt: new Date().toISOString(),
     };
     this.data.users.push(user);
+
+    // Pre-authorized managers: auto-grant the pending team on signup.
+    const pending = this.data.pendingManagers.find((p) => p.email === email);
+    if (pending) {
+      this.data.pendingManagers = this.data.pendingManagers.filter((p) => p.email !== email);
+      if (this.getTeam(pending.teamId)) {
+        user.role = 'manager';
+        user.teamId = pending.teamId;
+      }
+    }
+
     this.persist();
     return toPublicUser(user);
   }
@@ -364,10 +377,13 @@ export class LeagueStore {
     return toPublicUser(user);
   }
 
-  /** Player-role accounts on this team, public-safe (no email), sorted by number then name. */
+  /**
+   * Player-role accounts AND the team's manager on this team, public-safe (no email).
+   * Managers sort first (they also play); then by number, then name.
+   */
   getTeamMembers(teamId: string): TeamMember[] {
     return this.data.users
-      .filter((u) => u.role === 'player' && u.teamId === teamId)
+      .filter((u) => (u.role === 'player' || u.role === 'manager') && u.teamId === teamId)
       .map(
         (u): TeamMember => ({
           id: u.id,
@@ -375,9 +391,11 @@ export class LeagueStore {
           number: u.number ?? null,
           position: u.position,
           photoUrl: u.photoUrl,
+          isManager: u.role === 'manager',
         }),
       )
       .sort((a, b) => {
+        if (a.isManager !== b.isManager) return a.isManager ? -1 : 1;
         const aHas = a.number != null;
         const bHas = b.number != null;
         if (aHas && bHas && a.number !== b.number) return a.number! - b.number!;
@@ -399,6 +417,89 @@ export class LeagueStore {
   getTeamManager(teamId: string): { name: string } | null {
     const manager = this.data.users.find((u) => u.role === 'manager' && u.teamId === teamId);
     return manager ? { name: manager.name } : null;
+  }
+
+  /**
+   * Authorize emails as managers of `teamId`. Existing accounts are promoted
+   * immediately; others are stored as pending and auto-granted on signup.
+   */
+  authorizeManagers(emails: string[], teamId: string): { promoted: string[]; pending: string[] } {
+    if (!this.getTeam(teamId)) throw new Error(`Unknown team: ${teamId}`);
+    const promoted: string[] = [];
+    const pending: string[] = [];
+    const seen = new Set<string>();
+
+    for (const raw of emails) {
+      const email = (raw ?? '').trim().toLowerCase();
+      if (!email) continue;
+      if (seen.has(email)) continue;
+      seen.add(email);
+
+      const existing = this.getUserByEmail(email);
+      if (existing) {
+        this.setUserRole(existing.id, 'manager', teamId);
+        this.data.pendingManagers = this.data.pendingManagers.filter((p) => p.email !== email);
+        promoted.push(email);
+      } else {
+        const already = this.data.pendingManagers.find((p) => p.email === email);
+        if (already) already.teamId = teamId;
+        else this.data.pendingManagers.push({ email, teamId });
+        pending.push(email);
+      }
+    }
+
+    this.persist();
+    return { promoted, pending };
+  }
+
+  /** Combined list of active managers and pending (not-yet-registered) authorizations. */
+  listManagerAuthorizations(): ManagerAuthorization[] {
+    const rows: ManagerAuthorization[] = [];
+    const activeEmails = new Set<string>();
+
+    for (const user of this.data.users) {
+      if (user.role !== 'manager' || !user.teamId) continue;
+      const team = this.getTeam(user.teamId);
+      rows.push({
+        email: user.email,
+        teamId: user.teamId,
+        teamName: team?.name ?? user.teamId,
+        status: 'active',
+      });
+      activeEmails.add(user.email);
+    }
+
+    for (const entry of this.data.pendingManagers) {
+      if (activeEmails.has(entry.email)) continue;
+      if (this.getUserByEmail(entry.email)) continue;
+      const team = this.getTeam(entry.teamId);
+      rows.push({
+        email: entry.email,
+        teamId: entry.teamId,
+        teamName: team?.name ?? entry.teamId,
+        status: 'pending',
+      });
+    }
+
+    return rows.sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'pending' ? -1 : 1;
+      return a.email.localeCompare(b.email);
+    });
+  }
+
+  /**
+   * Drop a pending authorization. If an active manager uses this email, demote
+   * them to player while keeping their teamId (they remain on the roster).
+   */
+  revokeManagerAuthorization(email: string): { ok: true } {
+    const normalized = (email ?? '').trim().toLowerCase();
+    this.data.pendingManagers = this.data.pendingManagers.filter((p) => p.email !== normalized);
+    const user = this.getUserByEmail(normalized);
+    if (user && user.role === 'manager') {
+      user.role = 'player';
+    }
+    this.persist();
+    return { ok: true };
   }
 
   /**

@@ -25,5 +25,5 @@ export function createSeedData(): LeagueData {
     '8. TODO: Replace this entire section with the real league rules before opening day.',
   ].join('\n');
 
-  return { teams, players: [], games: [], users: [], rules };
+  return { teams, players: [], games: [], users: [], rules, pendingManagers: [] };
 }

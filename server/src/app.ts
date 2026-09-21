@@ -401,6 +401,44 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
+  // ---- Manager email authorizations (admin only) ------------------------
+
+  api.get('/manager-emails', requireAdmin, (_req: Request, res: Response) => {
+    res.json(store.listManagerAuthorizations());
+  });
+
+  api.post('/manager-emails', requireAdmin, (req: Request, res: Response) => {
+    const { emails, teamId } = req.body ?? {};
+    if (typeof teamId !== 'string' || !teamId) {
+      res.status(400).json({ error: 'teamId is required' });
+      return;
+    }
+    if (!store.getTeam(teamId)) {
+      res.status(400).json({ error: `Unknown team: ${teamId}` });
+      return;
+    }
+    const parsed = parseEmails(emails);
+    if (parsed.length === 0) {
+      res.status(400).json({ error: 'At least one valid-looking email is required' });
+      return;
+    }
+    try {
+      res.json(store.authorizeManagers(parsed, teamId));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.delete('/manager-emails/:email', requireAdmin, (req: Request, res: Response) => {
+    let email = req.params.email ?? '';
+    try {
+      email = decodeURIComponent(email);
+    } catch {
+      // already decoded
+    }
+    res.json(store.revokeManagerAuthorization(email));
+  });
+
   app.use('/api', api);
 
   const dist = options.clientDist;
@@ -421,4 +459,29 @@ function withTeamNames(store: LeagueStore) {
     homeTeamName: teams.get(g.homeTeamId) ?? g.homeTeamId,
     awayTeamName: teams.get(g.awayTeamId) ?? g.awayTeamId,
   }));
+}
+
+/** Split a string or string[] of emails on commas / whitespace / newlines. */
+function parseEmails(input: unknown): string[] {
+  const chunks: string[] = [];
+  if (typeof input === 'string') {
+    chunks.push(input);
+  } else if (Array.isArray(input)) {
+    for (const item of input) {
+      if (typeof item === 'string') chunks.push(item);
+    }
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const chunk of chunks) {
+    for (const part of chunk.split(/[\s,]+/)) {
+      const email = part.trim().toLowerCase();
+      if (!email) continue;
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) continue;
+      if (seen.has(email)) continue;
+      seen.add(email);
+      out.push(email);
+    }
+  }
+  return out;
 }
