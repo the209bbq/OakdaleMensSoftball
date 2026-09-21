@@ -32,8 +32,25 @@ export interface StandingRow {
   gamesPlayed: number;
 }
 
+export type Role = 'admin' | 'captain' | 'member';
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  /** For captains: the team they manage. Null for admins/members. */
+  teamId: string | null;
+  passwordHash: string;
+  createdAt: string;
+}
+
+/** User shape safe to return over the API (no password hash). */
+export type PublicUser = Omit<User, 'passwordHash'>;
+
 export interface LeagueData {
   teams: Team[];
   players: Player[];
   games: Game[];
+  users: User[];
 }

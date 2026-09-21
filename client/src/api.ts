@@ -34,39 +34,68 @@ export interface StandingRow {
   gamesPlayed: number;
 }
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+export type Role = 'admin' | 'captain' | 'member';
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  teamId: string | null;
+  createdAt: string;
+}
+
+async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const res = await fetch(url, {
+    credentials: 'same-origin',
+    headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+    ...options,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Request failed: ${res.status}`);
+  }
   return res.json() as Promise<T>;
 }
 
 export const api = {
-  getStandings: () => getJson<StandingRow[]>('/api/standings'),
-  getSchedule: () => getJson<Game[]>('/api/schedule'),
-  generateSchedule: async (startDate?: string) => {
-    const res = await fetch('/api/schedule/generate', {
+  // Public reads
+  getStandings: () => request<StandingRow[]>('/api/standings'),
+  getSchedule: () => request<Game[]>('/api/schedule'),
+  getTeams: () => request<Team[]>('/api/teams'),
+  getRoster: (teamId: string) => request<{ team: Team; roster: Player[] }>(`/api/teams/${teamId}/roster`),
+
+  // Auth
+  me: () => request<{ user: User | null }>('/api/auth/me'),
+  login: (email: string, password: string) =>
+    request<User>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  register: (email: string, name: string, password: string) =>
+    request<User>('/api/auth/register', { method: 'POST', body: JSON.stringify({ email, name, password }) }),
+  logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
+
+  // Writes (role-gated server-side)
+  addPlayer: (input: { teamId: string; name: string; number: number; position: string }) =>
+    request<Player>('/api/players', { method: 'POST', body: JSON.stringify(input) }),
+  removePlayer: (playerId: string) =>
+    request<{ ok: boolean }>(`/api/players/${playerId}`, { method: 'DELETE' }),
+  recordResult: (gameId: string, homeScore: number, awayScore: number) =>
+    request<Game>(`/api/games/${gameId}/result`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ homeScore, awayScore }),
+    }),
+  generateSchedule: (startDate?: string) =>
+    request<Game[]>('/api/schedule/generate', {
+      method: 'POST',
       body: JSON.stringify(startDate ? { startDate } : {}),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error ?? `Request failed: ${res.status}`);
-    }
-    return res.json() as Promise<Game[]>;
-  },
-  getTeams: () => getJson<Team[]>('/api/teams'),
-  getRoster: (teamId: string) => getJson<{ team: Team; roster: Player[] }>(`/api/teams/${teamId}/roster`),
-  addPlayer: async (input: { teamId: string; name: string; number: number; position: string }) => {
-    const res = await fetch('/api/players', {
+    }),
+
+  // Admin
+  listUsers: () => request<User[]>('/api/users'),
+  setUserRole: (userId: string, role: Role, teamId: string | null) =>
+    request<User>(`/api/users/${userId}/role`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error ?? `Request failed: ${res.status}`);
-    }
-    return res.json() as Promise<Player>;
-  },
+      body: JSON.stringify({ role, teamId }),
+    }),
+  createTeam: (name: string) =>
+    request<Team>('/api/teams', { method: 'POST', body: JSON.stringify({ name }) }),
 };
