@@ -37,6 +37,11 @@ export class LeagueStore {
       if (!Array.isArray(this.data.users)) this.data.users = [];
       if (typeof this.data.rules !== 'string') this.data.rules = createSeedData().rules;
       this.data.games = (this.data.games ?? []).map(normalizeGame);
+      for (const user of this.data.users) {
+        const legacy = user.role as string;
+        if (legacy === 'captain') user.role = 'manager';
+        else if (legacy === 'member') user.role = 'player';
+      }
     } else {
       this.data = createSeedData();
       this.persist();
@@ -258,8 +263,8 @@ export class LeagueStore {
       id: `u${Date.now()}${Math.floor(Math.random() * 1000)}`,
       email,
       name,
-      role: input.role ?? 'member',
-      teamId: input.role === 'captain' ? input.teamId ?? null : null,
+      role: input.role ?? 'player',
+      teamId: input.role === 'manager' ? input.teamId ?? null : null,
       passwordHash: hashPassword(input.password),
       createdAt: new Date().toISOString(),
     };
@@ -275,12 +280,12 @@ export class LeagueStore {
     return toPublicUser(user);
   }
 
-  /** Assign a role. Captains are pinned to a team; other roles clear teamId. */
+  /** Assign a role. Managers are pinned to a team; other roles clear teamId. */
   setUserRole(userId: string, role: Role, teamId: string | null = null): PublicUser {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
-    if (role === 'captain') {
-      if (!teamId || !this.getTeam(teamId)) throw new Error('A valid team is required for captains');
+    if (role === 'manager') {
+      if (!teamId || !this.getTeam(teamId)) throw new Error('A valid team is required for managers');
       user.teamId = teamId;
     } else {
       user.teamId = null;
@@ -296,15 +301,34 @@ export class LeagueStore {
 
   /** Ensure an admin account exists (bootstrapped from env at startup). */
   ensureAdmin(email: string, name: string, password: string): PublicUser {
-    const existing = this.getUserByEmail(email);
+    return this.ensureUser({ email, name, password, role: 'admin', teamId: null });
+  }
+
+  /**
+   * Create a user if missing, or align an existing account's role/teamId.
+   * Passwords are hashed on create; an existing user's password is left alone.
+   */
+  ensureUser(input: {
+    email: string;
+    name: string;
+    password: string;
+    role: Role;
+    teamId?: string | null;
+  }): PublicUser {
+    const desiredTeamId = input.role === 'manager' ? input.teamId ?? null : null;
+    const existing = this.getUserByEmail(input.email);
     if (existing) {
-      if (existing.role !== 'admin') {
-        existing.role = 'admin';
-        existing.teamId = null;
-        this.persist();
+      if (existing.role !== input.role || existing.teamId !== desiredTeamId) {
+        return this.setUserRole(existing.id, input.role, desiredTeamId);
       }
       return toPublicUser(existing);
     }
-    return this.registerUser({ email, name, password, role: 'admin' });
+    return this.registerUser({
+      email: input.email,
+      name: input.name,
+      password: input.password,
+      role: input.role,
+      teamId: desiredTeamId,
+    });
   }
 }

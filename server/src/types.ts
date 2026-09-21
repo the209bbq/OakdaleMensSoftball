@@ -40,14 +40,14 @@ export interface StandingRow {
   gamesPlayed: number;
 }
 
-export type Role = 'admin' | 'captain' | 'member';
+export type Role = 'admin' | 'manager' | 'player';
 
 export interface User {
   id: string;
   email: string;
   name: string;
   role: Role;
-  /** For captains: the team they manage. Null for admins/members. */
+  /** For managers: the team they manage. Null for admins/players. */
   teamId: string | null;
   passwordHash: string;
   createdAt: string;

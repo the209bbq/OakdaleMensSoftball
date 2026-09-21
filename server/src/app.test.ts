@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, beforeEach } from 'vitest';
 import request from 'supertest';
 import { createApp } from './app.js';
@@ -99,13 +102,13 @@ describe('Authentication', () => {
     app = makeApp().app;
   });
 
-  it('registers a new member and returns them from /me', async () => {
+  it('registers a new player and returns them from /me', async () => {
     const agent = request.agent(app);
     const reg = await agent
       .post('/api/auth/register')
       .send({ email: 'Player1@example.com', name: 'Player One', password: 'supersecret' });
     expect(reg.status).toBe(201);
-    expect(reg.body.role).toBe('member');
+    expect(reg.body.role).toBe('player');
     expect(reg.body.email).toBe('player1@example.com');
     expect(reg.body.passwordHash).toBeUndefined();
 
@@ -154,36 +157,36 @@ describe('Authorization', () => {
     expect(res.status).toBe(201);
   });
 
-  it('blocks a plain member from writing', async () => {
+  it('blocks a plain player from writing', async () => {
     const { app } = makeApp();
-    const member = request.agent(app);
-    await member.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
-    const res = await member.post('/api/players').send({ teamId: TEAM_OWN, name: 'X', number: 1 });
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
+    const res = await player.post('/api/players').send({ teamId: TEAM_OWN, name: 'X', number: 1 });
     expect(res.status).toBe(403);
   });
 
-  it('lets a captain manage only their own team', async () => {
+  it('lets a manager manage only their own team', async () => {
     const { app, store } = makeApp();
-    store.registerUser({ email: 'cap@b.com', name: 'Cap', password: 'longenough' });
-    const cap = store.getUserByEmail('cap@b.com')!;
-    store.setUserRole(cap.id, 'captain', TEAM_OWN);
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    const mgr = store.getUserByEmail('mgr@b.com')!;
+    store.setUserRole(mgr.id, 'manager', TEAM_OWN);
 
-    const captain = await loginAs(app, 'cap@b.com', 'longenough');
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
 
-    const own = await captain.post('/api/players').send({ teamId: TEAM_OWN, name: 'Rookie', number: 50 });
+    const own = await manager.post('/api/players').send({ teamId: TEAM_OWN, name: 'Rookie', number: 50 });
     expect(own.status).toBe(201);
 
-    const other = await captain.post('/api/players').send({ teamId: TEAM_OTHER, name: 'Nope', number: 51 });
+    const other = await manager.post('/api/players').send({ teamId: TEAM_OTHER, name: 'Nope', number: 51 });
     expect(other.status).toBe(403);
   });
 
   it('only lets admins generate the schedule', async () => {
     const { app, store } = makeApp();
-    store.registerUser({ email: 'cap@b.com', name: 'Cap', password: 'longenough' });
-    store.setUserRole(store.getUserByEmail('cap@b.com')!.id, 'captain', TEAM_OWN);
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
 
-    const captain = await loginAs(app, 'cap@b.com', 'longenough');
-    const denied = await captain.post('/api/schedule/generate').send({ startDate: '2026-07-04' });
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+    const denied = await manager.post('/api/schedule/generate').send({ startDate: '2026-07-04' });
     expect(denied.status).toBe(403);
 
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
@@ -220,7 +223,7 @@ describe('Authorization', () => {
     expect(ok.body.every((g: { week: number }) => g.week === 1 || g.week === 2)).toBe(true);
   });
 
-  it('lets a captain report only their own games', async () => {
+  it('lets a manager report only their own games', async () => {
     const { app, store } = makeApp();
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
     const gen = await admin.post('/api/schedule/generate').send({ startDate: '2026-05-02' });
@@ -233,11 +236,11 @@ describe('Authorization', () => {
     expect(ownGame).toBeDefined();
     expect(otherGame).toBeDefined();
 
-    store.registerUser({ email: 'cap@b.com', name: 'Cap', password: 'longenough' });
-    store.setUserRole(store.getUserByEmail('cap@b.com')!.id, 'captain', TEAM_OWN);
-    const captain = await loginAs(app, 'cap@b.com', 'longenough');
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
 
-    const own = await captain.post(`/api/games/${ownGame.id}/result`).send({ homeScore: 3, awayScore: 9 });
+    const own = await manager.post(`/api/games/${ownGame.id}/result`).send({ homeScore: 3, awayScore: 9 });
     expect(own.status).toBe(200);
     expect(own.body.field).toBeTruthy();
     expect(own.body.time).toBeTruthy();
@@ -245,16 +248,16 @@ describe('Authorization', () => {
     expect(own.body.week).toBeGreaterThan(0);
     expect(own.body.played).toBe(true);
 
-    const other = await captain.post(`/api/games/${otherGame.id}/result`).send({ homeScore: 1, awayScore: 2 });
+    const other = await manager.post(`/api/games/${otherGame.id}/result`).send({ homeScore: 1, awayScore: 2 });
     expect(other.status).toBe(403);
   });
 });
 
 describe('Admin user management', () => {
-  it('lists users and assigns a captain role to a team', async () => {
+  it('lists users and assigns a manager role to a team', async () => {
     const { app, store } = makeApp();
-    store.registerUser({ email: 'future.cap@b.com', name: 'Future Cap', password: 'longenough' });
-    const target = store.getUserByEmail('future.cap@b.com')!;
+    store.registerUser({ email: 'future.mgr@b.com', name: 'Future Mgr', password: 'longenough' });
+    const target = store.getUserByEmail('future.mgr@b.com')!;
 
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
 
@@ -264,16 +267,16 @@ describe('Admin user management', () => {
 
     const assign = await admin
       .post(`/api/users/${target.id}/role`)
-      .send({ role: 'captain', teamId: 'flying-demons' });
+      .send({ role: 'manager', teamId: 'flying-demons' });
     expect(assign.status).toBe(200);
-    expect(assign.body.role).toBe('captain');
+    expect(assign.body.role).toBe('manager');
     expect(assign.body.teamId).toBe('flying-demons');
 
-    const badTeam = await admin.post(`/api/users/${target.id}/role`).send({ role: 'captain' });
+    const badTeam = await admin.post(`/api/users/${target.id}/role`).send({ role: 'manager' });
     expect(badTeam.status).toBe(400);
   });
 
-  it('admins can create teams; members cannot', async () => {
+  it('admins can create teams; players cannot', async () => {
     const { app } = makeApp();
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
     const created = await admin.post('/api/teams').send({ name: 'Eastside Eagles' });
@@ -305,11 +308,11 @@ describe('Admin team rename', () => {
     expect(res.status).toBe(401);
   });
 
-  it('blocks a plain member from renaming a team', async () => {
+  it('blocks a plain player from renaming a team', async () => {
     const { app } = makeApp();
-    const member = request.agent(app);
-    await member.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
-    const res = await member.put(`/api/teams/${TEAM_OWN}`).send({ name: 'Nope' });
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
+    const res = await player.put(`/api/teams/${TEAM_OWN}`).send({ name: 'Nope' });
     expect(res.status).toBe(403);
   });
 
@@ -343,11 +346,11 @@ describe('League rules', () => {
     expect(res.status).toBe(401);
   });
 
-  it('blocks a plain member from editing rules', async () => {
+  it('blocks a plain player from editing rules', async () => {
     const { app } = makeApp();
-    const member = request.agent(app);
-    await member.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
-    const res = await member.put('/api/rules').send({ rules: 'Member rules' });
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
+    const res = await player.put('/api/rules').send({ rules: 'Player rules' });
     expect(res.status).toBe(403);
   });
 
@@ -373,5 +376,92 @@ describe('League rules', () => {
 
     const tooBig = await admin.put('/api/rules').send({ rules: 'x'.repeat(20001) });
     expect(tooBig.status).toBe(400);
+  });
+});
+
+describe('LeagueStore role backfill and ensureUser', () => {
+  it('maps legacy captain/member roles to manager/player when loading a data file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oakdale-legacy-roles-'));
+    const file = join(dir, 'league.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        teams: [{ id: 'camp-boys', name: 'Camp Boys' }],
+        players: [],
+        games: [],
+        users: [
+          {
+            id: 'u-cap',
+            email: 'legacy.cap@oakdale.local',
+            name: 'Old Captain',
+            role: 'captain',
+            teamId: 'camp-boys',
+            passwordHash: 'scrypt$00$00',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+          {
+            id: 'u-mem',
+            email: 'legacy.mem@oakdale.local',
+            name: 'Old Member',
+            role: 'member',
+            teamId: null,
+            passwordHash: 'scrypt$00$00',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+          {
+            id: 'u-adm',
+            email: 'legacy.adm@oakdale.local',
+            name: 'Old Admin',
+            role: 'admin',
+            teamId: null,
+            passwordHash: 'scrypt$00$00',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        rules: 'legacy rules',
+      }),
+    );
+
+    try {
+      const store = new LeagueStore(file);
+      expect(store.getUserByEmail('legacy.cap@oakdale.local')?.role).toBe('manager');
+      expect(store.getUserByEmail('legacy.cap@oakdale.local')?.teamId).toBe('camp-boys');
+      expect(store.getUserByEmail('legacy.mem@oakdale.local')?.role).toBe('player');
+      expect(store.getUserByEmail('legacy.adm@oakdale.local')?.role).toBe('admin');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('ensureUser creates a missing user and updates role/team on an existing one', () => {
+    const store = new LeagueStore(null);
+    const created = store.ensureUser({
+      email: 'Mgr@B.com',
+      name: 'Demo Manager',
+      password: 'longenough',
+      role: 'player',
+      teamId: null,
+    });
+    expect(created.email).toBe('mgr@b.com');
+    expect(created.role).toBe('player');
+    expect(created.teamId).toBeNull();
+    expect('passwordHash' in created).toBe(false);
+    expect(store.getUserByEmail('mgr@b.com')?.passwordHash).toBeTruthy();
+
+    const updated = store.ensureUser({
+      email: 'mgr@b.com',
+      name: 'Ignored Name',
+      password: 'different-password-that-should-not-apply',
+      role: 'manager',
+      teamId: TEAM_OWN,
+    });
+    expect(updated.role).toBe('manager');
+    expect(updated.teamId).toBe(TEAM_OWN);
+    const stored = store.getUserByEmail('mgr@b.com')!;
+    expect(stored.role).toBe('manager');
+    expect(stored.teamId).toBe(TEAM_OWN);
+    expect(stored.name).toBe('Demo Manager');
+    expect(store.authenticate('mgr@b.com', 'longenough')).not.toBeNull();
+    expect(store.authenticate('mgr@b.com', 'different-password-that-should-not-apply')).toBeNull();
   });
 });
