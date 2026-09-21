@@ -201,3 +201,51 @@ describe('Admin user management', () => {
     expect(anon.status).toBe(401);
   });
 });
+
+describe('League rules', () => {
+  it('returns rules as a string to anyone without auth', async () => {
+    const { app } = makeApp();
+    const res = await request(app).get('/api/rules');
+    expect(res.status).toBe(200);
+    expect(typeof res.body.rules).toBe('string');
+    expect(res.body.rules.length).toBeGreaterThan(0);
+  });
+
+  it('blocks anonymous rule edits', async () => {
+    const { app } = makeApp();
+    const res = await request(app).put('/api/rules').send({ rules: 'Hacked rules' });
+    expect(res.status).toBe(401);
+  });
+
+  it('blocks a plain member from editing rules', async () => {
+    const { app } = makeApp();
+    const member = request.agent(app);
+    await member.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
+    const res = await member.put('/api/rules').send({ rules: 'Member rules' });
+    expect(res.status).toBe(403);
+  });
+
+  it('lets an admin update the rules and reflects them on a subsequent read', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const updated = 'Rule 1: Have fun.\nRule 2: Bring snacks.';
+    const put = await admin.put('/api/rules').send({ rules: updated });
+    expect(put.status).toBe(200);
+    expect(put.body.rules).toBe(updated);
+
+    const get = await request(app).get('/api/rules');
+    expect(get.status).toBe(200);
+    expect(get.body.rules).toBe(updated);
+  });
+
+  it('rejects non-string and oversized rule payloads from an admin', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+
+    const notString = await admin.put('/api/rules').send({ rules: 42 });
+    expect(notString.status).toBe(400);
+
+    const tooBig = await admin.put('/api/rules').send({ rules: 'x'.repeat(20001) });
+    expect(tooBig.status).toBe(400);
+  });
+});

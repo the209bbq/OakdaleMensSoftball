@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, type Game, type Player, type Role, type StandingRow, type Team, type User } from './api';
 import { useAuth } from './auth';
 
-type Tab = 'standings' | 'schedule' | 'rosters' | 'admin';
+type Tab = 'standings' | 'schedule' | 'rosters' | 'rules' | 'admin';
 
 const TAB_TITLES: Record<Tab, string> = {
   standings: 'Standings',
   schedule: 'Schedule',
   rosters: 'Rosters',
+  rules: 'Rules',
   admin: 'Admin',
 };
 
@@ -45,6 +46,7 @@ export default function App() {
         {tab === 'standings' && <Standings />}
         {tab === 'schedule' && <Schedule />}
         {tab === 'rosters' && <Rosters />}
+        {tab === 'rules' && <Rules />}
         {tab === 'admin' && user?.role === 'admin' && <Admin />}
       </main>
 
@@ -52,6 +54,7 @@ export default function App() {
         <TabButton tab="standings" current={tab} onSelect={setTab} label="Standings" icon={TrophyIcon} />
         <TabButton tab="schedule" current={tab} onSelect={setTab} label="Schedule" icon={CalendarIcon} />
         <TabButton tab="rosters" current={tab} onSelect={setTab} label="Rosters" icon={RosterIcon} />
+        <TabButton tab="rules" current={tab} onSelect={setTab} label="Rules" icon={RulesIcon} />
         {user?.role === 'admin' && (
           <TabButton tab="admin" current={tab} onSelect={setTab} label="Admin" icon={GearIcon} />
         )}
@@ -464,6 +467,89 @@ function Rosters() {
   );
 }
 
+function Rules() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [rules, setRules] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getRules().then((r) => setRules(r.rules)).catch((e) => setError(e.message));
+  }, []);
+
+  function startEdit() {
+    setDraft(rules);
+    setMessage(null);
+    setError(null);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setError(null);
+  }
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await api.updateRules(draft);
+      setRules(res.rules);
+      setEditing(false);
+      setMessage('Rules saved!');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (error && !editing) return <p className="error">{error}</p>;
+
+  return (
+    <section className="card">
+      <h2>League Rules</h2>
+      {editing ? (
+        <div className="rules-edit">
+          <textarea
+            className="rules-textarea"
+            aria-label="League rules"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={16}
+          />
+          {error && <p className="error inline-error">{error}</p>}
+          <div className="rules-actions">
+            <button className="primary-btn" onClick={save} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button className="link-btn" onClick={cancelEdit} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {isAdmin && (
+            <div className="rules-toolbar">
+              <button className="mini-btn" onClick={startEdit}>
+                Edit rules
+              </button>
+            </div>
+          )}
+          {message && <p className="message">{message}</p>}
+          <div className="rules-text">{rules}</div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function Admin() {
   const { user: me } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -588,6 +674,16 @@ function RosterIcon() {
       <circle cx="9" cy="8" r="3" />
       <path d="M3 20a6 6 0 0 1 12 0" />
       <path d="M16 6a3 3 0 0 1 0 6M18 20a6 6 0 0 0-3-5.2" />
+    </svg>
+  );
+}
+
+function RulesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5z" />
+      <path d="M4 19a2 2 0 0 0 2 2h13" />
+      <path d="M8 7h7M8 11h7" />
     </svg>
   );
 }

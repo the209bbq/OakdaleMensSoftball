@@ -64,6 +64,7 @@ export const api = {
   getSchedule: () => request<Game[]>('/api/schedule'),
   getTeams: () => request<Team[]>('/api/teams'),
   getRoster: (teamId: string) => request<{ team: Team; roster: Player[] }>(`/api/teams/${teamId}/roster`),
+  getRules: () => request<{ rules: string }>('/api/rules'),
 
   // Auth
   me: () => request<{ user: User | null }>('/api/auth/me'),
@@ -98,4 +99,6 @@ export const api = {
     }),
   createTeam: (name: string) =>
     request<Team>('/api/teams', { method: 'POST', body: JSON.stringify({ name }) }),
+  updateRules: (rules: string) =>
+    request<{ rules: string }>('/api/rules', { method: 'PUT', body: JSON.stringify({ rules }) }),
 };
