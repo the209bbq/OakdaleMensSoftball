@@ -1,0 +1,32 @@
+# Oakdale Men's Softball — Render Blueprint
+#
+# Persistent disks require a paid instance type (not the free plan).
+# After the first Blueprint sync, set ADMIN_EMAIL, ADMIN_NAME, and
+# ADMIN_PASSWORD in the Render Dashboard (they are not committed).
+services:
+  - type: web
+    name: oakdale-mens-softball
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /data
+      - key: NODE_VERSION
+        value: "22"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_NAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
