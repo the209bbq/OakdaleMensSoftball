@@ -187,10 +187,37 @@ describe('Authorization', () => {
     expect(denied.status).toBe(403);
 
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
-    const ok = await admin.post('/api/schedule/generate').send({ startDate: '2026-07-04' });
+    const ok = await admin.post('/api/schedule/generate').send({ startDate: '2026-07-08' });
     expect(ok.status).toBe(201);
-    // 8 teams → C(8,2) = 28 games in a single round-robin.
-    expect(ok.body).toHaveLength(28);
+    // 8 teams × 11 weeks, 4 games per Wednesday night.
+    expect(ok.body).toHaveLength(44);
+    for (const game of ok.body) {
+      expect(game.field).toMatch(/^Field [123]$/);
+      expect(['6:00 PM', '7:30 PM']).toContain(game.time);
+      expect(game.location).toBe('Kerr Park');
+      expect(game.week).toBeGreaterThanOrEqual(1);
+      expect(game.week).toBeLessThanOrEqual(11);
+      expect(game.homeTeamName).toBeTruthy();
+      expect(game.awayTeamName).toBeTruthy();
+    }
+  });
+
+  it('rejects an invalid weeks value when generating a schedule', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const zero = await admin.post('/api/schedule/generate').send({ weeks: 0 });
+    expect(zero.status).toBe(400);
+    const tooMany = await admin.post('/api/schedule/generate').send({ weeks: 31 });
+    expect(tooMany.status).toBe(400);
+  });
+
+  it('honors a weeks option when generating the schedule', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const ok = await admin.post('/api/schedule/generate').send({ startDate: '2026-05-06', weeks: 2 });
+    expect(ok.status).toBe(201);
+    expect(ok.body).toHaveLength(8);
+    expect(ok.body.every((g: { week: number }) => g.week === 1 || g.week === 2)).toBe(true);
   });
 
   it('lets a captain report only their own games', async () => {
@@ -212,6 +239,11 @@ describe('Authorization', () => {
 
     const own = await captain.post(`/api/games/${ownGame.id}/result`).send({ homeScore: 3, awayScore: 9 });
     expect(own.status).toBe(200);
+    expect(own.body.field).toBeTruthy();
+    expect(own.body.time).toBeTruthy();
+    expect(own.body.location).toBe('Kerr Park');
+    expect(own.body.week).toBeGreaterThan(0);
+    expect(own.body.played).toBe(true);
 
     const other = await captain.post(`/api/games/${otherGame.id}/result`).send({ homeScore: 1, awayScore: 2 });
     expect(other.status).toBe(403);

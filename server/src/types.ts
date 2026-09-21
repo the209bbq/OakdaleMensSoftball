@@ -19,6 +19,14 @@ export interface Game {
   homeScore: number | null;
   awayScore: number | null;
   played: boolean;
+  /** e.g. "Field 1" */
+  field: string;
+  /** e.g. "6:00 PM" */
+  time: string;
+  /** e.g. "Kerr Park" */
+  location: string;
+  /** 1-based regular-season week */
+  week: number;
 }
 
 export interface StandingRow {

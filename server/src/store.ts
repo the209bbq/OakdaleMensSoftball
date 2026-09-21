@@ -2,8 +2,18 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Game, LeagueData, Player, PublicUser, Role, StandingRow, Team, User } from './types.js';
 import { createSeedData } from './seed.js';
-import { generateRoundRobin, type GenerateOptions } from './schedule.js';
+import { DEFAULT_LOCATION, generateRoundRobin, type GenerateOptions } from './schedule.js';
 import { hashPassword, verifyPassword } from './auth.js';
+
+function normalizeGame(g: Game): Game {
+  return {
+    ...g,
+    field: g.field ?? '',
+    time: g.time ?? '',
+    location: g.location ?? DEFAULT_LOCATION,
+    week: typeof g.week === 'number' ? g.week : 0,
+  };
+}
 
 function toPublicUser(user: User): PublicUser {
   const { passwordHash: _passwordHash, ...pub } = user;
@@ -26,6 +36,7 @@ export class LeagueStore {
       // Backfill fields added after a data file was first written.
       if (!Array.isArray(this.data.users)) this.data.users = [];
       if (typeof this.data.rules !== 'string') this.data.rules = createSeedData().rules;
+      this.data.games = (this.data.games ?? []).map(normalizeGame);
     } else {
       this.data = createSeedData();
       this.persist();
@@ -53,7 +64,14 @@ export class LeagueStore {
   }
 
   getSchedule(): Game[] {
-    return [...this.data.games].sort((a, b) => a.date.localeCompare(b.date));
+    return [...this.data.games].sort((a, b) => {
+      if (a.week !== b.week) return a.week - b.week;
+      const byDate = a.date.localeCompare(b.date);
+      if (byDate !== 0) return byDate;
+      const byTime = a.time.localeCompare(b.time);
+      if (byTime !== 0) return byTime;
+      return a.field.localeCompare(b.field);
+    });
   }
 
   getRules(): string {
@@ -70,8 +88,8 @@ export class LeagueStore {
   }
 
   /**
-   * Replace the season schedule with a freshly generated single round-robin
-   * built from the current teams. The first round is the season opener.
+   * Replace the season schedule with a freshly generated regular-season set
+   * (one Wednesday-night round per week) built from the current teams.
    */
   generateSchedule(options: GenerateOptions = {}): Game[] {
     if (this.data.teams.length < 2) {

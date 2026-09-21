@@ -1,10 +1,28 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { AuthProvider } from './auth';
 
 const standings = [
   { teamId: 'tigers', teamName: 'Oakdale Tigers', wins: 2, losses: 0, ties: 0, runsFor: 18, runsAgainst: 8, gamesPlayed: 2 },
+];
+
+const scheduleGames = [
+  {
+    id: 'g1',
+    date: '2026-05-06',
+    homeTeamId: 'tigers',
+    awayTeamId: 'beers',
+    homeTeamName: 'Oakdale Tigers',
+    awayTeamName: 'Da Beers',
+    homeScore: null,
+    awayScore: null,
+    played: false,
+    field: 'Field 1',
+    time: '6:00 PM',
+    location: 'Kerr Park',
+    week: 1,
+  },
 ];
 
 beforeEach(() => {
@@ -16,6 +34,9 @@ beforeEach(() => {
       }
       if (url.includes('/api/standings')) {
         return { ok: true, json: async () => standings } as Response;
+      }
+      if (url.includes('/api/schedule')) {
+        return { ok: true, json: async () => scheduleGames } as Response;
       }
       return { ok: true, json: async () => [] } as Response;
     }),
@@ -60,5 +81,22 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('Oakdale Tigers')).toBeInTheDocument();
     });
+  });
+
+  it('expands a schedule game to show field, time, location, and week', async () => {
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
+    });
+    const toggle = screen.getByRole('button', { name: /show details for da beers at oakdale tigers/i });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Kerr Park')).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.getByText('Kerr Park')).toBeInTheDocument();
+    expect(screen.getByText('Field 1')).toBeInTheDocument();
+    expect(screen.getByText('6:00 PM')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /hide details/i })).toHaveAttribute('aria-expanded', 'true');
   });
 });

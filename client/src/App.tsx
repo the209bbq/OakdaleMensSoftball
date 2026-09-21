@@ -237,18 +237,44 @@ function Standings() {
   );
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatGameDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return `${WEEKDAYS[date.getUTCDay()]} ${MONTHS[m - 1]} ${d}`;
+}
+
+function groupGamesByWeek(games: Game[]): { week: number; date: string; games: Game[] }[] {
+  const groups: { week: number; date: string; games: Game[] }[] = [];
+  for (const g of games) {
+    const last = groups[groups.length - 1];
+    if (last && last.week === g.week) {
+      last.games.push(g);
+    } else {
+      groups.push({ week: g.week, date: g.date, games: [g] });
+    }
+  }
+  return groups;
+}
+
 function Schedule() {
   const { user } = useAuth();
   const [games, setGames] = useState<Game[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [startDate, setStartDate] = useState('');
+  const [weeks, setWeeks] = useState('11');
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [home, setHome] = useState('');
   const [away, setAway] = useState('');
 
   const isAdmin = user?.role === 'admin';
+  const weekGroups = useMemo(() => groupGamesByWeek(games), [games]);
 
   function load() {
     api.getSchedule().then(setGames).catch((e) => setError(e.message));
@@ -260,8 +286,14 @@ function Schedule() {
     setMessage(null);
     setError(null);
     try {
-      const next = await api.generateSchedule(startDate || undefined);
+      const weeksNum = Number(weeks);
+      const next = await api.generateSchedule(
+        startDate || undefined,
+        Number.isInteger(weeksNum) ? weeksNum : undefined,
+      );
       setGames(next);
+      setExpanded(null);
+      setEditing(null);
       setMessage(`Generated ${next.length} games from the current teams.`);
     } catch (e) {
       setError((e as Error).message);
@@ -272,6 +304,7 @@ function Schedule() {
 
   function startEdit(g: Game) {
     setEditing(g.id);
+    setExpanded(g.id);
     setHome(g.homeScore?.toString() ?? '');
     setAway(g.awayScore?.toString() ?? '');
     setMessage(null);
@@ -291,6 +324,11 @@ function Schedule() {
   const canReport = (g: Game) =>
     canManageTeam(user, g.homeTeamId) || canManageTeam(user, g.awayTeamId);
 
+  function toggleGame(id: string) {
+    setExpanded((current) => (current === id ? null : id));
+    if (editing && editing !== id) setEditing(null);
+  }
+
   if (error) return <p className="error">{error}</p>;
 
   return (
@@ -307,51 +345,109 @@ function Schedule() {
               onChange={(e) => setStartDate(e.target.value)}
             />
           </label>
+          <label className="field inline">
+            Weeks:{' '}
+            <input
+              aria-label="Weeks"
+              type="number"
+              min={1}
+              max={30}
+              value={weeks}
+              onChange={(e) => setWeeks(e.target.value)}
+            />
+          </label>
           <button className="generate-btn" onClick={handleGenerate} disabled={generating}>
             {generating ? 'Generating…' : 'Generate schedule from teams'}
           </button>
         </div>
       )}
       {message && <p className="message">{message}</p>}
-      <ul className="games">
-        {games.map((g) => (
-          <li key={g.id} className={`game ${g.played ? 'played' : 'upcoming'}`}>
-            <span className="game-date">{g.date}</span>
-            <span className="game-teams">
-              {g.awayTeamName} <span className="at">@</span> {g.homeTeamName}
-            </span>
-            {editing === g.id ? (
-              <span className="score-edit">
-                <input
-                  aria-label={`${g.awayTeamName} score`}
-                  type="number"
-                  value={away}
-                  onChange={(e) => setAway(e.target.value)}
-                />
-                <span className="at">-</span>
-                <input
-                  aria-label={`${g.homeTeamName} score`}
-                  type="number"
-                  value={home}
-                  onChange={(e) => setHome(e.target.value)}
-                />
-                <button className="mini-btn" onClick={() => saveScore(g)}>
-                  Save
-                </button>
-              </span>
-            ) : (
-              <span className="game-score">
-                {g.played ? `${g.awayScore} - ${g.homeScore}` : 'Upcoming'}
-                {canReport(g) && (
-                  <button className="link-btn" onClick={() => startEdit(g)}>
-                    {g.played ? 'Edit' : 'Report'}
+      {weekGroups.map((group) => (
+        <div key={`${group.week}-${group.date}`} className="week-group">
+          <h3 className="week-heading">
+            {group.week ? `Week ${group.week} — ${formatGameDate(group.date)}` : formatGameDate(group.date)}
+          </h3>
+          <ul className="games">
+            {group.games.map((g) => {
+              const isOpen = expanded === g.id;
+              return (
+                <li key={g.id} className={`game ${g.played ? 'played' : 'upcoming'} ${isOpen ? 'expanded' : ''}`}>
+                  <button
+                    type="button"
+                    className="game-toggle"
+                    aria-expanded={isOpen}
+                    aria-label={`${isOpen ? 'Hide' : 'Show'} details for ${g.awayTeamName} at ${g.homeTeamName} on ${formatGameDate(g.date)}`}
+                    onClick={() => toggleGame(g.id)}
+                  >
+                    <span className="game-date">{formatGameDate(g.date)}</span>
+                    <span className="game-teams">
+                      {g.awayTeamName} <span className="at">@</span> {g.homeTeamName}
+                    </span>
+                    <span className="game-score">
+                      {g.played ? `${g.awayScore} - ${g.homeScore}` : 'Upcoming'}
+                    </span>
+                    <span className="game-chevron" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </span>
                   </button>
-                )}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
+                  {isOpen && (
+                    <div className="game-details">
+                      <dl className="game-meta">
+                        <div>
+                          <dt>Time</dt>
+                          <dd>{g.time || 'TBD'}</dd>
+                        </div>
+                        <div>
+                          <dt>Field</dt>
+                          <dd>{g.field || 'TBD'}</dd>
+                        </div>
+                        <div>
+                          <dt>Location</dt>
+                          <dd>{g.location || 'Kerr Park'}</dd>
+                        </div>
+                        <div>
+                          <dt>Week</dt>
+                          <dd>{g.week || '—'}</dd>
+                        </div>
+                      </dl>
+                      {editing === g.id ? (
+                        <div className="score-edit">
+                          <input
+                            aria-label={`${g.awayTeamName} score`}
+                            type="number"
+                            value={away}
+                            onChange={(e) => setAway(e.target.value)}
+                          />
+                          <span className="at">-</span>
+                          <input
+                            aria-label={`${g.homeTeamName} score`}
+                            type="number"
+                            value={home}
+                            onChange={(e) => setHome(e.target.value)}
+                          />
+                          <button className="mini-btn" onClick={() => saveScore(g)}>
+                            Save
+                          </button>
+                        </div>
+                      ) : (
+                        canReport(g) && (
+                          <div className="game-actions">
+                            <button className="link-btn" onClick={() => startEdit(g)}>
+                              {g.played ? 'Edit score' : 'Report score'}
+                            </button>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
     </section>
   );
 }

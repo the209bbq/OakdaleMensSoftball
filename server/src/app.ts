@@ -225,12 +225,21 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
   api.post('/schedule/generate', requireAdmin, (req: Request, res: Response) => {
     try {
-      const { startDate } = req.body ?? {};
+      const { startDate, weeks } = req.body ?? {};
       if (startDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(startDate))) {
         res.status(400).json({ error: 'startDate must be a YYYY-MM-DD date' });
         return;
       }
-      store.generateSchedule({ startDate });
+      let weekCount: number | undefined;
+      if (weeks !== undefined && weeks !== null && weeks !== '') {
+        const n = Number(weeks);
+        if (!Number.isInteger(n) || n < 1 || n > 30) {
+          res.status(400).json({ error: 'weeks must be a positive integer ≤ 30' });
+          return;
+        }
+        weekCount = n;
+      }
+      store.generateSchedule({ startDate, weeks: weekCount });
       res.status(201).json(withTeamNames(store));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
