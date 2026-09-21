@@ -4,6 +4,9 @@ dev-dist/
 *.log
 .DS_Store
 data/*.json
+data/*.imported
+data/*.db
+data/*.db-*
 !data/.gitkeep
 coverage/
 .vite/

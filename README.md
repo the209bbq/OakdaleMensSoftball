@@ -4,7 +4,7 @@ Website for the Oakdale Men's Softball League — league standings, the season s
 
 It's a small full-stack TypeScript app:
 
-- **`server/`** — Express + TypeScript REST API with a zero-dependency JSON-file-backed data store. Computes standings from recorded game results.
+- **`server/`** — Express + TypeScript REST API with a SQLite-backed data store (`better-sqlite3`). Computes standings from recorded game results.
 - **`client/`** — React + Vite + TypeScript single-page app with Standings, Schedule, and Rosters views (including an "add a player" form).
 
 ## Prerequisites
@@ -47,4 +47,4 @@ Then open http://localhost:5173. The Vite dev server proxies `/api/*` to the API
 
 ## Data
 
-Seed data lives in `server/src/seed.ts`. At runtime the API persists to `data/league.json` (git-ignored), so changes made through the app survive restarts.
+Seed data lives in `server/src/seed.ts`. At runtime the API persists to `data/league.db` (git-ignored), so changes made through the app survive restarts. A leftover `data/league.json` is imported once on first boot.
