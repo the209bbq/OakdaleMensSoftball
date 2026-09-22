@@ -81,9 +81,11 @@ function renderApp() {
 }
 
 describe('App', () => {
-  it('renders the app bar title', () => {
+  it('renders the app bar title', async () => {
     renderApp();
-    expect(screen.getAllByText(/Oakdale Mens Softball League/i).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getAllByText(/Oakdale Mens Softball League/i).length).toBeGreaterThan(0);
+    });
   });
 
   it('shows a Sign in button when logged out', async () => {
@@ -101,6 +103,9 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Schedule' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Rosters' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Admin' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Welcome to the Oakdale Mens Softball League')).toBeInTheDocument();
+    });
   });
 
   it('opens on the Home tab and renders the landing headline', async () => {
