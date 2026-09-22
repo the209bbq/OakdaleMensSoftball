@@ -26,7 +26,6 @@ export interface Theme extends ThemeColors {
   id: ThemeId;
   label: string;
   primary: string;
-  accent: string;
   presets: ThemePreset[];
 }
 

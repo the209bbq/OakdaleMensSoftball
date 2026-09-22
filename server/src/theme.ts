@@ -31,7 +31,6 @@ export interface Theme extends ThemeColors {
   id: ThemeId;
   label: string;
   primary: string;
-  accent: string;
   presets: Array<Pick<ThemePreset, 'id' | 'label' | 'blurb'> & { primary: string; accent: string }>;
 }
 
@@ -200,7 +199,7 @@ export function resolveTheme(input: ThemeInput): Theme {
     const primary = normalizeHex(input.primary, fallback.navy);
     const accent = normalizeHex(input.accent, fallback.accent);
     const colors = customColors(primary, accent);
-    return { id: 'custom', label: 'Custom', primary, accent, presets, ...colors };
+    return { id: 'custom', label: 'Custom', primary, presets, ...colors };
   }
 
   const preset = THEME_PRESETS.find((p) => p.id === input.id) ?? THEME_PRESETS[0];
@@ -208,7 +207,6 @@ export function resolveTheme(input: ThemeInput): Theme {
     id: preset.id,
     label: preset.label,
     primary: preset.colors.navy,
-    accent: preset.colors.accent,
     presets,
     ...preset.colors,
   };
