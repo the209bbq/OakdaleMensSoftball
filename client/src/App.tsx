@@ -50,7 +50,7 @@ export default function App() {
         <div className="app-bar-inner">
           <img className="app-logo" src="/app-icon.svg" alt="" width="28" height="28" />
           <div className="app-bar-text">
-            <span className="app-bar-title">Oakdale MSB</span>
+            <span className="app-bar-title">Oakdale Mens Softball League</span>
             <span className="app-bar-sub">{TAB_TITLES[tab]}</span>
           </div>
           <AuthControl onSignIn={() => setAuthOpen(true)} onEditProfile={() => setProfileOpen(true)} />
