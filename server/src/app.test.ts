@@ -1296,5 +1296,83 @@ describe('Weekly check-in', () => {
     member = roster.body.members.find((m: { id: string }) => m.id === reg.body.id);
     expect(member.checkIn).toBeNull();
   });
+
+  it('GET /api/schedule includes per-week home/away attendance for account members', async () => {
+    const { app, store } = makeApp();
+    store.generateSchedule({ startDate: utcToday(), weeks: 3 });
+
+    const emptyTeam = TEAM_OTHER;
+    const emptyGame = store.getSchedule().find((g) => g.homeTeamId === emptyTeam || g.awayTeamId === emptyTeam)!;
+    expect(emptyGame).toBeDefined();
+    expect(store.getTeamAttendance(emptyTeam, emptyGame.week)).toEqual({ in: 0, out: 0, none: 0, total: 0 });
+
+    const manager = store.registerUser({
+      email: 'mgr-att@b.com',
+      name: 'Mgr Att',
+      password: 'longenough',
+      role: 'manager',
+      teamId: TEAM_OWN,
+    });
+    const player = store.registerUser({ email: 'p-att@b.com', name: 'Pat Att', password: 'longenough' });
+    store.setUserTeam(player.id, TEAM_OWN);
+
+    store.setCheckIn(player.id, 1, 'in');
+    store.setCheckIn(manager.id, 1, 'out');
+
+    expect(store.getTeamAttendance(TEAM_OWN, 1)).toEqual({ in: 1, out: 1, none: 0, total: 2 });
+    expect(store.getTeamAttendance(TEAM_OWN, 2)).toEqual({ in: 0, out: 0, none: 2, total: 2 });
+
+    const res = await request(app).get('/api/schedule');
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBeGreaterThan(0);
+
+    type AttGame = {
+      week: number;
+      homeTeamId: string;
+      awayTeamId: string;
+      homeAttendance: { in: number; out: number; none: number; total: number };
+      awayAttendance: { in: number; out: number; none: number; total: number };
+    };
+    const games = res.body as AttGame[];
+
+    const week1 = games.filter((g) => g.week === 1 && (g.homeTeamId === TEAM_OWN || g.awayTeamId === TEAM_OWN));
+    expect(week1.length).toBeGreaterThan(0);
+    for (const game of week1) {
+      const mine = game.homeTeamId === TEAM_OWN ? game.homeAttendance : game.awayAttendance;
+      expect(mine).toEqual({ in: 1, out: 1, none: 0, total: 2 });
+    }
+
+    const week2 = games.filter((g) => g.week === 2 && (g.homeTeamId === TEAM_OWN || g.awayTeamId === TEAM_OWN));
+    expect(week2.length).toBeGreaterThan(0);
+    for (const game of week2) {
+      const mine = game.homeTeamId === TEAM_OWN ? game.homeAttendance : game.awayAttendance;
+      expect(mine).toEqual({ in: 0, out: 0, none: 2, total: 2 });
+    }
+
+    const emptyOnSchedule = games.find((g) => g.homeTeamId === emptyTeam || g.awayTeamId === emptyTeam)!;
+    const emptyAtt =
+      emptyOnSchedule.homeTeamId === emptyTeam
+        ? emptyOnSchedule.homeAttendance
+        : emptyOnSchedule.awayAttendance;
+    expect(emptyAtt.total).toBe(0);
+  });
+
+  it('POST /api/schedule/generate returns attendance fields and remains public to GET', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: utcToday(), weeks: 2 });
+    expect(gen.status).toBe(201);
+    expect(gen.body.length).toBeGreaterThan(0);
+    for (const game of gen.body) {
+      expect(game.homeAttendance).toEqual({ in: 0, out: 0, none: 0, total: 0 });
+      expect(game.awayAttendance).toEqual({ in: 0, out: 0, none: 0, total: 0 });
+    }
+
+    const anon = await request(app).get('/api/schedule');
+    expect(anon.status).toBe(200);
+    expect(anon.body).toHaveLength(gen.body.length);
+    expect(anon.body[0].homeAttendance).toBeDefined();
+    expect(anon.body[0].awayAttendance).toBeDefined();
+  });
 });
 

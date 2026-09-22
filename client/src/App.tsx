@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type CurrentWeek, type Game, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamMember, type User } from './api';
+import { api, type CurrentWeek, type Game, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamAttendance, type TeamMember, type User } from './api';
 import { useAuth } from './auth';
 import { fileToSquareDataUrl } from './image';
 
@@ -400,6 +400,39 @@ function formatGameDate(iso: string): string {
   return `${WEEKDAYS[date.getUTCDay()]} ${MONTHS[m - 1]} ${d}`;
 }
 
+const EMPTY_ATTENDANCE: TeamAttendance = { in: 0, out: 0, none: 0, total: 0 };
+
+function attendanceOf(value?: TeamAttendance | null): TeamAttendance {
+  return value ?? EMPTY_ATTENDANCE;
+}
+
+function AttendanceChip({ attendance }: { attendance?: TeamAttendance | null }) {
+  const a = attendanceOf(attendance);
+  if (a.total === 0) {
+    return (
+      <span className="att-chip att-empty" aria-label="No roster accounts">
+        —
+      </span>
+    );
+  }
+  return (
+    <span className="att-chip" aria-label={`${a.in} of ${a.total} checked in`}>
+      🥎 {a.in}/{a.total}
+    </span>
+  );
+}
+
+function AttendanceBreakdown({ name, attendance }: { name: string; attendance?: TeamAttendance | null }) {
+  const a = attendanceOf(attendance);
+  const shortHanded = a.total > 0 && a.in < 8;
+  return (
+    <p className="game-att-line">
+      <span className="game-att-name">{name}:</span> 🥎 {a.in} · 💩 {a.out} · — {a.none}
+      {shortHanded ? <span className="att-short"> short-handed</span> : null}
+    </p>
+  );
+}
+
 function groupGamesByWeek(games: Game[]): { week: number; date: string; games: Game[] }[] {
   const groups: { week: number; date: string; games: Game[] }[] = [];
   for (const g of games) {
@@ -534,7 +567,13 @@ function Schedule() {
                   >
                     <span className="game-date">{formatGameDate(g.date)}</span>
                     <span className="game-teams">
-                      {g.awayTeamName} <span className="at">@</span> {g.homeTeamName}
+                      <span className="game-team">
+                        {g.awayTeamName} <AttendanceChip attendance={g.awayAttendance} />
+                      </span>
+                      <span className="at">@</span>
+                      <span className="game-team">
+                        {g.homeTeamName} <AttendanceChip attendance={g.homeAttendance} />
+                      </span>
                     </span>
                     <span className="game-score">
                       {g.played ? `${g.awayScore} - ${g.homeScore}` : 'Upcoming'}
@@ -565,6 +604,10 @@ function Schedule() {
                           <dd>{g.week || '—'}</dd>
                         </div>
                       </dl>
+                      <div className="game-attendance">
+                        <AttendanceBreakdown name={g.awayTeamName} attendance={g.awayAttendance} />
+                        <AttendanceBreakdown name={g.homeTeamName} attendance={g.homeAttendance} />
+                      </div>
                       {editing === g.id ? (
                         <div className="score-edit">
                           <input

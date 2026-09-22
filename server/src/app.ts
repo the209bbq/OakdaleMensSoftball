@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { LeagueStore } from './store.js';
-import type { PublicUser } from './types.js';
+import type { PublicUser, TeamAttendance } from './types.js';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_MS,
@@ -480,12 +480,18 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
   return app;
 }
 
+const EMPTY_ATTENDANCE: TeamAttendance = { in: 0, out: 0, none: 0, total: 0 };
+
 function withTeamNames(store: LeagueStore) {
   const teams = new Map(store.getTeams().map((t) => [t.id, t.name]));
-  return store.getSchedule().map((g) => ({
+  const games = store.getSchedule();
+  const attendance = store.getAttendanceForGames(games);
+  return games.map((g) => ({
     ...g,
     homeTeamName: teams.get(g.homeTeamId) ?? g.homeTeamId,
     awayTeamName: teams.get(g.awayTeamId) ?? g.awayTeamId,
+    homeAttendance: attendance.get(`${g.homeTeamId}:${g.week}`) ?? EMPTY_ATTENDANCE,
+    awayAttendance: attendance.get(`${g.awayTeamId}:${g.week}`) ?? EMPTY_ATTENDANCE,
   }));
 }
 

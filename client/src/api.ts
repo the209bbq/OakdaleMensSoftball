@@ -12,6 +12,14 @@ export interface Player {
   position: string;
 }
 
+/** Account-member check-in counts for one team in one scheduled week. */
+export interface TeamAttendance {
+  in: number;
+  out: number;
+  none: number;
+  total: number;
+}
+
 export interface Game {
   id: string;
   date: string;
@@ -26,6 +34,8 @@ export interface Game {
   time: string;
   location: string;
   week: number;
+  homeAttendance?: TeamAttendance;
+  awayAttendance?: TeamAttendance;
 }
 
 export interface StandingRow {

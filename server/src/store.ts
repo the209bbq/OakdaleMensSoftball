@@ -13,6 +13,7 @@ import type {
   Role,
   StandingRow,
   Team,
+  TeamAttendance,
   TeamMember,
   User,
 } from './types.js';
@@ -119,6 +120,21 @@ function normalizeGame(g: Game): Game {
 function toPublicUser(user: User): PublicUser {
   const { passwordHash: _passwordHash, ...pub } = user;
   return pub;
+}
+
+const EMPTY_ATTENDANCE: TeamAttendance = { in: 0, out: 0, none: 0, total: 0 };
+
+function tallyAttendance(memberIds: string[], checkIns: Map<string, CheckInStatus>): TeamAttendance {
+  let inn = 0;
+  let out = 0;
+  let none = 0;
+  for (const id of memberIds) {
+    const status = checkIns.get(id);
+    if (status === 'in') inn += 1;
+    else if (status === 'out') out += 1;
+    else none += 1;
+  }
+  return { in: inn, out, none, total: memberIds.length };
 }
 
 /** Validate a stored data-URL thumbnail. Empty/null means "clear". */
@@ -754,6 +770,67 @@ export class LeagueStore {
       }
     }
     return map;
+  }
+
+  /**
+   * Account members of a team for attendance: player-role users with
+   * `teamId === team` plus the team's manager. Manual placeholder roster
+   * rows have no account and are excluded (same set as `getTeamMembers`).
+   */
+  getTeamAttendance(teamId: string, week: number): TeamAttendance {
+    const members = this.accountMemberIdsByTeam().get(teamId) ?? [];
+    return tallyAttendance(members, this.getCheckInsForWeek(week));
+  }
+
+  /**
+   * Attendance for both sides of every game, keyed by `${teamId}:${week}`.
+   * Loads account members and check-ins once so schedule payloads stay O(1)
+   * extra queries regardless of weeks/teams.
+   */
+  getAttendanceForGames(
+    games: Array<{ homeTeamId: string; awayTeamId: string; week: number }>,
+  ): Map<string, TeamAttendance> {
+    const membersByTeam = this.accountMemberIdsByTeam();
+    const checkInsByWeek = this.checkInsByWeek();
+    const out = new Map<string, TeamAttendance>();
+    for (const game of games) {
+      for (const teamId of [game.homeTeamId, game.awayTeamId]) {
+        const key = `${teamId}:${game.week}`;
+        if (out.has(key)) continue;
+        const members = membersByTeam.get(teamId) ?? [];
+        const checkIns = checkInsByWeek.get(game.week) ?? new Map<string, CheckInStatus>();
+        out.set(key, members.length === 0 ? { ...EMPTY_ATTENDANCE } : tallyAttendance(members, checkIns));
+      }
+    }
+    return out;
+  }
+
+  /** Player + manager account ids grouped by teamId. */
+  private accountMemberIdsByTeam(): Map<string, string[]> {
+    const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
+    const byTeam = new Map<string, string[]>();
+    for (const user of rows.map(userFromRow)) {
+      if ((user.role !== 'player' && user.role !== 'manager') || !user.teamId) continue;
+      const list = byTeam.get(user.teamId) ?? [];
+      list.push(user.id);
+      byTeam.set(user.teamId, list);
+    }
+    return byTeam;
+  }
+
+  private checkInsByWeek(): Map<number, Map<string, CheckInStatus>> {
+    const rows = this.db.prepare('SELECT userId, week, status FROM check_ins').all() as CheckInRow[];
+    const byWeek = new Map<number, Map<string, CheckInStatus>>();
+    for (const row of rows) {
+      if (row.status !== 'in' && row.status !== 'out') continue;
+      let weekMap = byWeek.get(row.week);
+      if (!weekMap) {
+        weekMap = new Map();
+        byWeek.set(row.week, weekMap);
+      }
+      weekMap.set(row.userId, row.status);
+    }
+    return byWeek;
   }
 
   /**
