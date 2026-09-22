@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type User } from './api';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
+import { applyTheme } from './theme';
 
 type Tab = 'home' | 'standings' | 'schedule' | 'rosters' | 'rules' | 'admin';
 
@@ -55,6 +56,24 @@ export default function App() {
   useEffect(() => {
     if (!canOpenTeamChat(user)) setChatOpen(false);
   }, [user]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTheme() {
+      try {
+        const theme = await api.getTheme();
+        if (!cancelled) applyTheme(theme);
+      } catch {
+        /* keep the last applied theme */
+      }
+    }
+    void loadTheme();
+    const timer = window.setInterval(() => void loadTheme(), 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   return (
     <div className="app-shell">
@@ -470,6 +489,12 @@ function LandingPage() {
       )}
 
       <CountdownCard label={landing.countdownLabel} target={landing.effectiveCountdownTarget} />
+
+      {isAdmin && (
+        <section className="card">
+          <ColorSchemeAdmin onError={setError} onMessage={setMessage} />
+        </section>
+      )}
 
       <section className="card landing-announcement">
         <div className="landing-announcement-head">
@@ -1733,6 +1758,118 @@ function Rules() {
   );
 }
 
+function ColorSchemeAdmin({
+  onError,
+  onMessage,
+}: {
+  onError: (message: string | null) => void;
+  onMessage: (message: string | null) => void;
+}) {
+  const [theme, setTheme] = useState<Theme | null>(null);
+  const [selected, setSelected] = useState<ThemeId>('grass');
+  const [primary, setPrimary] = useState('#14532d');
+  const [accent, setAccent] = useState('#facc15');
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .getTheme()
+      .then((next) => {
+        setTheme(next);
+        setSelected(next.id);
+        setPrimary(next.primary);
+        setAccent(next.accent);
+        applyTheme(next);
+      })
+      .catch((e) => onError((e as Error).message));
+  }, [onError]);
+
+  async function save(id: ThemeId, nextPrimary = primary, nextAccent = accent) {
+    setSaving(true);
+    onError(null);
+    onMessage(null);
+    try {
+      const saved = await api.updateTheme(
+        id === 'custom' ? { id, primary: nextPrimary, accent: nextAccent } : { id },
+      );
+      setTheme(saved);
+      setSelected(saved.id);
+      setPrimary(saved.primary);
+      setAccent(saved.accent);
+      applyTheme(saved);
+      setStatus(`Color scheme saved: ${saved.label}.`);
+      onMessage(null);
+    } catch (err) {
+      onError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!theme) return <p className="muted-copy">Loading color scheme…</p>;
+
+  return (
+    <div className="theme-panel">
+      <h3>Color scheme</h3>
+      <p className="theme-help">Everyone in the league sees the scheme you save. Tap a swatch to apply it now.</p>
+      {status && <p className="message">{status}</p>}
+      <div className="theme-grid">
+        {theme.presets.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className={`theme-swatch${selected === preset.id ? ' selected' : ''}`}
+            disabled={saving}
+            aria-pressed={selected === preset.id}
+            aria-label={`${preset.label} color scheme`}
+            onClick={() => void save(preset.id)}
+            style={{
+              '--swatch-primary': preset.primary,
+              '--swatch-accent': preset.accent,
+            } as CSSProperties}
+          >
+            <span className="theme-swatch-bar" aria-hidden="true" />
+            <span className="theme-swatch-label">{preset.label}</span>
+            <span className="theme-swatch-blurb">{preset.blurb}</span>
+          </button>
+        ))}
+      </div>
+      <div className={`theme-custom${selected === 'custom' ? ' selected' : ''}`}>
+        <p className="theme-custom-title">Custom</p>
+        <div className="theme-custom-row">
+          <label className="theme-color-field">
+            Primary
+            <input
+              type="color"
+              value={primary}
+              aria-label="Custom primary color"
+              onChange={(e) => setPrimary(e.target.value)}
+            />
+          </label>
+          <label className="theme-color-field">
+            Accent
+            <input
+              type="color"
+              value={accent}
+              aria-label="Custom accent color"
+              onChange={(e) => setAccent(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="primary-btn theme-save-btn"
+            disabled={saving}
+            onClick={() => void save('custom')}
+          >
+            {saving && selected === 'custom' ? 'Saving…' : 'Save custom'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Admin() {
   const { user: me } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -1902,6 +2039,11 @@ function Admin() {
       <h2>League Admin</h2>
       {error && <p className="error inline-error">{error}</p>}
       {message && <p className="message">{message}</p>}
+
+      <ColorSchemeAdmin
+        onError={setError}
+        onMessage={setMessage}
+      />
 
       <div className="test-data-panel">
         <h3>Test Data (simulation)</h3>

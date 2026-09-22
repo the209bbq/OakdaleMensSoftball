@@ -1,13 +1,15 @@
 :root {
-  --navy: #0b2545;
-  --navy-light: #13315c;
-  --accent: #f2a900;
-  --accent-dark: #d99400;
-  --bg: #f4f6fb;
+  --navy: #14532d;
+  --navy-light: #166534;
+  --accent: #facc15;
+  --accent-dark: #ca8a04;
+  --bg: #f3f7f1;
   --card: #ffffff;
-  --text: #1b2733;
-  --muted: #64748b;
-  --border: #e2e8f0;
+  --text: #14532d;
+  --muted: #4d7c5a;
+  --border: #d4e3d4;
+  --heading: #14532d;
+  --on-accent: #14532d;
 }
 
 * {
@@ -111,7 +113,7 @@ body {
 
 .signin-btn {
   background: var(--accent);
-  color: var(--navy);
+  color: var(--on-accent);
   border: none;
   padding: 0.45rem 0.9rem;
   border-radius: 999px;
@@ -253,7 +255,7 @@ body {
 
 .primary-btn {
   background: var(--accent);
-  color: var(--navy);
+  color: var(--on-accent);
   border: none;
   padding: 0.6rem;
   border-radius: 8px;
@@ -281,7 +283,7 @@ body {
 
 .modal-title {
   margin: 0 1.5rem 1rem 0;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 1.15rem;
 }
 
@@ -329,7 +331,7 @@ body {
 .photo-picker-label {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--navy);
+  color: var(--heading);
   cursor: pointer;
 }
 
@@ -357,7 +359,7 @@ body {
 
 .roster-team-name {
   margin: 0;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 1.1rem;
 }
 
@@ -377,7 +379,7 @@ body {
   justify-content: center;
   font-size: 0.75rem;
   font-weight: 700;
-  color: var(--navy);
+  color: var(--heading);
 }
 
 .team-manage {
@@ -400,7 +402,7 @@ body {
 .join-status {
   margin: 0 0 0.55rem;
   font-weight: 700;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 0.95rem;
 }
 
@@ -410,7 +412,7 @@ body {
 
 .roster-heading {
   margin: 1.15rem 0 0.4rem;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 1rem;
 }
 
@@ -459,7 +461,7 @@ body {
 
 .member-name {
   font-weight: 700;
-  color: var(--navy);
+  color: var(--heading);
 }
 
 .member-meta {
@@ -590,7 +592,7 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--navy);
+  color: var(--on-accent);
   background: var(--accent);
   padding: 0.12rem 0.4rem;
   border-radius: 999px;
@@ -691,7 +693,7 @@ body {
 }
 
 .tab-item.active {
-  color: var(--navy);
+  color: var(--heading);
 }
 
 .tab-item.active svg {
@@ -708,7 +710,7 @@ body {
 
 .card h2 {
   margin-top: 0;
-  color: var(--navy);
+  color: var(--heading);
 }
 
 .table {
@@ -764,7 +766,7 @@ body {
 
 .generate-btn {
   background: var(--accent);
-  color: var(--navy);
+  color: var(--on-accent);
   border: none;
   padding: 0.55rem 1.2rem;
   border-radius: 8px;
@@ -878,7 +880,7 @@ body {
 
 .game.expanded .game-chevron {
   transform: rotate(180deg);
-  color: var(--navy);
+  color: var(--heading);
 }
 
 .at {
@@ -888,7 +890,7 @@ body {
 
 .game-score {
   font-weight: 700;
-  color: var(--navy);
+  color: var(--heading);
   white-space: nowrap;
   font-size: 0.85rem;
 }
@@ -917,7 +919,7 @@ body {
 }
 
 .game-att-name {
-  color: var(--navy);
+  color: var(--heading);
 }
 
 .att-short {
@@ -951,7 +953,7 @@ body {
 .game-meta dd {
   margin: 0.12rem 0 0;
   font-weight: 600;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 0.9rem;
 }
 
@@ -968,7 +970,7 @@ body {
   display: block;
   margin-bottom: 1rem;
   font-weight: 600;
-  color: var(--navy);
+  color: var(--heading);
 }
 
 .field select {
@@ -987,7 +989,7 @@ body {
 
 .add-form h3 {
   margin: 0 0 0.6rem;
-  color: var(--navy);
+  color: var(--heading);
 }
 
 .add-row {
@@ -1036,7 +1038,7 @@ body {
 .rules-text {
   white-space: pre-wrap;
   line-height: 1.55;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 0.95rem;
 }
 
@@ -1049,7 +1051,7 @@ body {
   font-family: inherit;
   font-size: 0.95rem;
   line-height: 1.55;
-  color: var(--navy);
+  color: var(--heading);
   resize: vertical;
 }
 
@@ -1112,7 +1114,7 @@ body {
 
 .countdown-label {
   margin: 0 0 0.7rem;
-  color: var(--navy);
+  color: var(--heading);
   font-weight: 700;
   font-size: 0.95rem;
 }
@@ -1131,7 +1133,7 @@ body {
 
 .countdown-unit strong {
   display: block;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 1.25rem;
   line-height: 1.1;
 }
@@ -1146,14 +1148,14 @@ body {
 
 .countdown-phrase {
   margin: 0.75rem 0 0;
-  color: var(--navy);
+  color: var(--heading);
   font-weight: 700;
   font-size: 0.92rem;
 }
 
 .countdown-underway {
   margin: 0;
-  color: var(--navy);
+  color: var(--heading);
   font-weight: 700;
   font-size: 1.05rem;
 }
@@ -1173,7 +1175,7 @@ body {
 .landing-body {
   white-space: pre-wrap;
   line-height: 1.55;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 0.95rem;
 }
 
@@ -1204,7 +1206,7 @@ body {
 
 .checkin-heading {
   margin: 0 0 0.4rem;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 1rem;
 }
 
@@ -1228,7 +1230,7 @@ body {
   padding: 0.85rem 0.4rem 0.75rem;
   font-size: 0.92rem;
   font-weight: 700;
-  color: var(--navy);
+  color: var(--heading);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -1338,7 +1340,7 @@ body {
 .suggestion-text {
   margin: 0;
   white-space: pre-wrap;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 0.92rem;
   line-height: 1.45;
 }
@@ -1429,7 +1431,7 @@ body {
 .chat-bubble-author {
   font-size: 0.72rem;
   font-weight: 700;
-  color: var(--navy);
+  color: var(--heading);
 }
 
 .chat-bubble-time {
@@ -1533,6 +1535,112 @@ body {
 .test-data-clear-btn:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.theme-panel {
+  margin: 0.2rem 0 1.4rem;
+}
+
+.theme-panel h3 {
+  margin: 0 0 0.35rem;
+}
+
+.theme-help,
+.theme-custom-title {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.theme-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 12px;
+  padding: 0.65rem 0.7rem 0.7rem;
+  cursor: pointer;
+  color: inherit;
+}
+
+.theme-swatch.selected,
+.theme-custom.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.theme-swatch-bar {
+  display: block;
+  width: 100%;
+  height: 18px;
+  border-radius: 6px;
+  margin-bottom: 0.35rem;
+  background: linear-gradient(90deg, var(--swatch-primary, var(--navy)) 62%, var(--swatch-accent, var(--accent)) 62%);
+}
+
+.theme-swatch-label {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--heading);
+}
+
+.theme-swatch-blurb {
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.theme-custom {
+  margin-top: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem 0.8rem;
+}
+
+.theme-custom-title {
+  margin-bottom: 0.55rem;
+  font-weight: 700;
+  color: var(--heading);
+}
+
+.theme-custom-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  align-items: flex-end;
+}
+
+.theme-color-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.theme-color-field input[type='color'] {
+  width: 3.2rem;
+  height: 2.1rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  cursor: pointer;
+}
+
+.theme-save-btn {
+  margin-top: 0;
+  padding: 0.45rem 0.9rem;
 }
 
 @media (max-width: 400px) {
