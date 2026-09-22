@@ -1,15 +1,15 @@
 :root {
-  --navy: #0b2545;
-  --navy-light: #13315c;
-  --accent: #f2a900;
-  --accent-dark: #d99400;
-  --bg: #f4f6fb;
+  --navy: #14532d;
+  --navy-light: #166534;
+  --accent: #facc15;
+  --accent-dark: #ca8a04;
+  --bg: #f3f7f1;
   --card: #ffffff;
-  --text: #1b2733;
-  --muted: #64748b;
-  --border: #e2e8f0;
-  --heading: #0b2545;
-  --on-accent: #0b2545;
+  --text: #14532d;
+  --muted: #4d7c5a;
+  --border: #d4e3d4;
+  --heading: #14532d;
+  --on-accent: #14532d;
 }
 
 * {

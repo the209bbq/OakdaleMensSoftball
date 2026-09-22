@@ -111,7 +111,7 @@ export const THEME_PRESETS: ThemePreset[] = [
   },
 ];
 
-export const DEFAULT_THEME_INPUT: ThemeInput = { id: 'classic' };
+export const DEFAULT_THEME_INPUT: ThemeInput = { id: 'grass' };
 
 function clampByte(n: number): number {
   return Math.max(0, Math.min(255, Math.round(n)));
@@ -172,7 +172,7 @@ export function parseStoredTheme(raw: string | undefined): ThemeInput {
   if (!raw) return { ...DEFAULT_THEME_INPUT };
   try {
     const parsed = JSON.parse(raw) as Partial<ThemeInput>;
-    const id = isThemeId(parsed.id) ? parsed.id : 'classic';
+    const id = isThemeId(parsed.id) ? parsed.id : DEFAULT_THEME_INPUT.id;
     if (id !== 'custom') return { id };
     const fallback = THEME_PRESETS[0].colors;
     return {

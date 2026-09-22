@@ -1766,9 +1766,9 @@ function ColorSchemeAdmin({
   onMessage: (message: string | null) => void;
 }) {
   const [theme, setTheme] = useState<Theme | null>(null);
-  const [selected, setSelected] = useState<ThemeId>('classic');
-  const [primary, setPrimary] = useState('#0b2545');
-  const [accent, setAccent] = useState('#f2a900');
+  const [selected, setSelected] = useState<ThemeId>('grass');
+  const [primary, setPrimary] = useState('#14532d');
+  const [accent, setAccent] = useState('#facc15');
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 

@@ -611,13 +611,13 @@ describe('Landing page', () => {
 });
 
 describe('Color scheme', () => {
-  it('returns the classic navy theme to anyone without auth', async () => {
+  it('returns the grass field theme to anyone without auth', async () => {
     const { app } = makeApp();
     const res = await request(app).get('/api/theme');
     expect(res.status).toBe(200);
-    expect(res.body.id).toBe('classic');
-    expect(res.body.navy).toBe('#0b2545');
-    expect(res.body.accent).toBe('#f2a900');
+    expect(res.body.id).toBe('grass');
+    expect(res.body.navy).toBe('#14532d');
+    expect(res.body.accent).toBe('#facc15');
     expect(res.body.presets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'night', label: 'Night game' }),
