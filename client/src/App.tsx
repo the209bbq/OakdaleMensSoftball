@@ -903,7 +903,7 @@ function Rosters() {
           </h3>
           {members.length > 0 && (
             <p className="checkin-summary">
-              🥎 {checkInCounts.in} · 🚫 {checkInCounts.out} · — {checkInCounts.none}
+              🥎 {checkInCounts.in} · 💩 {checkInCounts.out} · — {checkInCounts.none}
             </p>
           )}
           {canCheckIn && (
@@ -930,7 +930,7 @@ function Rosters() {
                 onClick={() => handleCheckIn('out')}
               >
                 <span className="checkin-emoji" aria-hidden="true">
-                  🚫
+                  💩
                 </span>
                 Can&apos;t make it
               </button>
@@ -1004,7 +1004,7 @@ function Rosters() {
                         : `${m.name} hasn't checked in`
                   }
                 >
-                  {m.checkIn === 'in' ? '🥎' : m.checkIn === 'out' ? '🚫' : '—'}
+                  {m.checkIn === 'in' ? '🥎' : m.checkIn === 'out' ? '💩' : '—'}
                 </span>
               )}
               {canEdit && !m.isManager && (

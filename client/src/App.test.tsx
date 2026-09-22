@@ -132,7 +132,7 @@ describe('App', () => {
     expect(screen.getByText('Manager: Coach')).toBeInTheDocument();
     expect(screen.getByText('Manager')).toBeInTheDocument();
     expect(screen.getByText(/Check-in — Week 1 · Wed May 6/)).toBeInTheDocument();
-    expect(screen.getByText(/🥎 1 · 🚫 0 · — 1/)).toBeInTheDocument();
+    expect(screen.getByText(/🥎 1 · 💩 0 · — 1/)).toBeInTheDocument();
     expect(screen.getByLabelText('Coach is in')).toHaveTextContent('🥎');
     expect(screen.getByLabelText("Pat Shortstop hasn't checked in")).toHaveTextContent('—');
     expect(screen.queryByRole('button', { name: /i'm there/i })).not.toBeInTheDocument();
@@ -204,7 +204,7 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /can't make it/i }));
     await waitFor(() => {
-      expect(screen.getByLabelText("Pat Shortstop can't make it")).toHaveTextContent('🚫');
+      expect(screen.getByLabelText("Pat Shortstop can't make it")).toHaveTextContent('💩');
     });
     expect(screen.getByRole('button', { name: /can't make it/i })).toHaveAttribute('aria-pressed', 'true');
   });
