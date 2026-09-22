@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type CurrentWeek, type Game, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamAttendance, type TeamMember, type User } from './api';
+import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamAttendance, type TeamMember, type User } from './api';
 import { useAuth } from './auth';
-import { fileToSquareDataUrl } from './image';
+import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
 
-type Tab = 'standings' | 'schedule' | 'rosters' | 'rules' | 'admin';
+type Tab = 'home' | 'standings' | 'schedule' | 'rosters' | 'rules' | 'admin';
 
 const TAB_TITLES: Record<Tab, string> = {
+  home: 'Home',
   standings: 'Standings',
   schedule: 'Schedule',
   rosters: 'Rosters',
@@ -35,13 +36,13 @@ function initials(name: string): string {
 
 export default function App() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<Tab>('standings');
+  const [tab, setTab] = useState<Tab>('home');
   const [authOpen, setAuthOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
 
   // If a non-admin lands on the admin tab (e.g. after logout), bounce them out.
   useEffect(() => {
-    if (tab === 'admin' && user?.role !== 'admin') setTab('standings');
+    if (tab === 'admin' && user?.role !== 'admin') setTab('home');
   }, [tab, user]);
 
   return (
@@ -58,6 +59,7 @@ export default function App() {
       </header>
 
       <main className="app-content">
+        {tab === 'home' && <LandingPage />}
         {tab === 'standings' && <Standings />}
         {tab === 'schedule' && <Schedule />}
         {tab === 'rosters' && <Rosters />}
@@ -66,6 +68,7 @@ export default function App() {
       </main>
 
       <nav className="tab-bar" role="tablist" aria-label="Main navigation">
+        <TabButton tab="home" current={tab} onSelect={setTab} label="Home" icon={HomeIcon} />
         <TabButton tab="standings" current={tab} onSelect={setTab} label="Standings" icon={TrophyIcon} />
         <TabButton tab="schedule" current={tab} onSelect={setTab} label="Schedule" icon={CalendarIcon} />
         <TabButton tab="rosters" current={tab} onSelect={setTab} label="Rosters" icon={RosterIcon} />
@@ -284,11 +287,13 @@ function PhotoPicker({
   label,
   value,
   onFile,
+  onClear,
 }: {
   id: string;
   label: string;
   value: string | null | undefined;
   onFile: (file: File) => void | Promise<void>;
+  onClear?: () => void;
 }) {
   return (
     <div className="photo-picker">
@@ -297,20 +302,27 @@ function PhotoPicker({
       ) : (
         <div className="photo-preview photo-preview-empty" aria-hidden="true" />
       )}
-      <label className="photo-picker-label" htmlFor={id}>
-        {label}
-        <input
-          id={id}
-          type="file"
-          accept="image/*"
-          aria-label={label}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void onFile(file);
-            e.target.value = '';
-          }}
-        />
-      </label>
+      <div className="photo-picker-actions">
+        <label className="photo-picker-label" htmlFor={id}>
+          {label}
+          <input
+            id={id}
+            type="file"
+            accept="image/*"
+            aria-label={label}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void onFile(file);
+              e.target.value = '';
+            }}
+          />
+        </label>
+        {onClear && value ? (
+          <button type="button" className="link-btn" onClick={onClear}>
+            Remove image
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -340,6 +352,259 @@ function TabButton({
       <Icon />
       <span>{label}</span>
     </button>
+  );
+}
+
+function LandingPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [landing, setLanding] = useState<Landing | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [headline, setHeadline] = useState('');
+  const [body, setBody] = useState('');
+  const [countdownLabel, setCountdownLabel] = useState('');
+  const [countdownTarget, setCountdownTarget] = useState('');
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  function applyLanding(next: Landing) {
+    setLanding(next);
+    setHeadline(next.headline);
+    setBody(next.body);
+    setCountdownLabel(next.countdownLabel);
+    setCountdownTarget(toDatetimeLocalValue(next.countdownTarget));
+    setImageUrl(next.imageUrl);
+  }
+
+  useEffect(() => {
+    api
+      .getLanding()
+      .then(applyLanding)
+      .catch((e) => setError((e as Error).message));
+  }, []);
+
+  function startEdit() {
+    if (!landing) return;
+    applyLanding(landing);
+    setMessage(null);
+    setError(null);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    if (landing) applyLanding(landing);
+    setEditing(false);
+    setError(null);
+  }
+
+  async function onPickBanner(file: File) {
+    try {
+      setImageUrl(await fileToBannerDataUrl(file));
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const next = await api.updateLanding({
+        headline,
+        body,
+        countdownLabel,
+        countdownTarget: fromDatetimeLocalValue(countdownTarget),
+        imageUrl,
+      });
+      applyLanding(next);
+      setEditing(false);
+      setMessage('Landing page saved!');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (error && !landing) return <p className="error">{error}</p>;
+  if (!landing) return <p className="muted-copy">Loading home…</p>;
+
+  return (
+    <div className="landing">
+      <section className="landing-hero">
+        <img className="landing-logo" src="/app-icon.svg" alt="" width="56" height="56" />
+        <p className="landing-league">Oakdale Mens Softball League</p>
+        <h1 className="landing-headline">{landing.headline}</h1>
+      </section>
+
+      {landing.imageUrl && (
+        <img className="landing-banner" src={landing.imageUrl} alt="" />
+      )}
+
+      <CountdownCard label={landing.countdownLabel} target={landing.effectiveCountdownTarget} />
+
+      <section className="card landing-announcement">
+        <div className="landing-announcement-head">
+          <h2>Announcements</h2>
+          {isAdmin && !editing && (
+            <button className="mini-btn" type="button" onClick={startEdit}>
+              Edit
+            </button>
+          )}
+        </div>
+        {message && <p className="message">{message}</p>}
+        {editing ? (
+          <form
+            className="landing-editor"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <label className="field">
+              Headline
+              <input
+                aria-label="Headline"
+                value={headline}
+                onChange={(e) => setHeadline(e.target.value)}
+                maxLength={200}
+                required
+              />
+            </label>
+            <label className="field">
+              Announcement
+              <textarea
+                className="rules-textarea"
+                aria-label="Announcement"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                rows={8}
+                maxLength={5000}
+              />
+            </label>
+            <label className="field">
+              Countdown label
+              <input
+                aria-label="Countdown label"
+                value={countdownLabel}
+                onChange={(e) => setCountdownLabel(e.target.value)}
+                maxLength={80}
+              />
+            </label>
+            <label className="field">
+              Countdown target
+              <input
+                aria-label="Countdown target"
+                type="datetime-local"
+                value={countdownTarget}
+                onChange={(e) => setCountdownTarget(e.target.value)}
+              />
+            </label>
+            <PhotoPicker
+              id="landing-banner"
+              label="Banner image"
+              value={imageUrl}
+              onFile={onPickBanner}
+              onClear={() => setImageUrl(null)}
+            />
+            {error && <p className="error inline-error">{error}</p>}
+            <div className="rules-actions">
+              <button className="primary-btn" type="submit" disabled={saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button className="link-btn" type="button" onClick={cancelEdit} disabled={saving}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="landing-body">{landing.body}</div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function toDatetimeLocalValue(value: string | null): string {
+  if (!value) return '';
+  const match = value.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
+  if (match) return match[1];
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+}
+
+function fromDatetimeLocalValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.length === 16 ? `${trimmed}:00` : trimmed;
+}
+
+function CountdownCard({ label, target }: { label: string; target: string | null }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!target) return undefined;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [target]);
+
+  if (!target) return null;
+
+  const targetMs = new Date(target).getTime();
+  if (Number.isNaN(targetMs)) return null;
+
+  if (targetMs <= now) {
+    return (
+      <section className="card landing-countdown">
+        <p className="countdown-underway">The season is underway!</p>
+      </section>
+    );
+  }
+
+  const parts = remainingParts(targetMs, now);
+  const seconds = String(parts.seconds).padStart(2, '0');
+  const phrase = `${label} in ${parts.days}d ${parts.hours}h ${parts.minutes}m ${seconds}s`;
+
+  return (
+    <section className="card landing-countdown">
+      <p className="countdown-label">{label}</p>
+      <div className="countdown-units" aria-hidden="true">
+        <CountdownUnit value={parts.days} unit="days" />
+        <CountdownUnit value={parts.hours} unit="hrs" />
+        <CountdownUnit value={parts.minutes} unit="min" />
+        <CountdownUnit value={seconds} unit="sec" />
+      </div>
+      <p className="countdown-phrase" aria-live="polite">
+        {phrase}
+      </p>
+    </section>
+  );
+}
+
+function remainingParts(targetMs: number, nowMs: number) {
+  let ms = Math.max(0, targetMs - nowMs);
+  const days = Math.floor(ms / 86_400_000);
+  ms %= 86_400_000;
+  const hours = Math.floor(ms / 3_600_000);
+  ms %= 3_600_000;
+  const minutes = Math.floor(ms / 60_000);
+  ms %= 60_000;
+  const seconds = Math.floor(ms / 1000);
+  return { days, hours, minutes, seconds };
+}
+
+function CountdownUnit({ value, unit }: { value: number | string; unit: string }) {
+  return (
+    <div className="countdown-unit">
+      <strong>{value}</strong>
+      <span>{unit}</span>
+    </div>
   );
 }
 
@@ -1441,6 +1706,16 @@ function Admin() {
         ))}
       </ul>
     </section>
+  );
+}
+
+function HomeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 11.5 12 4l9 7.5" />
+      <path d="M5 10.5V20h14v-9.5" />
+      <path d="M10 20v-6h4v6" />
+    </svg>
   );
 }
 

@@ -114,6 +114,19 @@ export interface ProfileUpdate {
   photoUrl?: string | null;
 }
 
+export interface Landing {
+  headline: string;
+  body: string;
+  imageUrl: string | null;
+  countdownLabel: string;
+  countdownTarget: string | null;
+  effectiveCountdownTarget: string | null;
+}
+
+export type LandingUpdate = Partial<
+  Pick<Landing, 'headline' | 'body' | 'imageUrl' | 'countdownLabel' | 'countdownTarget'>
+>;
+
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(url, {
     credentials: 'same-origin',
@@ -134,6 +147,9 @@ export const api = {
   getTeams: () => request<Team[]>('/api/teams'),
   getRoster: (teamId: string) => request<RosterResponse>(`/api/teams/${teamId}/roster`),
   getRules: () => request<{ rules: string }>('/api/rules'),
+  getLanding: () => request<Landing>('/api/landing'),
+  updateLanding: (payload: LandingUpdate) =>
+    request<Landing>('/api/landing', { method: 'PUT', body: JSON.stringify(payload) }),
   getCurrentWeek: () => request<CurrentWeek | null>('/api/current-week'),
   checkIn: (week: number, status: CheckInStatus | null) =>
     request<{ ok: true; week: number; status: CheckInStatus | null }>('/api/checkin', {
