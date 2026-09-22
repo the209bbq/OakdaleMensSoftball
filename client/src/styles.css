@@ -66,6 +66,9 @@ body {
   font-weight: 700;
   font-size: 1rem;
   line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-bar-sub {
@@ -76,6 +79,34 @@ body {
 
 .app-bar-inner .app-bar-text {
   flex: 1;
+  min-width: 0;
+}
+
+.app-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: none;
+}
+
+.chat-icon-btn {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.chat-icon-btn:hover,
+.chat-icon-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.2);
+  outline: none;
 }
 
 .signin-btn {
@@ -1249,4 +1280,205 @@ body {
   color: var(--muted);
   margin-top: 2rem;
   font-size: 0.85rem;
+}
+
+/* Home suggestions box */
+.suggestions-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.suggestions-form .field textarea,
+.suggestions-form .field input {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 400;
+  resize: vertical;
+}
+
+.suggestions-form .primary-btn {
+  align-self: flex-start;
+  padding: 0.55rem 1.2rem;
+}
+
+.suggestions-thanks .link-btn {
+  margin-left: 0;
+}
+
+.suggestion-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.suggestion-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  background: var(--bg);
+  border-radius: 10px;
+}
+
+.suggestion-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.suggestion-text {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--navy);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.suggestion-meta {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.suggestion-row .link-btn {
+  margin-left: 0;
+  flex: none;
+}
+
+/* Team chat panel */
+.chat-modal {
+  max-width: 400px;
+  width: 100%;
+  height: min(72vh, 560px);
+  max-height: calc(100dvh - 2rem);
+  display: flex;
+  flex-direction: column;
+  padding: 1.35rem 1rem 1rem;
+}
+
+.chat-modal .modal-title {
+  margin-bottom: 0.65rem;
+}
+
+.chat-team-picker {
+  margin-bottom: 0.65rem;
+}
+
+.chat-team-picker select {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+  margin-left: 0;
+}
+
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.35rem 0.1rem 0.5rem;
+  background: var(--bg);
+  border-radius: 12px;
+  margin-bottom: 0.65rem;
+}
+
+.chat-empty {
+  margin: auto;
+  padding: 1.2rem;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.chat-bubble {
+  align-self: flex-start;
+  max-width: 85%;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 12px 4px;
+  padding: 0.45rem 0.7rem 0.5rem;
+}
+
+.chat-bubble.mine {
+  align-self: flex-end;
+  background: #e8f0fb;
+  border-color: #c5d7ef;
+  border-radius: 12px 12px 4px 12px;
+}
+
+.chat-bubble-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.7rem;
+  margin-bottom: 0.15rem;
+}
+
+.chat-bubble-author {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.chat-bubble-time {
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-weight: 600;
+  flex: none;
+}
+
+.chat-bubble-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.chat-compose {
+  display: flex;
+  gap: 0.45rem;
+  align-items: stretch;
+}
+
+.chat-compose input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.chat-compose .primary-btn {
+  margin-top: 0;
+  padding: 0.55rem 0.9rem;
+  flex: none;
+}
+
+.chat-modal .inline-error {
+  padding: 0 0 0.45rem;
+}
+
+@media (max-width: 400px) {
+  .user-meta {
+    display: none;
+  }
+
+  .chat-modal {
+    height: min(80vh, 600px);
+  }
 }

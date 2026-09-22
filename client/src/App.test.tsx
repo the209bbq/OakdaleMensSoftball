@@ -56,11 +56,24 @@ function jsonOk(data: unknown) {
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes('/api/auth/me')) return jsonOk({ user: null });
       if (url.includes('/api/landing')) return jsonOk(landing);
       if (url.includes('/api/standings')) return jsonOk(standings);
       if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+      if (url.includes('/messages')) return jsonOk([]);
+      if (url.includes('/api/suggestions')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body ?? '{}')) as { text?: string; name?: string };
+          return jsonOk({
+            id: 's1',
+            text: body.text ?? '',
+            authorName: body.name ?? null,
+            createdAt: '2026-09-22T00:00:00.000Z',
+          });
+        }
+        return jsonOk([]);
+      }
       if (url.includes('/roster')) return jsonOk(rosterPayload);
       if (url.includes('/api/teams')) return jsonOk(teams);
       return jsonOk([]);
@@ -213,6 +226,89 @@ describe('App', () => {
     expect(screen.getByLabelText('Coach is in')).toHaveTextContent('🥎');
     expect(screen.getByLabelText("Pat Shortstop hasn't checked in")).toHaveTextContent('—');
     expect(screen.queryByRole('button', { name: /i'm there/i })).not.toBeInTheDocument();
+  });
+
+  it('shows a public suggestions box and hides the team-chat button when logged out', async () => {
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Suggestions' })).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Suggestion')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /team chat/i })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Suggestion'), {
+      target: { value: 'Add a snack schedule' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() => {
+      expect(screen.getByText('Thanks for the suggestion!')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Add a snack schedule')).not.toBeInTheDocument();
+  });
+
+  it('opens team chat from the app-bar button for a signed-in teammate', async () => {
+    const playerUser = {
+      id: 'u1',
+      email: 'pat@example.com',
+      name: 'Pat Shortstop',
+      role: 'player' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const chat: Array<{ id: string; teamId: string; userId: string; authorName: string; text: string; createdAt: string }> = [
+      {
+        id: 'm1',
+        teamId: 'tigers',
+        userId: 'u-mgr',
+        authorName: 'Coach',
+        text: 'Bring water',
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: playerUser });
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/messages')) {
+          if (init?.method === 'POST') {
+            const body = JSON.parse(String(init.body ?? '{}')) as { text: string };
+            const posted = {
+              id: 'm2',
+              teamId: 'tigers',
+              userId: playerUser.id,
+              authorName: playerUser.name,
+              text: body.text,
+              createdAt: new Date().toISOString(),
+            };
+            chat.push(posted);
+            return jsonOk(posted);
+          }
+          return jsonOk([...chat]);
+        }
+        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /team chat/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /team chat/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /team chat/i })).toBeInTheDocument();
+    });
+    expect(screen.getByText('Oakdale Tigers')).toBeInTheDocument();
+    expect(screen.getByText('Bring water')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'On my way' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(screen.getByText('On my way')).toBeInTheDocument();
+    });
   });
 
   it('lets a signed-in teammate set, highlight, and clear a weekly check-in', async () => {

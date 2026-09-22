@@ -14,9 +14,11 @@ import type {
   PublicUser,
   Role,
   StandingRow,
+  Suggestion,
   Team,
   TeamAttendance,
   TeamMember,
+  TeamMessage,
   User,
 } from './types.js';
 import { createSeedData } from './seed.js';
@@ -27,6 +29,8 @@ export const MAX_PHOTO_URL_CHARS = 800000;
 export const MAX_LANDING_HEADLINE_CHARS = 200;
 export const MAX_LANDING_BODY_CHARS = 5000;
 export const MAX_LANDING_LABEL_CHARS = 80;
+export const MAX_SUGGESTION_CHARS = 2000;
+export const MAX_MESSAGE_CHARS = 2000;
 
 export const DEFAULT_LANDING: LandingContent = {
   headline: 'Welcome to the Oakdale Mens Softball League',
@@ -88,6 +92,21 @@ CREATE TABLE IF NOT EXISTS check_ins (
   status TEXT NOT NULL CHECK (status IN ('in', 'out')),
   PRIMARY KEY (userId, week)
 );
+CREATE TABLE IF NOT EXISTS suggestions (
+  id TEXT PRIMARY KEY,
+  text TEXT NOT NULL,
+  authorName TEXT,
+  createdAt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  teamId TEXT NOT NULL,
+  userId TEXT NOT NULL,
+  authorName TEXT NOT NULL,
+  text TEXT NOT NULL,
+  createdAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_team_created ON messages (teamId, createdAt);
 `;
 
 type TeamRow = { id: string; name: string; photoUrl: string | null };
@@ -119,6 +138,15 @@ type UserRow = {
 };
 type PendingRow = { email: string; teamId: string };
 type CheckInRow = { userId: string; week: number; status: string };
+type SuggestionRow = { id: string; text: string; authorName: string | null; createdAt: string };
+type MessageRow = {
+  id: string;
+  teamId: string;
+  userId: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+};
 
 function normalizeGame(g: Game): Game {
   return {
@@ -324,6 +352,30 @@ function userFromRow(row: UserRow): User {
   if (row.number != null) user.number = row.number;
   if (row.photoUrl) user.photoUrl = row.photoUrl;
   return user;
+}
+
+function suggestionFromRow(row: SuggestionRow): Suggestion {
+  return {
+    id: row.id,
+    text: row.text,
+    authorName: row.authorName,
+    createdAt: row.createdAt,
+  };
+}
+
+function messageFromRow(row: MessageRow): TeamMessage {
+  return {
+    id: row.id,
+    teamId: row.teamId,
+    userId: row.userId,
+    authorName: row.authorName,
+    text: row.text,
+    createdAt: row.createdAt,
+  };
+}
+
+function newRowId(prefix: string): string {
+  return `${prefix}${Date.now()}${Math.floor(Math.random() * 10000)}`;
 }
 
 /**
@@ -1225,5 +1277,82 @@ export class LeagueStore {
       role: input.role,
       teamId: desiredTeamId,
     });
+  }
+
+  // ---- Suggestions (public submit; admin reads) --------------------------
+
+  addSuggestion(input: { text: unknown; authorName?: string | null }): Suggestion {
+    if (typeof input.text !== 'string') throw new Error('text is required');
+    const text = clampText(input.text.trim(), MAX_SUGGESTION_CHARS);
+    if (!text) throw new Error('text is required');
+    let authorName: string | null = null;
+    if (typeof input.authorName === 'string') {
+      const trimmed = input.authorName.trim();
+      authorName = trimmed ? clampText(trimmed, 80) : null;
+    }
+    const suggestion: Suggestion = {
+      id: newRowId('s'),
+      text,
+      authorName,
+      createdAt: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        'INSERT INTO suggestions (id, text, authorName, createdAt) VALUES (@id, @text, @authorName, @createdAt)',
+      )
+      .run(suggestion);
+    return suggestion;
+  }
+
+  listSuggestions(): Suggestion[] {
+    const rows = this.db
+      .prepare('SELECT id, text, authorName, createdAt FROM suggestions ORDER BY createdAt DESC, rowid DESC')
+      .all() as SuggestionRow[];
+    return rows.map(suggestionFromRow);
+  }
+
+  deleteSuggestion(id: string): void {
+    const result = this.db.prepare('DELETE FROM suggestions WHERE id = ?').run(id);
+    if (result.changes === 0) {
+      throw new Error(`Unknown suggestion: ${id}`);
+    }
+  }
+
+  // ---- Team group chat ---------------------------------------------------
+
+  getTeamMessages(teamId: string, limit = 200): TeamMessage[] {
+    const cap = Number.isFinite(limit) ? Math.max(1, Math.min(Math.trunc(limit), 500)) : 200;
+    const rows = this.db
+      .prepare(
+        `SELECT id, teamId, userId, authorName, text, createdAt
+         FROM messages
+         WHERE teamId = ?
+         ORDER BY createdAt DESC, rowid DESC
+         LIMIT ?`,
+      )
+      .all(teamId, cap) as MessageRow[];
+    return rows.map(messageFromRow).reverse();
+  }
+
+  addTeamMessage(input: { teamId: string; userId: string; authorName: string; text: unknown }): TeamMessage {
+    if (typeof input.text !== 'string') throw new Error('text is required');
+    const text = clampText(input.text.trim(), MAX_MESSAGE_CHARS);
+    if (!text) throw new Error('text is required');
+    const authorName = clampText((input.authorName ?? '').trim() || 'Anonymous', 80);
+    const message: TeamMessage = {
+      id: newRowId('m'),
+      teamId: input.teamId,
+      userId: input.userId,
+      authorName,
+      text,
+      createdAt: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO messages (id, teamId, userId, authorName, text, createdAt)
+         VALUES (@id, @teamId, @userId, @authorName, @text, @createdAt)`,
+      )
+      .run(message);
+    return message;
   }
 }

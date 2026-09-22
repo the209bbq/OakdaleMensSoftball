@@ -79,6 +79,13 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     return user.role === 'manager' && user.teamId === teamId;
   };
 
+  /** Team members (any role on that team) and admins may read/post team chat. */
+  const canAccessTeamChat = (user: PublicUser | undefined, teamId: string): boolean => {
+    if (!user) return false;
+    if (user.role === 'admin') return true;
+    return user.teamId === teamId;
+  };
+
   const setSessionCookie = (res: Response, userId: string) => {
     res.cookie(SESSION_COOKIE, createSessionToken(userId, sessionSecret), {
       httpOnly: true,
@@ -231,6 +238,83 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       if (countdownLabel !== undefined) payload.countdownLabel = countdownLabel;
       if (countdownTarget !== undefined) payload.countdownTarget = countdownTarget;
       res.json(store.setLanding(payload));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  // ---- Suggestions (public submit; admin-only reads).
+  // Routing suggestions to an external place (email/Slack) can be added later;
+  // for now admins view them in-app.
+  api.post('/suggestions', (req: Request, res: Response) => {
+    try {
+      const { text, name } = req.body ?? {};
+      let authorName: string | null | undefined;
+      if (typeof name === 'string') {
+        authorName = name;
+      } else if (req.user) {
+        authorName = req.user.name;
+      } else {
+        authorName = null;
+      }
+      const suggestion = store.addSuggestion({ text, authorName });
+      res.status(201).json(suggestion);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.get('/suggestions', requireAdmin, (_req: Request, res: Response) => {
+    res.json(store.listSuggestions());
+  });
+
+  api.delete('/suggestions/:id', requireAdmin, (req: Request, res: Response) => {
+    try {
+      store.deleteSuggestion(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      const message = (err as Error).message;
+      if (message.startsWith('Unknown suggestion')) {
+        res.status(404).json({ error: 'Suggestion not found' });
+        return;
+      }
+      res.status(400).json({ error: message });
+    }
+  });
+
+  // ---- Team group chat (team members + admins) --------------------------
+
+  api.get('/teams/:id/messages', requireAuth, (req: Request, res: Response) => {
+    const team = store.getTeam(req.params.id);
+    if (!team) {
+      res.status(404).json({ error: 'Team not found' });
+      return;
+    }
+    if (!canAccessTeamChat(req.user, team.id)) {
+      res.status(403).json({ error: 'You can only access your own team chat' });
+      return;
+    }
+    res.json(store.getTeamMessages(team.id));
+  });
+
+  api.post('/teams/:id/messages', requireAuth, (req: Request, res: Response) => {
+    const team = store.getTeam(req.params.id);
+    if (!team) {
+      res.status(404).json({ error: 'Team not found' });
+      return;
+    }
+    if (!canAccessTeamChat(req.user, team.id)) {
+      res.status(403).json({ error: 'You can only access your own team chat' });
+      return;
+    }
+    try {
+      const message = store.addTeamMessage({
+        teamId: team.id,
+        userId: req.user!.id,
+        authorName: req.user!.name,
+        text: (req.body ?? {}).text,
+      });
+      res.status(201).json(message);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
