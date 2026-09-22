@@ -61,6 +61,14 @@ export interface TeamMember {
   position?: string;
   photoUrl?: string;
   isManager?: boolean;
+  checkIn?: 'in' | 'out' | null;
+}
+
+export type CheckInStatus = 'in' | 'out';
+
+export interface CurrentWeek {
+  week: number;
+  date: string;
 }
 
 export interface ManagerAuthorization {
@@ -86,6 +94,7 @@ export interface RosterResponse {
   roster: Player[];
   members: TeamMember[];
   manager: TeamManagerSummary | null;
+  currentWeek: CurrentWeek | null;
 }
 
 export interface ProfileUpdate {
@@ -115,6 +124,12 @@ export const api = {
   getTeams: () => request<Team[]>('/api/teams'),
   getRoster: (teamId: string) => request<RosterResponse>(`/api/teams/${teamId}/roster`),
   getRules: () => request<{ rules: string }>('/api/rules'),
+  getCurrentWeek: () => request<CurrentWeek | null>('/api/current-week'),
+  checkIn: (week: number, status: CheckInStatus | null) =>
+    request<{ ok: true; week: number; status: CheckInStatus | null }>('/api/checkin', {
+      method: 'POST',
+      body: JSON.stringify({ week, status }),
+    }),
 
   // Auth
   me: () => request<{ user: User | null }>('/api/auth/me'),

@@ -169,6 +169,10 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     res.json(withTeamNames(store));
   });
 
+  api.get('/current-week', (_req: Request, res: Response) => {
+    res.json(store.getCurrentWeek());
+  });
+
   api.get('/teams/:id/roster', (req: Request, res: Response) => {
     const team = store.getTeam(req.params.id);
     if (!team) {
@@ -180,7 +184,31 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       roster: store.getRoster(team.id),
       members: store.getTeamMembers(team.id),
       manager: store.getTeamManager(team.id),
+      currentWeek: store.getCurrentWeek(),
     });
+  });
+
+  api.post('/checkin', requireAuth, (req: Request, res: Response) => {
+    const week = Number((req.body ?? {}).week);
+    const status = (req.body ?? {}).status;
+    if (!Number.isInteger(week)) {
+      res.status(400).json({ error: 'week is not a scheduled week' });
+      return;
+    }
+    if (status !== 'in' && status !== 'out' && status !== null) {
+      res.status(400).json({ error: "status must be 'in', 'out', or null" });
+      return;
+    }
+    if (!req.user!.teamId) {
+      res.status(400).json({ error: 'You must be on a team to check in' });
+      return;
+    }
+    try {
+      const next = store.setCheckIn(req.user!.id, week, status);
+      res.json({ ok: true, week, status: next });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
   });
 
   api.get('/rules', (_req: Request, res: Response) => {

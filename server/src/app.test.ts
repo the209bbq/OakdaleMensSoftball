@@ -20,6 +20,16 @@ const SEEDED_TEAM_NAMES = [
   'Whiskey Rebels',
 ];
 
+function utcToday(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addUtcDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 function makeApp() {
   const store = new LeagueStore(null);
   store.ensureAdmin('admin@oakdale.local', 'Commish', 'admin-password');
@@ -1155,3 +1165,136 @@ describe('Manager email authorizations', () => {
     expect(roster.body.members[1]).toMatchObject({ name: 'Pat', isManager: false });
   });
 });
+
+describe('Weekly check-in', () => {
+  it('getCurrentWeek is week 1 before the season, that week on a game date, last week after, and null with no games', () => {
+    const today = utcToday();
+
+    const empty = makeApp().store;
+    expect(empty.getCurrentWeek()).toBeNull();
+
+    const before = makeApp().store;
+    const opener = addUtcDays(today, 14);
+    before.generateSchedule({ startDate: opener, weeks: 3 });
+    expect(before.getCurrentWeek()).toEqual({ week: 1, date: opener });
+
+    const onDate = makeApp().store;
+    onDate.generateSchedule({ startDate: today, weeks: 3 });
+    expect(onDate.getCurrentWeek()).toEqual({ week: 1, date: today });
+
+    const mid = makeApp().store;
+    mid.generateSchedule({ startDate: addUtcDays(today, -7), weeks: 3 });
+    expect(mid.getCurrentWeek()).toEqual({ week: 2, date: today });
+
+    const after = makeApp().store;
+    after.generateSchedule({ startDate: addUtcDays(today, -28), weeks: 3 });
+    const last = after.getCurrentWeek();
+    expect(last?.week).toBe(3);
+    expect(last?.date).toBe(addUtcDays(today, -14));
+  });
+
+  it('GET /api/current-week is public and returns the store result', async () => {
+    const { app, store } = makeApp();
+    const empty = await request(app).get('/api/current-week');
+    expect(empty.status).toBe(200);
+    expect(empty.body).toBeNull();
+
+    store.generateSchedule({ startDate: utcToday(), weeks: 2 });
+    const res = await request(app).get('/api/current-week');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(store.getCurrentWeek());
+  });
+
+  it('lets a player on a team set in/out and clear a check-in', () => {
+    const { store } = makeApp();
+    store.generateSchedule({ startDate: utcToday(), weeks: 3 });
+    const player = store.registerUser({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    store.setUserTeam(player.id, TEAM_OWN);
+
+    expect(store.setCheckIn(player.id, 1, 'in')).toBe('in');
+    expect(store.getCheckInsForWeek(1).get(player.id)).toBe('in');
+    expect(store.setCheckIn(player.id, 1, 'out')).toBe('out');
+    expect(store.getCheckInsForWeek(1).get(player.id)).toBe('out');
+    expect(store.setCheckIn(player.id, 1, null)).toBeNull();
+    expect(store.getCheckInsForWeek(1).has(player.id)).toBe(false);
+  });
+
+  it('rejects check-in from a user with no team and an invalid week', () => {
+    const { store } = makeApp();
+    store.generateSchedule({ startDate: utcToday(), weeks: 3 });
+    const admin = store.getUserByEmail('admin@oakdale.local')!;
+    expect(admin.teamId).toBeNull();
+    expect(() => store.setCheckIn(admin.id, 1, 'in')).toThrow(/on a team/i);
+
+    const player = store.registerUser({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    expect(() => store.setCheckIn(player.id, 1, 'in')).toThrow(/on a team/i);
+
+    store.setUserTeam(player.id, TEAM_OWN);
+    expect(() => store.setCheckIn(player.id, 99, 'in')).toThrow(/scheduled week/i);
+    expect(() => store.setCheckIn('missing-user', 1, 'in')).toThrow(/unknown user/i);
+  });
+
+  it('POST /api/checkin is 401 unauthenticated, 400 without a team or for a bad week', async () => {
+    const { app, store } = makeApp();
+    store.generateSchedule({ startDate: utcToday(), weeks: 3 });
+    const current = store.getCurrentWeek()!;
+
+    const anon = await request(app).post('/api/checkin').send({ week: current.week, status: 'in' });
+    expect(anon.status).toBe(401);
+
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const adminPost = await admin.post('/api/checkin').send({ week: current.week, status: 'in' });
+    expect(adminPost.status).toBe(400);
+    expect(adminPost.body.error).toMatch(/on a team/i);
+
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    const noTeam = await player.post('/api/checkin').send({ week: current.week, status: 'in' });
+    expect(noTeam.status).toBe(400);
+
+    await player.put('/api/auth/team').send({ teamId: TEAM_OWN });
+    const badWeek = await player.post('/api/checkin').send({ week: 99, status: 'in' });
+    expect(badWeek.status).toBe(400);
+
+    const ok = await player.post('/api/checkin').send({ week: current.week, status: 'in' });
+    expect(ok.status).toBe(200);
+    expect(ok.body).toEqual({ ok: true, week: current.week, status: 'in' });
+
+    const gone = await player.post('/api/checkin').send({ week: current.week, status: null });
+    expect(gone.status).toBe(200);
+    expect(gone.body).toEqual({ ok: true, week: current.week, status: null });
+  });
+
+  it('roster members reflect the current-week check-in and not other weeks', async () => {
+    const { app, store } = makeApp();
+    store.generateSchedule({ startDate: utcToday(), weeks: 3 });
+    const current = store.getCurrentWeek()!;
+    expect(current.week).toBe(1);
+
+    const player = request.agent(app);
+    const reg = await player
+      .post('/api/auth/register')
+      .send({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    await player.put('/api/auth/team').send({ teamId: TEAM_OWN });
+
+    const otherWeek = current.week + 1;
+    await player.post('/api/checkin').send({ week: otherWeek, status: 'out' });
+
+    let roster = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
+    expect(roster.status).toBe(200);
+    expect(roster.body.currentWeek).toEqual(current);
+    let member = roster.body.members.find((m: { id: string }) => m.id === reg.body.id);
+    expect(member.checkIn).toBeNull();
+
+    await player.post('/api/checkin').send({ week: current.week, status: 'in' });
+    roster = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
+    member = roster.body.members.find((m: { id: string }) => m.id === reg.body.id);
+    expect(member.checkIn).toBe('in');
+
+    await player.post('/api/checkin').send({ week: current.week, status: null });
+    roster = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
+    member = roster.body.members.find((m: { id: string }) => m.id === reg.body.id);
+    expect(member.checkIn).toBeNull();
+  });
+});
+
