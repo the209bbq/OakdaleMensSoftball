@@ -143,6 +143,21 @@ export interface TeamMessage {
   createdAt: string;
 }
 
+export interface TestDataGenerateResult {
+  alreadySeeded?: boolean;
+  guestsCreated: number;
+  checkIns: number;
+  messages: number;
+  gamesPlayed: number;
+}
+
+export interface TestDataClearResult {
+  guestsRemoved: number;
+  checkInsRemoved: number;
+  messagesRemoved: number;
+  gamesReset: number;
+}
+
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(url, {
     credentials: 'same-origin',
@@ -246,4 +261,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ text }),
     }),
+
+  // TEST DATA (simulation, admin only)
+  generateTestData: () =>
+    request<TestDataGenerateResult>('/api/admin/test-data/generate', { method: 'POST' }),
+  clearTestData: () =>
+    request<TestDataClearResult>('/api/admin/test-data/clear', { method: 'POST' }),
 };

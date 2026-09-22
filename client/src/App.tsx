@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type User } from './api';
+import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
 
@@ -1746,6 +1746,9 @@ function Admin() {
   const [authorizations, setAuthorizations] = useState<ManagerAuthorization[]>([]);
   const [authorizing, setAuthorizing] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [testDataConfirm, setTestDataConfirm] = useState<'generate' | 'clear' | null>(null);
+  const [testDataBusy, setTestDataBusy] = useState(false);
+  const [testDataSummary, setTestDataSummary] = useState<string | null>(null);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
 
@@ -1843,11 +1846,142 @@ function Admin() {
     }
   }
 
+  function formatGenerateSummary(result: TestDataGenerateResult): string {
+    if (result.alreadySeeded) {
+      return 'Already seeded — guest accounts already exist. Clear test data first to re-seed.';
+    }
+    return `Created ${result.guestsCreated} guests, ${result.checkIns} check-ins, ${result.messages} messages, ${result.gamesPlayed} games scored`;
+  }
+
+  function formatClearSummary(result: TestDataClearResult): string {
+    return `Removed ${result.guestsRemoved} guests, reset ${result.gamesReset} games`;
+  }
+
+  async function runGenerateTestData() {
+    setTestDataBusy(true);
+    setError(null);
+    setMessage(null);
+    setTestDataSummary(null);
+    try {
+      const result = await api.generateTestData();
+      setTestDataSummary(formatGenerateSummary(result));
+      setTestDataConfirm(null);
+      load();
+    } catch (err) {
+      const text = (err as Error).message;
+      if (/already seeded/i.test(text)) {
+        setTestDataSummary('Already seeded — guest accounts already exist. Clear test data first to re-seed.');
+        setTestDataConfirm(null);
+      } else {
+        setError(text);
+      }
+    } finally {
+      setTestDataBusy(false);
+    }
+  }
+
+  async function runClearTestData() {
+    setTestDataBusy(true);
+    setError(null);
+    setMessage(null);
+    setTestDataSummary(null);
+    try {
+      const result = await api.clearTestData();
+      setTestDataSummary(formatClearSummary(result));
+      setTestDataConfirm(null);
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setTestDataBusy(false);
+    }
+  }
+
   return (
     <section className="card">
       <h2>League Admin</h2>
       {error && <p className="error inline-error">{error}</p>}
       {message && <p className="message">{message}</p>}
+
+      <div className="test-data-panel">
+        <h3>Test Data (simulation)</h3>
+        <p className="test-data-warning">
+          For testing only. Generates 72 guest players (<code>@sim.local</code>), check-ins, team chat, and
+          season scores. Clear removes those guests and resets standings — demo accounts, teams, landing, and
+          rules stay put.
+        </p>
+        {testDataSummary && <p className="message">{testDataSummary}</p>}
+        {testDataConfirm === 'generate' ? (
+          <div className="test-data-confirm">
+            <p>Create 72 guest accounts, fill check-ins/chat, and score the season?</p>
+            <div className="test-data-actions">
+              <button
+                type="button"
+                className="primary-btn"
+                disabled={testDataBusy}
+                onClick={() => void runGenerateTestData()}
+              >
+                {testDataBusy ? 'Generating…' : 'Confirm generate'}
+              </button>
+              <button
+                type="button"
+                className="link-btn"
+                disabled={testDataBusy}
+                onClick={() => setTestDataConfirm(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : testDataConfirm === 'clear' ? (
+          <div className="test-data-confirm">
+            <p>Remove all <code>@sim.local</code> guests and reset every game to unplayed?</p>
+            <div className="test-data-actions">
+              <button
+                type="button"
+                className="test-data-clear-btn"
+                disabled={testDataBusy}
+                onClick={() => void runClearTestData()}
+              >
+                {testDataBusy ? 'Clearing…' : 'Confirm clear'}
+              </button>
+              <button
+                type="button"
+                className="link-btn"
+                disabled={testDataBusy}
+                onClick={() => setTestDataConfirm(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="test-data-actions">
+            <button
+              type="button"
+              className="primary-btn"
+              disabled={testDataBusy}
+              onClick={() => {
+                setTestDataSummary(null);
+                setTestDataConfirm('generate');
+              }}
+            >
+              Generate test data
+            </button>
+            <button
+              type="button"
+              className="test-data-clear-btn"
+              disabled={testDataBusy}
+              onClick={() => {
+                setTestDataSummary(null);
+                setTestDataConfirm('clear');
+              }}
+            >
+              Clear test data
+            </button>
+          </div>
+        )}
+      </div>
 
       <h3>Suggestions</h3>
       {/* Routing suggestions to an external place can be added later; for now admins view them in-app. */}

@@ -32,6 +32,28 @@ export const MAX_LANDING_LABEL_CHARS = 80;
 export const MAX_SUGGESTION_CHARS = 2000;
 export const MAX_MESSAGE_CHARS = 2000;
 
+/** Guest accounts created by the admin Test Data simulator. Easy to find/remove. */
+export const SIM_EMAIL_DOMAIN = '@sim.local';
+export const SIM_GUEST_PASSWORD = 'guestpass1';
+export const SIM_GUEST_COUNT = 72;
+export const SIM_GUESTS_PER_TEAM = 9;
+const SIM_RNG_SEED = 20260922;
+
+export interface TestDataGenerateSummary {
+  alreadySeeded: boolean;
+  guestsCreated: number;
+  checkIns: number;
+  messages: number;
+  gamesPlayed: number;
+}
+
+export interface TestDataClearSummary {
+  guestsRemoved: number;
+  checkInsRemoved: number;
+  messagesRemoved: number;
+  gamesReset: number;
+}
+
 export const DEFAULT_LANDING: LandingContent = {
   headline: 'Welcome to the Oakdale Mens Softball League',
   body: 'Season updates and announcements will appear here. TODO: add real content.',
@@ -374,9 +396,37 @@ function messageFromRow(row: MessageRow): TeamMessage {
   };
 }
 
+let rowIdSeq = 0;
+
 function newRowId(prefix: string): string {
-  return `${prefix}${Date.now()}${Math.floor(Math.random() * 10000)}`;
+  rowIdSeq = (rowIdSeq + 1) % 100000;
+  return `${prefix}${Date.now()}${rowIdSeq}${Math.floor(Math.random() * 1000)}`;
 }
+
+/** Deterministic 0–1 RNG (mulberry32) so simulated scores/chat stay stable. */
+function seededRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (Math.imul(a, 0x2c1b3c6d) + 0x9e3779b9) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const SIM_CHAT_LINES = [
+  'See everyone at the field!',
+  "I'll bring the bats",
+  'Running 5 min late',
+  'Who has the extra bases?',
+  "Let's go 🥎",
+  'Great game last week',
+  'I can grab drinks after',
+  'Field 2 tonight, right?',
+  'Anyone need a ride?',
+  'Bring sunscreen — it is bright out',
+];
 
 /**
  * SQLite-backed data store. The public interface matches the previous
@@ -1354,5 +1404,155 @@ export class LeagueStore {
       )
       .run(message);
     return message;
+  }
+
+  // ---- TEST DATA (simulation) --------------------------------------------
+  // Admin-only utility. Guests use the @sim.local domain so they are easy
+  // to find and wipe without touching real/demo accounts or league config.
+
+  private listSimUsers(): User[] {
+    const rows = this.db
+      .prepare('SELECT * FROM users WHERE email LIKE ?')
+      .all(`%${SIM_EMAIL_DOMAIN}`) as UserRow[];
+    return rows.map(userFromRow).filter((u) => u.email.endsWith(SIM_EMAIL_DOMAIN));
+  }
+
+  /**
+   * Seed a realistic full league of guest players, current-week check-ins,
+   * team chat, and season scores. Idempotent: if any @sim.local guests already
+   * exist, nothing is duplicated.
+   */
+  generateTestData(): TestDataGenerateSummary {
+    const existing = this.listSimUsers();
+    if (existing.length > 0) {
+      return { alreadySeeded: true, guestsCreated: 0, checkIns: 0, messages: 0, gamesPlayed: 0 };
+    }
+
+    const teams = this.getTeams();
+    if (teams.length === 0) {
+      throw new Error('Need at least one team to generate test data');
+    }
+
+    const rng = seededRng(SIM_RNG_SEED);
+    const passwordHash = hashPassword(SIM_GUEST_PASSWORD);
+    const createdAt = new Date().toISOString();
+
+    const run = this.db.transaction(() => {
+      if (this.getSchedule().length === 0) {
+        this.generateSchedule();
+      }
+
+      const guests: User[] = [];
+      const maxGuests = Math.min(SIM_GUEST_COUNT, teams.length * SIM_GUESTS_PER_TEAM);
+      for (let i = 1; i <= maxGuests; i++) {
+        const teamIndex = Math.floor((i - 1) / SIM_GUESTS_PER_TEAM);
+        if (teamIndex >= teams.length) break;
+        const user: User = {
+          id: `u-sim-guest-${i}`,
+          email: `guest${i}${SIM_EMAIL_DOMAIN}`,
+          name: `Guest ${i}`,
+          role: 'player',
+          teamId: teams[teamIndex].id,
+          passwordHash,
+          createdAt,
+        };
+        this.insertUserRow(user);
+        guests.push(user);
+      }
+
+      let checkIns = 0;
+      const current = this.getCurrentWeek();
+      if (current) {
+        for (let i = 0; i < guests.length; i++) {
+          // ~75% in, ~25% out (every 4th guest is out).
+          const status: CheckInStatus = (i + 1) % 4 === 0 ? 'out' : 'in';
+          this.setCheckIn(guests[i].id, current.week, status);
+          checkIns += 1;
+        }
+      }
+
+      let messages = 0;
+      for (const team of teams) {
+        const teamGuests = guests.filter((g) => g.teamId === team.id);
+        if (teamGuests.length === 0) continue;
+        const count = 3 + Math.floor(rng() * 3); // 3–5
+        for (let m = 0; m < count; m++) {
+          const author = teamGuests[m % teamGuests.length];
+          const text = SIM_CHAT_LINES[Math.floor(rng() * SIM_CHAT_LINES.length)];
+          this.addTeamMessage({
+            teamId: team.id,
+            userId: author.id,
+            authorName: author.name,
+            text,
+          });
+          messages += 1;
+        }
+      }
+
+      const skill = new Map(teams.map((team, index) => [team.id, teams.length - index]));
+      let gamesPlayed = 0;
+      for (const game of this.getSchedule()) {
+        const homeSkill = skill.get(game.homeTeamId) ?? 4;
+        const awaySkill = skill.get(game.awayTeamId) ?? 4;
+        let homeScore = 4 + homeSkill + Math.floor(rng() * 6);
+        let awayScore = 4 + awaySkill + Math.floor(rng() * 6);
+        if (rng() < 0.1) {
+          awayScore = homeScore;
+        } else if (homeScore === awayScore) {
+          homeScore += 1;
+        }
+        this.recordResult(game.id, homeScore, awayScore);
+        gamesPlayed += 1;
+      }
+
+      return {
+        alreadySeeded: false,
+        guestsCreated: guests.length,
+        checkIns,
+        messages,
+        gamesPlayed,
+      } satisfies TestDataGenerateSummary;
+    });
+
+    return run();
+  }
+
+  /**
+   * Remove every @sim.local guest (and their check-ins/messages) and reset
+   * the season to unplayed. Demo/admin accounts, teams, landing, rules, and
+   * suggestions are left alone.
+   */
+  clearTestData(): TestDataClearSummary {
+    const run = this.db.transaction(() => {
+      const simUsers = this.listSimUsers();
+      const ids = simUsers.map((u) => u.id);
+      let checkInsRemoved = 0;
+      let messagesRemoved = 0;
+
+      if (ids.length > 0) {
+        const placeholders = ids.map(() => '?').join(',');
+        checkInsRemoved = this.db
+          .prepare(`DELETE FROM check_ins WHERE userId IN (${placeholders})`)
+          .run(...ids).changes;
+        messagesRemoved = this.db
+          .prepare(`DELETE FROM messages WHERE userId IN (${placeholders})`)
+          .run(...ids).changes;
+        this.db.prepare(`DELETE FROM users WHERE id IN (${placeholders})`).run(...ids);
+      }
+
+      const gamesReset = (
+        this.db.prepare('SELECT COUNT(*) AS c FROM games').get() as { c: number }
+      ).c;
+      this.db.prepare('UPDATE games SET homeScore = NULL, awayScore = NULL, played = 0').run();
+
+      return {
+        guestsRemoved: simUsers.length,
+        checkInsRemoved,
+        messagesRemoved,
+        gamesReset,
+      } satisfies TestDataClearSummary;
+    });
+
+    return run();
   }
 }

@@ -437,4 +437,60 @@ describe('App', () => {
       expect(screen.getByText('The season is underway!')).toBeInTheDocument();
     });
   });
+
+  it('lets an admin generate and clear test data from the Admin tab after confirming', async () => {
+    const adminUser = {
+      id: 'u-admin',
+      email: 'admin@oakdale.local',
+      name: 'Commish',
+      role: 'admin' as const,
+      teamId: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: adminUser });
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/admin/test-data/generate') && init?.method === 'POST') {
+          return jsonOk({ guestsCreated: 72, checkIns: 72, messages: 28, gamesPlayed: 44 });
+        }
+        if (url.includes('/api/admin/test-data/clear') && init?.method === 'POST') {
+          return jsonOk({ guestsRemoved: 72, checkInsRemoved: 72, messagesRemoved: 28, gamesReset: 44 });
+        }
+        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/manager-emails')) return jsonOk([]);
+        if (url.includes('/api/users')) return jsonOk([adminUser]);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Admin' }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Test Data (simulation)' })).toBeInTheDocument();
+    });
+    expect(screen.getByText(/for testing only/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate test data' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm generate' }));
+    await waitFor(() => {
+      expect(
+        screen.getByText('Created 72 guests, 72 check-ins, 28 messages, 44 games scored'),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear test data' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm clear' }));
+    await waitFor(() => {
+      expect(screen.getByText('Removed 72 guests, reset 44 games')).toBeInTheDocument();
+    });
+  });
 });

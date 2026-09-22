@@ -572,6 +572,29 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     res.json(store.revokeManagerAuthorization(email));
   });
 
+  // ---- TEST DATA (simulation, admin only) --------------------------------
+
+  api.post('/admin/test-data/generate', requireAdmin, (_req: Request, res: Response) => {
+    try {
+      const summary = store.generateTestData();
+      if (summary.alreadySeeded) {
+        res.status(409).json({ error: 'Test data already seeded', ...summary });
+        return;
+      }
+      res.json(summary);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.post('/admin/test-data/clear', requireAdmin, (_req: Request, res: Response) => {
+    try {
+      res.json(store.clearTestData());
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   app.use('/api', api);
 
   const dist = options.clientDist;

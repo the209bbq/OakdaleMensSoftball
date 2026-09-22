@@ -1473,6 +1473,68 @@ body {
   padding: 0 0 0.45rem;
 }
 
+/* Admin Test Data (simulation) */
+.test-data-panel {
+  margin: 0.4rem 0 1.4rem;
+  padding: 0.9rem 1rem;
+  border: 1px dashed #d4a017;
+  border-radius: 10px;
+  background: #fffbeb;
+}
+
+.test-data-panel h3 {
+  margin: 0 0 0.4rem;
+}
+
+.test-data-warning {
+  margin: 0 0 0.75rem;
+  color: #92400e;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.test-data-warning code,
+.test-data-confirm code {
+  font-size: 0.82em;
+}
+
+.test-data-confirm p {
+  margin: 0 0 0.65rem;
+  font-size: 0.9rem;
+}
+
+.test-data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.test-data-panel .primary-btn {
+  margin-top: 0;
+  padding: 0.45rem 0.95rem;
+}
+
+.test-data-clear-btn {
+  background: #fff;
+  color: #9b1c1c;
+  border: 1px solid #f1aeb5;
+  border-radius: 8px;
+  padding: 0.45rem 0.95rem;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.test-data-clear-btn:hover:not(:disabled) {
+  background: #fff5f5;
+}
+
+.test-data-clear-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 @media (max-width: 400px) {
   .user-meta {
     display: none;
