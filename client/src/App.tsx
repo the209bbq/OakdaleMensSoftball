@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamAttendance, type TeamMember, type User } from './api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
 
@@ -21,6 +21,12 @@ function canManageTeam(user: User | null, teamId: string | null): boolean {
   return user.role === 'manager' && user.teamId === teamId;
 }
 
+/** Signed-in team members and admins can open team chat. */
+function canOpenTeamChat(user: User | null): boolean {
+  if (!user) return false;
+  return user.role === 'admin' || Boolean(user.teamId);
+}
+
 function roleLabel(role: Role): string {
   if (role === 'admin') return 'Admin';
   if (role === 'manager') return 'Team Manager';
@@ -39,11 +45,16 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('home');
   const [authOpen, setAuthOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   // If a non-admin lands on the admin tab (e.g. after logout), bounce them out.
   useEffect(() => {
     if (tab === 'admin' && user?.role !== 'admin') setTab('home');
   }, [tab, user]);
+
+  useEffect(() => {
+    if (!canOpenTeamChat(user)) setChatOpen(false);
+  }, [user]);
 
   return (
     <div className="app-shell">
@@ -54,7 +65,19 @@ export default function App() {
             <span className="app-bar-title">Oakdale Mens Softball League</span>
             <span className="app-bar-sub">{TAB_TITLES[tab]}</span>
           </div>
-          <AuthControl onSignIn={() => setAuthOpen(true)} onEditProfile={() => setProfileOpen(true)} />
+          <div className="app-bar-actions">
+            {canOpenTeamChat(user) && (
+              <button
+                className="chat-icon-btn"
+                type="button"
+                aria-label="Team chat"
+                onClick={() => setChatOpen(true)}
+              >
+                <ChatIcon />
+              </button>
+            )}
+            <AuthControl onSignIn={() => setAuthOpen(true)} onEditProfile={() => setProfileOpen(true)} />
+          </div>
         </div>
       </header>
 
@@ -80,6 +103,7 @@ export default function App() {
 
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
       {profileOpen && user && <ProfileModal onClose={() => setProfileOpen(false)} />}
+      {chatOpen && user && canOpenTeamChat(user) && <TeamChatModal onClose={() => setChatOpen(false)} />}
     </div>
   );
 }
@@ -525,6 +549,236 @@ function LandingPage() {
           <div className="landing-body">{landing.body}</div>
         )}
       </section>
+
+      <SuggestionsBox />
+    </div>
+  );
+}
+
+function SuggestionsBox() {
+  const { user } = useAuth();
+  const [text, setText] = useState('');
+  const [name, setName] = useState(user?.name ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [thanks, setThanks] = useState(false);
+
+  useEffect(() => {
+    if (user?.name && !name) setName(user.name);
+  }, [user?.name, name]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const payload: { text: string; name?: string } = { text };
+      const trimmedName = name.trim();
+      if (trimmedName) payload.name = trimmedName;
+      await api.submitSuggestion(payload);
+      setText('');
+      setName(user?.name ?? '');
+      setThanks(true);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card landing-suggestions">
+      <h2>Suggestions</h2>
+      {/* Routing suggestions to an external place can be added later; for now admins view them in-app. */}
+      {thanks ? (
+        <div className="suggestions-thanks">
+          <p className="message">Thanks for the suggestion!</p>
+          <button className="link-btn" type="button" onClick={() => setThanks(false)}>
+            Send another
+          </button>
+        </div>
+      ) : (
+        <form className="suggestions-form" onSubmit={submit}>
+          <label className="field">
+            Suggestion
+            <textarea
+              aria-label="Suggestion"
+              placeholder="Ideas for the league, fields, schedule…"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={4}
+              maxLength={2000}
+              required
+            />
+          </label>
+          <label className="field">
+            Your name (optional)
+            <input
+              aria-label="Your name (optional)"
+              placeholder="Anonymous if left blank"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+            />
+          </label>
+          {error && <p className="error inline-error">{error}</p>}
+          <button className="primary-btn" type="submit" disabled={busy || !text.trim()}>
+            {busy ? 'Sending…' : 'Submit'}
+          </button>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function formatMessageTime(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const diff = Date.now() - parsed.getTime();
+  if (diff < 45_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.max(1, Math.floor(diff / 60_000))}m`;
+  if (diff < 86_400_000) return `${Math.max(1, Math.floor(diff / 3_600_000))}h`;
+  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function TeamChatModal({ onClose }: { onClose: () => void }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [teamId, setTeamId] = useState<string>(isAdmin ? '' : user?.teamId ?? '');
+  const [messages, setMessages] = useState<TeamMessage[]>([]);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    api
+      .getTeams()
+      .then((next) => {
+        setTeams(next);
+        setTeamId((current) => current || user?.teamId || next[0]?.id || '');
+      })
+      .catch((err) => setError((err as Error).message));
+  }, [user?.teamId]);
+
+  useEffect(() => {
+    if (!teamId) return undefined;
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const next = await api.getTeamMessages(teamId);
+        if (!cancelled) {
+          setMessages(next);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) setError((err as Error).message);
+      }
+    }
+
+    void load();
+    const timer = window.setInterval(() => {
+      void load();
+    }, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [teamId]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  const activeTeam = teams.find((t) => t.id === teamId);
+  const title = isAdmin
+    ? activeTeam
+      ? `${activeTeam.name} chat`
+      : 'Team chat'
+    : activeTeam
+      ? `${activeTeam.name}`
+      : 'Team chat';
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    if (!teamId || !draft.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const posted = await api.sendTeamMessage(teamId, draft);
+      setMessages((prev) => [...prev.filter((m) => m.id !== posted.id), posted]);
+      setDraft('');
+      const latest = await api.getTeamMessages(teamId);
+      setMessages(latest);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal chat-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Team chat">
+        <h2 className="modal-title">{title}</h2>
+        {isAdmin && (
+          <label className="field chat-team-picker">
+            Team
+            <select
+              aria-label="Chat team"
+              value={teamId}
+              onChange={(e) => {
+                setTeamId(e.target.value);
+                setMessages([]);
+              }}
+            >
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <div className="chat-messages" ref={listRef}>
+          {messages.length === 0 ? (
+            <p className="chat-empty">No messages yet. Say hi to the team.</p>
+          ) : (
+            messages.map((m) => {
+              const mine = m.userId === user?.id;
+              return (
+                <div key={m.id} className={`chat-bubble ${mine ? 'mine' : ''}`}>
+                  <div className="chat-bubble-meta">
+                    <span className="chat-bubble-author">{m.authorName}</span>
+                    <span className="chat-bubble-time">{formatMessageTime(m.createdAt)}</span>
+                  </div>
+                  <p className="chat-bubble-text">{m.text}</p>
+                </div>
+              );
+            })
+          )}
+        </div>
+        {error && <p className="error inline-error">{error}</p>}
+        <form className="chat-compose" onSubmit={send}>
+          <input
+            aria-label="Message"
+            placeholder="Message the team…"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            maxLength={2000}
+            autoComplete="off"
+          />
+          <button className="primary-btn" type="submit" disabled={busy || !draft.trim() || !teamId}>
+            {busy ? 'Sending…' : 'Send'}
+          </button>
+        </form>
+        <button className="modal-close" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+      </div>
     </div>
   );
 }
@@ -1491,6 +1745,7 @@ function Admin() {
   const [mgrTeamId, setMgrTeamId] = useState('');
   const [authorizations, setAuthorizations] = useState<ManagerAuthorization[]>([]);
   const [authorizing, setAuthorizing] = useState(false);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
 
@@ -1505,6 +1760,7 @@ function Admin() {
       })
       .catch((e) => setError(e.message));
     api.listManagerEmails().then(setAuthorizations).catch((e) => setError(e.message));
+    api.listSuggestions().then(setSuggestions).catch((e) => setError(e.message));
   }
   useEffect(load, []);
 
@@ -1575,13 +1831,54 @@ function Admin() {
     }
   }
 
+  async function removeSuggestion(id: string) {
+    setError(null);
+    setMessage(null);
+    try {
+      await api.deleteSuggestion(id);
+      setSuggestions((prev) => prev.filter((s) => s.id !== id));
+      setMessage('Suggestion removed.');
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   return (
     <section className="card">
       <h2>League Admin</h2>
       {error && <p className="error inline-error">{error}</p>}
       {message && <p className="message">{message}</p>}
 
-      <h3>Teams</h3>
+      <h3>Suggestions</h3>
+      {/* Routing suggestions to an external place can be added later; for now admins view them in-app. */}
+      {suggestions.length === 0 ? (
+        <p className="member-empty">No suggestions yet.</p>
+      ) : (
+        <ul className="suggestion-list">
+          {suggestions.map((s) => (
+            <li key={s.id} className="suggestion-row">
+              <div className="suggestion-main">
+                <p className="suggestion-text">{s.text}</p>
+                <p className="suggestion-meta">
+                  {s.authorName?.trim() || 'Anonymous'}
+                  {' · '}
+                  {formatSuggestionDate(s.createdAt)}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="link-btn danger"
+                onClick={() => removeSuggestion(s.id)}
+                aria-label={`Delete suggestion from ${s.authorName?.trim() || 'Anonymous'}`}
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h3 className="admin-users-heading">Teams</h3>
       <ul className="user-list">
         {teams.map((t) => (
           <li key={t.id} className="user-row">
@@ -1709,6 +2006,18 @@ function Admin() {
   );
 }
 
+function formatSuggestionDate(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function HomeIcon() {
   return (
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1763,6 +2072,14 @@ function GearIcon() {
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function ChatIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z" />
     </svg>
   );
 }

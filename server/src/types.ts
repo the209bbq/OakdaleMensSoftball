@@ -142,3 +142,21 @@ export interface Landing extends LandingContent {
   /** Explicit target, or the earliest scheduled game datetime when unset. */
   effectiveCountdownTarget: string | null;
 }
+
+/** Public suggestion submitted from the Home page. */
+export interface Suggestion {
+  id: string;
+  text: string;
+  authorName: string | null;
+  createdAt: string;
+}
+
+/** Team-scoped group-chat message. */
+export interface TeamMessage {
+  id: string;
+  teamId: string;
+  userId: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+}

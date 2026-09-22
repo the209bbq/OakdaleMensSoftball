@@ -127,6 +127,22 @@ export type LandingUpdate = Partial<
   Pick<Landing, 'headline' | 'body' | 'imageUrl' | 'countdownLabel' | 'countdownTarget'>
 >;
 
+export interface Suggestion {
+  id: string;
+  text: string;
+  authorName: string | null;
+  createdAt: string;
+}
+
+export interface TeamMessage {
+  id: string;
+  teamId: string;
+  userId: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+}
+
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(url, {
     credentials: 'same-origin',
@@ -214,4 +230,20 @@ export const api = {
     }),
   revokeManagerEmail: (email: string) =>
     request<{ ok: boolean }>(`/api/manager-emails/${encodeURIComponent(email)}`, { method: 'DELETE' }),
+
+  // Suggestions (public submit; admin list/delete). Routing to an external
+  // place can be added later; for now admins view them in-app.
+  submitSuggestion: (input: { text: string; name?: string }) =>
+    request<Suggestion>('/api/suggestions', { method: 'POST', body: JSON.stringify(input) }),
+  listSuggestions: () => request<Suggestion[]>('/api/suggestions'),
+  deleteSuggestion: (id: string) =>
+    request<{ ok: boolean }>(`/api/suggestions/${id}`, { method: 'DELETE' }),
+
+  // Team group chat
+  getTeamMessages: (teamId: string) => request<TeamMessage[]>(`/api/teams/${teamId}/messages`),
+  sendTeamMessage: (teamId: string, text: string) =>
+    request<TeamMessage>(`/api/teams/${teamId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
 };
