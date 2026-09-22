@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { LeagueStore } from './store.js';
-import type { PublicUser, TeamAttendance } from './types.js';
+import type { LandingContent, PublicUser, TeamAttendance } from './types.js';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_MS,
@@ -213,6 +213,27 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
   api.get('/rules', (_req: Request, res: Response) => {
     res.json({ rules: store.getRules() });
+  });
+
+  // ---- Landing page (public read; admin write) --------------------------
+
+  api.get('/landing', (_req: Request, res: Response) => {
+    res.json(store.getLanding());
+  });
+
+  api.put('/landing', requireAdmin, (req: Request, res: Response) => {
+    try {
+      const { headline, body, imageUrl, countdownLabel, countdownTarget } = req.body ?? {};
+      const payload: Partial<LandingContent> = {};
+      if (headline !== undefined) payload.headline = headline;
+      if (body !== undefined) payload.body = body;
+      if (imageUrl !== undefined) payload.imageUrl = imageUrl;
+      if (countdownLabel !== undefined) payload.countdownLabel = countdownLabel;
+      if (countdownTarget !== undefined) payload.countdownTarget = countdownTarget;
+      res.json(store.setLanding(payload));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
   });
 
   // ---- Rules management (admin only) ------------------------------------

@@ -127,3 +127,18 @@ export interface LeagueData {
   rules: string;
   pendingManagers: PendingManager[];
 }
+
+/** Editable landing-page fields stored as JSON in `settings.landing`. */
+export interface LandingContent {
+  headline: string;
+  body: string;
+  imageUrl: string | null;
+  countdownLabel: string;
+  countdownTarget: string | null;
+}
+
+/** Landing payload returned by GET/PUT /api/landing. */
+export interface Landing extends LandingContent {
+  /** Explicit target, or the earliest scheduled game datetime when unset. */
+  effectiveCountdownTarget: string | null;
+}

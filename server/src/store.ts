@@ -5,6 +5,8 @@ import type {
   CheckInStatus,
   CurrentWeek,
   Game,
+  Landing,
+  LandingContent,
   LeagueData,
   ManagerAuthorization,
   Player,
@@ -22,6 +24,17 @@ import { DEFAULT_LOCATION, generateRoundRobin, type GenerateOptions } from './sc
 import { hashPassword, verifyPassword } from './auth.js';
 
 export const MAX_PHOTO_URL_CHARS = 800000;
+export const MAX_LANDING_HEADLINE_CHARS = 200;
+export const MAX_LANDING_BODY_CHARS = 5000;
+export const MAX_LANDING_LABEL_CHARS = 80;
+
+export const DEFAULT_LANDING: LandingContent = {
+  headline: 'Welcome to the Oakdale Mens Softball League',
+  body: 'Season updates and announcements will appear here. TODO: add real content.',
+  imageUrl: null,
+  countdownLabel: 'Opening Day',
+  countdownTarget: null,
+};
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS teams (
@@ -152,6 +165,90 @@ function normalizePhotoUrl(value: unknown): string | null {
   return value;
 }
 
+/** Parse "6:00 PM" → 18:00, "7:30 PM" → 19:30, "18:00" → 18:00. */
+function parseGameClock(time: string): { hours: number; minutes: number } | null {
+  const match = String(time ?? '')
+    .trim()
+    .match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
+  if (!match) return null;
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  const ampm = match[3]?.toUpperCase();
+  if (ampm === 'PM' && hours < 12) hours += 12;
+  if (ampm === 'AM' && hours === 12) hours = 0;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return { hours, minutes };
+}
+
+/** Combine a YYYY-MM-DD date with a "6:00 PM"-style time into a naive local datetime. */
+export function combineGameDateTime(date: string, time: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const clock = parseGameClock(time) ?? { hours: 0, minutes: 0 };
+  const hh = String(clock.hours).padStart(2, '0');
+  const mm = String(clock.minutes).padStart(2, '0');
+  return `${date}T${hh}:${mm}:00`;
+}
+
+function parseStoredLanding(raw: string | undefined): LandingContent {
+  if (!raw) return { ...DEFAULT_LANDING };
+  try {
+    const parsed = JSON.parse(raw) as Partial<LandingContent>;
+    return {
+      headline: typeof parsed.headline === 'string' ? parsed.headline : DEFAULT_LANDING.headline,
+      body: typeof parsed.body === 'string' ? parsed.body : DEFAULT_LANDING.body,
+      imageUrl:
+        parsed.imageUrl === null
+          ? null
+          : typeof parsed.imageUrl === 'string'
+            ? parsed.imageUrl
+            : DEFAULT_LANDING.imageUrl,
+      countdownLabel:
+        typeof parsed.countdownLabel === 'string' ? parsed.countdownLabel : DEFAULT_LANDING.countdownLabel,
+      countdownTarget:
+        parsed.countdownTarget === null
+          ? null
+          : typeof parsed.countdownTarget === 'string'
+            ? parsed.countdownTarget
+            : DEFAULT_LANDING.countdownTarget,
+    };
+  } catch {
+    return { ...DEFAULT_LANDING };
+  }
+}
+
+function clampText(value: string, max: number): string {
+  return value.length <= max ? value : value.slice(0, max);
+}
+
+function normalizeLandingImageUrl(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') {
+    throw new Error('imageUrl must be a data:image URL or empty');
+  }
+  if (!value.startsWith('data:image/')) {
+    throw new Error('imageUrl must start with data:image/');
+  }
+  if (value.length > MAX_PHOTO_URL_CHARS) {
+    throw new Error(`imageUrl must be ${MAX_PHOTO_URL_CHARS} characters or fewer`);
+  }
+  return value;
+}
+
+function normalizeCountdownTarget(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') {
+    throw new Error('countdownTarget must be a datetime string or null');
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error('countdownTarget must be a valid date');
+  }
+  return trimmed;
+}
+
 function normalizeJerseyNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
@@ -275,6 +372,9 @@ export class LeagueStore {
       this.db
         .prepare("INSERT INTO settings (key, value) VALUES ('rules', ?) ON CONFLICT(key) DO NOTHING")
         .run(seed.rules);
+      this.db
+        .prepare("INSERT INTO settings (key, value) VALUES ('landing', ?) ON CONFLICT(key) DO NOTHING")
+        .run(JSON.stringify(DEFAULT_LANDING));
     });
     tx();
   }
@@ -453,6 +553,64 @@ export class LeagueStore {
       )
       .run(rules);
     return rules;
+  }
+
+  getLanding(): Landing {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'landing'").get() as
+      | { value: string }
+      | undefined;
+    const content = parseStoredLanding(row?.value);
+    const effectiveCountdownTarget = content.countdownTarget ?? this.earliestGameDateTime();
+    return { ...content, effectiveCountdownTarget };
+  }
+
+  setLanding(partial: Partial<LandingContent>): Landing {
+    const current = parseStoredLanding(
+      (
+        this.db.prepare("SELECT value FROM settings WHERE key = 'landing'").get() as
+          | { value: string }
+          | undefined
+      )?.value,
+    );
+    const next: LandingContent = { ...current };
+
+    if (partial.headline !== undefined) {
+      if (typeof partial.headline !== 'string') throw new Error('headline must be a string');
+      next.headline = clampText(partial.headline.trim(), MAX_LANDING_HEADLINE_CHARS);
+    }
+    if (partial.body !== undefined) {
+      if (typeof partial.body !== 'string') throw new Error('body must be a string');
+      next.body = clampText(partial.body.trim(), MAX_LANDING_BODY_CHARS);
+    }
+    if (partial.countdownLabel !== undefined) {
+      if (typeof partial.countdownLabel !== 'string') throw new Error('countdownLabel must be a string');
+      next.countdownLabel = clampText(partial.countdownLabel.trim(), MAX_LANDING_LABEL_CHARS);
+    }
+    if (partial.imageUrl !== undefined) {
+      next.imageUrl = normalizeLandingImageUrl(partial.imageUrl);
+    }
+    if (partial.countdownTarget !== undefined) {
+      next.countdownTarget = normalizeCountdownTarget(partial.countdownTarget);
+    }
+
+    this.db
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('landing', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(JSON.stringify(next));
+    return this.getLanding();
+  }
+
+  /** Earliest scheduled game as a naive local datetime, or null if none. */
+  private earliestGameDateTime(): string | null {
+    const rows = this.db.prepare('SELECT date, time FROM games').all() as Array<{ date: string; time: string }>;
+    let earliest: string | null = null;
+    for (const row of rows) {
+      const combined = combineGameDateTime(row.date, row.time);
+      if (!combined) continue;
+      if (!earliest || combined < earliest) earliest = combined;
+    }
+    return earliest;
   }
 
   /**

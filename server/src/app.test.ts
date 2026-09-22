@@ -526,6 +526,90 @@ describe('League rules', () => {
   });
 });
 
+describe('Landing page', () => {
+  it('returns default landing content to anyone without auth', async () => {
+    const { app } = makeApp();
+    const res = await request(app).get('/api/landing');
+    expect(res.status).toBe(200);
+    expect(res.body.headline).toBe('Welcome to the Oakdale Mens Softball League');
+    expect(res.body.body).toMatch(/TODO: add real content/i);
+    expect(res.body.imageUrl).toBeNull();
+    expect(res.body.countdownLabel).toBe('Opening Day');
+    expect(res.body.countdownTarget).toBeNull();
+    expect(res.body.effectiveCountdownTarget).toBeNull();
+  });
+
+  it('derives effectiveCountdownTarget from the earliest scheduled game', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2026-05-06' });
+    expect(gen.status).toBe(201);
+    const first = gen.body[0];
+    expect(first.date).toBe('2026-05-06');
+    expect(first.time).toBe('6:00 PM');
+
+    const res = await request(app).get('/api/landing');
+    expect(res.status).toBe(200);
+    expect(res.body.countdownTarget).toBeNull();
+    expect(res.body.effectiveCountdownTarget).toBe('2026-05-06T18:00:00');
+  });
+
+  it('blocks anonymous landing edits', async () => {
+    const { app } = makeApp();
+    const res = await request(app).put('/api/landing').send({ headline: 'Hacked' });
+    expect(res.status).toBe(401);
+  });
+
+  it('blocks a plain player from editing the landing page', async () => {
+    const { app } = makeApp();
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
+    const res = await player.put('/api/landing').send({ headline: 'Player headline' });
+    expect(res.status).toBe(403);
+  });
+
+  it('lets an admin update landing fields and reflects them on a subsequent read', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const put = await admin.put('/api/landing').send({
+      headline: 'Season opener week',
+      body: 'Bring your gloves.\nSee you at Kerr Park.',
+      countdownLabel: 'First pitch',
+      countdownTarget: '2026-09-23T18:00:00',
+    });
+    expect(put.status).toBe(200);
+    expect(put.body.headline).toBe('Season opener week');
+    expect(put.body.body).toBe('Bring your gloves.\nSee you at Kerr Park.');
+    expect(put.body.countdownLabel).toBe('First pitch');
+    expect(put.body.countdownTarget).toBe('2026-09-23T18:00:00');
+    expect(put.body.effectiveCountdownTarget).toBe('2026-09-23T18:00:00');
+
+    const get = await request(app).get('/api/landing');
+    expect(get.status).toBe(200);
+    expect(get.body.headline).toBe('Season opener week');
+    expect(get.body.body).toBe('Bring your gloves.\nSee you at Kerr Park.');
+    expect(get.body.countdownLabel).toBe('First pitch');
+    expect(get.body.countdownTarget).toBe('2026-09-23T18:00:00');
+    expect(get.body.effectiveCountdownTarget).toBe('2026-09-23T18:00:00');
+  });
+
+  it('rejects an invalid banner image or unparseable countdownTarget', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+
+    const badImage = await admin.put('/api/landing').send({ imageUrl: 'https://example.com/banner.png' });
+    expect(badImage.status).toBe(400);
+
+    const huge = await admin.put('/api/landing').send({
+      imageUrl: `data:image/jpeg;base64,${'a'.repeat(800001)}`,
+    });
+    expect(huge.status).toBe(400);
+
+    const badDate = await admin.put('/api/landing').send({ countdownTarget: 'not-a-date' });
+    expect(badDate.status).toBe(400);
+  });
+});
+
 describe('LeagueStore role backfill and ensureUser', () => {
   it('maps legacy captain/member roles to manager/player when loading a data file', () => {
     const dir = mkdtempSync(join(tmpdir(), 'oakdale-legacy-roles-'));

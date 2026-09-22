@@ -29,6 +29,15 @@ const scheduleGames = [
 
 const teams = [{ id: 'tigers', name: 'Oakdale Tigers' }];
 
+const landing = {
+  headline: 'Welcome to the Oakdale Mens Softball League',
+  body: 'Season updates and announcements will appear here. TODO: add real content.',
+  imageUrl: null,
+  countdownLabel: 'Opening Day',
+  countdownTarget: null,
+  effectiveCountdownTarget: null,
+};
+
 const rosterPayload = {
   team: teams[0],
   roster: [{ id: 'p1', teamId: 'tigers', name: 'Placeholder Guy', number: 9, position: 'OF' }],
@@ -40,26 +49,21 @@ const rosterPayload = {
   currentWeek: { week: 1, date: '2026-05-06' },
 };
 
+function jsonOk(data: unknown) {
+  return { ok: true, json: async () => data } as Response;
+}
+
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
-      if (url.includes('/api/auth/me')) {
-        return { ok: true, json: async () => ({ user: null }) } as Response;
-      }
-      if (url.includes('/api/standings')) {
-        return { ok: true, json: async () => standings } as Response;
-      }
-      if (url.includes('/api/schedule')) {
-        return { ok: true, json: async () => scheduleGames } as Response;
-      }
-      if (url.includes('/roster')) {
-        return { ok: true, json: async () => rosterPayload } as Response;
-      }
-      if (url.includes('/api/teams')) {
-        return { ok: true, json: async () => teams } as Response;
-      }
-      return { ok: true, json: async () => [] } as Response;
+      if (url.includes('/api/auth/me')) return jsonOk({ user: null });
+      if (url.includes('/api/landing')) return jsonOk(landing);
+      if (url.includes('/api/standings')) return jsonOk(standings);
+      if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+      if (url.includes('/roster')) return jsonOk(rosterPayload);
+      if (url.includes('/api/teams')) return jsonOk(teams);
+      return jsonOk([]);
     }),
   );
 });
@@ -77,9 +81,11 @@ function renderApp() {
 }
 
 describe('App', () => {
-  it('renders the app bar title', () => {
+  it('renders the app bar title', async () => {
     renderApp();
-    expect(screen.getByText(/Oakdale Mens Softball League/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText(/Oakdale Mens Softball League/i).length).toBeGreaterThan(0);
+    });
   });
 
   it('shows a Sign in button when logged out', async () => {
@@ -92,13 +98,69 @@ describe('App', () => {
   it('renders bottom tab navigation without an Admin tab when logged out', async () => {
     renderApp();
     expect(screen.getByRole('tablist')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Standings' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Schedule' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Rosters' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Admin' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Welcome to the Oakdale Mens Softball League')).toBeInTheDocument();
+    });
+  });
+
+  it('opens on the Home tab and renders the landing headline', async () => {
+    renderApp();
+    expect(screen.getByRole('tab', { name: 'Home' })).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => {
+      expect(screen.getByText('Welcome to the Oakdale Mens Softball League')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/TODO: add real content/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+  });
+
+  it('lets an admin open the landing editor', async () => {
+    const adminUser = {
+      id: 'u-admin',
+      email: 'admin@oakdale.local',
+      name: 'Commish',
+      role: 'admin' as const,
+      teamId: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: adminUser });
+        if (url.includes('/api/landing') && init?.method === 'PUT') {
+          const body = JSON.parse(String(init.body ?? '{}'));
+          return jsonOk({ ...landing, ...body, effectiveCountdownTarget: body.countdownTarget ?? null });
+        }
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByLabelText('Headline')).toHaveValue(landing.headline);
+    fireEvent.change(screen.getByLabelText('Headline'), { target: { value: 'Play ball' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(screen.getByText('Landing page saved!')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Play ball')).toBeInTheDocument();
   });
 
   it('shows standings loaded from the API', async () => {
     renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Standings' }));
     await waitFor(() => {
       expect(screen.getByText('Oakdale Tigers')).toBeInTheDocument();
     });
@@ -169,6 +231,9 @@ describe('App', () => {
         if (url.includes('/api/auth/me')) {
           return { ok: true, json: async () => ({ user: playerUser }) } as Response;
         }
+        if (url.includes('/api/landing')) {
+          return { ok: true, json: async () => landing } as Response;
+        }
         if (url.includes('/api/standings')) {
           return { ok: true, json: async () => standings } as Response;
         }
@@ -222,5 +287,58 @@ describe('App', () => {
       expect(screen.getByLabelText("Pat Shortstop can't make it")).toHaveTextContent('💩');
     });
     expect(screen.getByRole('button', { name: /can't make it/i })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('shows a live countdown to the effective opening-day target', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: null });
+        if (url.includes('/api/landing')) {
+          return jsonOk({
+            ...landing,
+            countdownLabel: 'Opening Day',
+            countdownTarget: '2099-05-06T18:00:00',
+            effectiveCountdownTarget: '2099-05-06T18:00:00',
+          });
+        }
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByText(/Opening Day in \d+d \d+h \d+m \d{2}s/)).toBeInTheDocument();
+    });
+  });
+
+  it('shows that the season is underway when the countdown target is in the past', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: null });
+        if (url.includes('/api/landing')) {
+          return jsonOk({
+            ...landing,
+            countdownTarget: '2020-04-01T18:00:00',
+            effectiveCountdownTarget: '2020-04-01T18:00:00',
+          });
+        }
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByText('The season is underway!')).toBeInTheDocument();
+    });
   });
 });
