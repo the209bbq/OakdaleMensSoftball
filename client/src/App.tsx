@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type Game, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamMember, type User } from './api';
+import { api, type CurrentWeek, type Game, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamMember, type User } from './api';
 import { useAuth } from './auth';
 import { fileToSquareDataUrl } from './image';
 
@@ -611,7 +611,9 @@ function Rosters() {
   const [selected, setSelected] = useState<string>('');
   const [roster, setRoster] = useState<Player[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
+  const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
   const [managerName, setManagerName] = useState<string | null>(null);
+  const [checkingIn, setCheckingIn] = useState(false);
   const [accounts, setAccounts] = useState<PlayerAccount[]>([]);
   const [pickMember, setPickMember] = useState('');
   const [joinPick, setJoinPick] = useState('');
@@ -645,6 +647,7 @@ function Rosters() {
     api.getRoster(teamId).then((r) => {
       setRoster(r.roster);
       setMembers(r.members ?? []);
+      setCurrentWeek(r.currentWeek ?? null);
       setManagerName(r.manager?.name ?? null);
       setTeams((prev) => prev.map((t) => (t.id === r.team.id ? r.team : t)));
     });
@@ -784,9 +787,33 @@ function Rosters() {
     }
   }
 
+  async function handleCheckIn(status: 'in' | 'out') {
+    if (!currentWeek) return;
+    const mine = members.find((m) => m.id === user?.id)?.checkIn ?? null;
+    const next = mine === status ? null : status;
+    setMessage(null);
+    setCheckingIn(true);
+    try {
+      await api.checkIn(currentWeek.week, next);
+      loadRoster(selected);
+    } catch (err) {
+      setMessage((err as Error).message);
+    } finally {
+      setCheckingIn(false);
+    }
+  }
+
   const playerTeamName = user?.teamId
     ? teams.find((t) => t.id === user.teamId)?.name ?? user.teamId
     : null;
+
+  const canCheckIn = Boolean(user && user.teamId === selected && currentWeek);
+  const myCheckIn = members.find((m) => m.id === user?.id)?.checkIn ?? null;
+  const checkInCounts = {
+    in: members.filter((m) => m.checkIn === 'in').length,
+    out: members.filter((m) => m.checkIn === 'out').length,
+    none: members.filter((m) => m.checkIn !== 'in' && m.checkIn !== 'out').length,
+  };
 
   return (
     <section className="card">
@@ -869,6 +896,49 @@ function Rosters() {
         </div>
       )}
 
+      {currentWeek && (
+        <div className="checkin-panel">
+          <h3 className="checkin-heading">
+            Check-in — Week {currentWeek.week} · {formatGameDate(currentWeek.date)}
+          </h3>
+          {members.length > 0 && (
+            <p className="checkin-summary">
+              🥎 {checkInCounts.in} · 🚫 {checkInCounts.out} · — {checkInCounts.none}
+            </p>
+          )}
+          {canCheckIn && (
+            <div className="checkin-actions">
+              <button
+                type="button"
+                className={`checkin-btn${myCheckIn === 'in' ? ' active-in' : ''}`}
+                aria-pressed={myCheckIn === 'in'}
+                aria-label="I'm there"
+                disabled={checkingIn}
+                onClick={() => handleCheckIn('in')}
+              >
+                <span className="checkin-emoji" aria-hidden="true">
+                  🥎
+                </span>
+                I&apos;m there
+              </button>
+              <button
+                type="button"
+                className={`checkin-btn${myCheckIn === 'out' ? ' active-out' : ''}`}
+                aria-pressed={myCheckIn === 'out'}
+                aria-label="Can't make it"
+                disabled={checkingIn}
+                onClick={() => handleCheckIn('out')}
+              >
+                <span className="checkin-emoji" aria-hidden="true">
+                  🚫
+                </span>
+                Can&apos;t make it
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {canEdit && (
         <div className="team-manage">
           <form className="add-row team-rename-row" onSubmit={handleRename}>
@@ -916,6 +986,27 @@ function Rosters() {
                   {m.position ?? ''}
                 </span>
               </div>
+              {currentWeek && (
+                <span
+                  className={`checkin-marker${m.checkIn ? ` is-${m.checkIn}` : ' is-none'}`}
+                  title={
+                    m.checkIn === 'in'
+                      ? `${m.name} is in`
+                      : m.checkIn === 'out'
+                        ? `${m.name} can't make it`
+                        : `${m.name} hasn't checked in`
+                  }
+                  aria-label={
+                    m.checkIn === 'in'
+                      ? `${m.name} is in`
+                      : m.checkIn === 'out'
+                        ? `${m.name} can't make it`
+                        : `${m.name} hasn't checked in`
+                  }
+                >
+                  {m.checkIn === 'in' ? '🥎' : m.checkIn === 'out' ? '🚫' : '—'}
+                </span>
+              )}
               {canEdit && !m.isManager && (
                 <button
                   className="link-btn danger"

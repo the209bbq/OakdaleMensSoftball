@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:
 import { dirname, extname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import type {
+  CheckInStatus,
+  CurrentWeek,
   Game,
   LeagueData,
   ManagerAuthorization,
@@ -66,6 +68,12 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS check_ins (
+  userId TEXT NOT NULL,
+  week INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('in', 'out')),
+  PRIMARY KEY (userId, week)
+);
 `;
 
 type TeamRow = { id: string; name: string; photoUrl: string | null };
@@ -96,6 +104,7 @@ type UserRow = {
   createdAt: string;
 };
 type PendingRow = { email: string; teamId: string };
+type CheckInRow = { userId: string; week: number; status: string };
 
 function normalizeGame(g: Game): Game {
   return {
@@ -446,6 +455,7 @@ export class LeagueStore {
     );
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM games').run();
+      this.db.prepare('DELETE FROM check_ins').run();
       for (const game of games) {
         insert.run({ ...game, played: game.played ? 1 : 0 });
       }
@@ -718,10 +728,73 @@ export class LeagueStore {
   }
 
   /**
+   * Upcoming/in-progress week: smallest scheduled week whose game date is >=
+   * today's UTC date. After the season ends, returns the last week. No games → null.
+   */
+  getCurrentWeek(): CurrentWeek | null {
+    const rows = this.db
+      .prepare('SELECT week, MIN(date) AS date FROM games GROUP BY week ORDER BY week ASC')
+      .all() as Array<{ week: number; date: string }>;
+    if (rows.length === 0) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    const upcoming = rows.find((row) => row.date >= today);
+    if (upcoming) return { week: upcoming.week, date: upcoming.date };
+    const last = rows[rows.length - 1];
+    return { week: last.week, date: last.date };
+  }
+
+  getCheckInsForWeek(week: number): Map<string, CheckInStatus> {
+    const rows = this.db
+      .prepare('SELECT userId, week, status FROM check_ins WHERE week = ?')
+      .all(week) as CheckInRow[];
+    const map = new Map<string, CheckInStatus>();
+    for (const row of rows) {
+      if (row.status === 'in' || row.status === 'out') {
+        map.set(row.userId, row.status);
+      }
+    }
+    return map;
+  }
+
+  /**
+   * Set (or clear) a user's check-in for a scheduled week. The user must exist
+   * and already be on a team; `week` must appear on the schedule.
+   */
+  setCheckIn(userId: string, week: number, status: CheckInStatus | null): CheckInStatus | null {
+    const user = this.getUserById(userId);
+    if (!user) throw new Error('Unknown user');
+    if (!user.teamId) throw new Error('You must be on a team to check in');
+    if (!Number.isInteger(week)) throw new Error('week is not a scheduled week');
+    const scheduled = this.db.prepare('SELECT 1 AS ok FROM games WHERE week = ? LIMIT 1').get(week) as
+      | { ok: number }
+      | undefined;
+    if (!scheduled) throw new Error('week is not a scheduled week');
+    if (status !== 'in' && status !== 'out' && status !== null) {
+      throw new Error("status must be 'in', 'out', or null");
+    }
+
+    if (status === null) {
+      this.db.prepare('DELETE FROM check_ins WHERE userId = ? AND week = ?').run(userId, week);
+      return null;
+    }
+
+    this.db
+      .prepare(
+        `INSERT INTO check_ins (userId, week, status) VALUES (?, ?, ?)
+         ON CONFLICT(userId, week) DO UPDATE SET status = excluded.status`,
+      )
+      .run(userId, week, status);
+    return status;
+  }
+
+  /**
    * Player-role accounts AND the team's manager on this team, public-safe (no email).
    * Managers sort first (they also play); then by number, then name.
+   * `checkIn` is the member's RSVP for the current week (null = no response).
    */
   getTeamMembers(teamId: string): TeamMember[] {
+    const current = this.getCurrentWeek();
+    const checkIns = current ? this.getCheckInsForWeek(current.week) : new Map<string, CheckInStatus>();
     const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
     return rows
       .map(userFromRow)
@@ -734,6 +807,7 @@ export class LeagueStore {
           position: u.position,
           photoUrl: u.photoUrl,
           isManager: u.role === 'manager',
+          checkIn: checkIns.get(u.id) ?? null,
         }),
       )
       .sort((a, b) => {

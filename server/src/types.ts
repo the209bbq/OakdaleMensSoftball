@@ -62,6 +62,21 @@ export interface User {
 /** User shape safe to return over the API (no password hash). */
 export type PublicUser = Omit<User, 'passwordHash'>;
 
+export type CheckInStatus = 'in' | 'out';
+
+/** One player's RSVP for a scheduled week. Absence of a row = no response. */
+export interface CheckIn {
+  userId: string;
+  week: number;
+  status: CheckInStatus;
+}
+
+/** Upcoming/in-progress game week (or the last week once the season is over). */
+export interface CurrentWeek {
+  week: number;
+  date: string;
+}
+
 /** Public-safe player-account row on a team roster (no email). */
 export interface TeamMember {
   id: string;
@@ -71,6 +86,8 @@ export interface TeamMember {
   photoUrl?: string;
   /** True when this member is the team's manager (managers also play). */
   isManager: boolean;
+  /** Current-week RSVP; null means no response. */
+  checkIn: CheckInStatus | null;
 }
 
 /** Pre-authorization allowlist entry: email is granted manager of teamId on signup. */

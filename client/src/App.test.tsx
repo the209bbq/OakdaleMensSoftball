@@ -31,10 +31,11 @@ const rosterPayload = {
   team: teams[0],
   roster: [{ id: 'p1', teamId: 'tigers', name: 'Placeholder Guy', number: 9, position: 'OF' }],
   members: [
-    { id: 'u-mgr', name: 'Coach', number: 1, position: 'P', isManager: true },
-    { id: 'u1', name: 'Pat Shortstop', number: 12, position: 'SS', isManager: false },
+    { id: 'u-mgr', name: 'Coach', number: 1, position: 'P', isManager: true, checkIn: 'in' as const },
+    { id: 'u1', name: 'Pat Shortstop', number: 12, position: 'SS', isManager: false, checkIn: null },
   ],
   manager: { name: 'Coach' },
+  currentWeek: { week: 1, date: '2026-05-06' },
 };
 
 beforeEach(() => {
@@ -130,5 +131,81 @@ describe('App', () => {
     expect(screen.getByText('#12 · SS')).toBeInTheDocument();
     expect(screen.getByText('Manager: Coach')).toBeInTheDocument();
     expect(screen.getByText('Manager')).toBeInTheDocument();
+    expect(screen.getByText(/Check-in — Week 1 · Wed May 6/)).toBeInTheDocument();
+    expect(screen.getByText(/🥎 1 · 🚫 0 · — 1/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Coach is in')).toHaveTextContent('🥎');
+    expect(screen.getByLabelText("Pat Shortstop hasn't checked in")).toHaveTextContent('—');
+    expect(screen.queryByRole('button', { name: /i'm there/i })).not.toBeInTheDocument();
+  });
+
+  it('lets a signed-in teammate set, highlight, and clear a weekly check-in', async () => {
+    const playerUser = {
+      id: 'u1',
+      email: 'pat@example.com',
+      name: 'Pat Shortstop',
+      role: 'player' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    let patCheckIn: 'in' | 'out' | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) {
+          return { ok: true, json: async () => ({ user: playerUser }) } as Response;
+        }
+        if (url.includes('/api/standings')) {
+          return { ok: true, json: async () => standings } as Response;
+        }
+        if (url.includes('/api/schedule')) {
+          return { ok: true, json: async () => scheduleGames } as Response;
+        }
+        if (url.includes('/api/checkin')) {
+          const body = JSON.parse(String(init?.body ?? '{}')) as { week: number; status: 'in' | 'out' | null };
+          patCheckIn = body.status;
+          return { ok: true, json: async () => ({ ok: true, week: body.week, status: body.status }) } as Response;
+        }
+        if (url.includes('/roster')) {
+          return {
+            ok: true,
+            json: async () => ({
+              ...rosterPayload,
+              members: rosterPayload.members.map((m) =>
+                m.id === 'u1' ? { ...m, checkIn: patCheckIn } : m,
+              ),
+            }),
+          } as Response;
+        }
+        if (url.includes('/api/teams')) {
+          return { ok: true, json: async () => teams } as Response;
+        }
+        return { ok: true, json: async () => [] } as Response;
+      }),
+    );
+
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Rosters' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /i'm there/i })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /can't make it/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /i'm there/i }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Pat Shortstop is in')).toHaveTextContent('🥎');
+    });
+    expect(screen.getByRole('button', { name: /i'm there/i })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: /i'm there/i }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Pat Shortstop hasn't checked in")).toHaveTextContent('—');
+    });
+    expect(screen.getByRole('button', { name: /i'm there/i })).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: /can't make it/i }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Pat Shortstop can't make it")).toHaveTextContent('🚫');
+    });
+    expect(screen.getByRole('button', { name: /can't make it/i })).toHaveAttribute('aria-pressed', 'true');
   });
 });
