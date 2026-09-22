@@ -24,6 +24,14 @@ import type {
 import { createSeedData } from './seed.js';
 import { DEFAULT_LOCATION, generateRoundRobin, type GenerateOptions } from './schedule.js';
 import { hashPassword, verifyPassword } from './auth.js';
+import {
+  DEFAULT_THEME_INPUT,
+  normalizeThemeInput,
+  parseStoredTheme,
+  resolveTheme,
+  type Theme,
+  type ThemeInput,
+} from './theme.js';
 
 export const MAX_PHOTO_URL_CHARS = 800000;
 export const MAX_LANDING_HEADLINE_CHARS = 200;
@@ -477,6 +485,9 @@ export class LeagueStore {
       this.db
         .prepare("INSERT INTO settings (key, value) VALUES ('landing', ?) ON CONFLICT(key) DO NOTHING")
         .run(JSON.stringify(DEFAULT_LANDING));
+      this.db
+        .prepare("INSERT INTO settings (key, value) VALUES ('theme', ?) ON CONFLICT(key) DO NOTHING")
+        .run(JSON.stringify(DEFAULT_THEME_INPUT));
     });
     tx();
   }
@@ -701,6 +712,23 @@ export class LeagueStore {
       )
       .run(JSON.stringify(next));
     return this.getLanding();
+  }
+
+  getTheme(): Theme {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'theme'").get() as
+      | { value: string }
+      | undefined;
+    return resolveTheme(parseStoredTheme(row?.value));
+  }
+
+  setTheme(input: unknown): Theme {
+    const next: ThemeInput = normalizeThemeInput(input);
+    this.db
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('theme', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(JSON.stringify(next));
+    return this.getTheme();
   }
 
   /** Earliest scheduled game as a naive local datetime, or null if none. */
@@ -1519,8 +1547,8 @@ export class LeagueStore {
 
   /**
    * Remove every @sim.local guest (and their check-ins/messages) and reset
-   * the season to unplayed. Demo/admin accounts, teams, landing, rules, and
-   * suggestions are left alone.
+   * the season to unplayed. Demo/admin accounts, teams, landing, rules, theme,
+   * and suggestions are left alone.
    */
   clearTestData(): TestDataClearSummary {
     const run = this.db.transaction(() => {

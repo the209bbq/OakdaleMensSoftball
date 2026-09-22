@@ -243,6 +243,20 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
+  // ---- Color scheme (public read; admin write) --------------------------
+
+  api.get('/theme', (_req: Request, res: Response) => {
+    res.json(store.getTheme());
+  });
+
+  api.put('/theme', requireAdmin, (req: Request, res: Response) => {
+    try {
+      res.json(store.setTheme(req.body));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   // ---- Suggestions (public submit; admin-only reads).
   // Routing suggestions to an external place (email/Slack) can be added later;
   // for now admins view them in-app.

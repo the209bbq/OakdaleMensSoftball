@@ -158,6 +158,9 @@ export interface TestDataClearResult {
   gamesReset: number;
 }
 
+import type { Theme, ThemeUpdate } from './theme';
+export type { Theme, ThemeId, ThemePreset, ThemeUpdate } from './theme';
+
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(url, {
     credentials: 'same-origin',
@@ -181,6 +184,9 @@ export const api = {
   getLanding: () => request<Landing>('/api/landing'),
   updateLanding: (payload: LandingUpdate) =>
     request<Landing>('/api/landing', { method: 'PUT', body: JSON.stringify(payload) }),
+  getTheme: () => request<Theme>('/api/theme'),
+  updateTheme: (payload: ThemeUpdate) =>
+    request<Theme>('/api/theme', { method: 'PUT', body: JSON.stringify(payload) }),
   getCurrentWeek: () => request<CurrentWeek | null>('/api/current-week'),
   checkIn: (week: number, status: CheckInStatus | null) =>
     request<{ ok: true; week: number; status: CheckInStatus | null }>('/api/checkin', {

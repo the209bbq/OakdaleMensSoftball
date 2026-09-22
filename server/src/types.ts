@@ -143,6 +143,8 @@ export interface Landing extends LandingContent {
   effectiveCountdownTarget: string | null;
 }
 
+export type { Theme, ThemeId, ThemeInput } from './theme.js';
+
 /** Public suggestion submitted from the Home page. */
 export interface Suggestion {
   id: string;

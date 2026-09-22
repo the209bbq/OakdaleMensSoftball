@@ -610,6 +610,72 @@ describe('Landing page', () => {
   });
 });
 
+describe('Color scheme', () => {
+  it('returns the classic navy theme to anyone without auth', async () => {
+    const { app } = makeApp();
+    const res = await request(app).get('/api/theme');
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe('classic');
+    expect(res.body.navy).toBe('#0b2545');
+    expect(res.body.accent).toBe('#f2a900');
+    expect(res.body.presets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'night', label: 'Night game' }),
+        expect.objectContaining({ id: 'grass', label: 'Grass field' }),
+        expect.objectContaining({ id: 'clay', label: 'Infield clay' }),
+      ]),
+    );
+  });
+
+  it('blocks anonymous and player theme edits', async () => {
+    const { app } = makeApp();
+    const anon = await request(app).put('/api/theme').send({ id: 'night' });
+    expect(anon.status).toBe(401);
+
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'm@b.com', name: 'M', password: 'longenough' });
+    const res = await player.put('/api/theme').send({ id: 'night' });
+    expect(res.status).toBe(403);
+  });
+
+  it('lets an admin switch to a preset and reflects it on a subsequent public read', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const put = await admin.put('/api/theme').send({ id: 'grass' });
+    expect(put.status).toBe(200);
+    expect(put.body.id).toBe('grass');
+    expect(put.body.navy).toBe('#14532d');
+
+    const get = await request(app).get('/api/theme');
+    expect(get.status).toBe(200);
+    expect(get.body.id).toBe('grass');
+    expect(get.body.navy).toBe('#14532d');
+    expect(get.body.heading).toBe('#14532d');
+  });
+
+  it('lets an admin save a custom primary and accent', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const put = await admin.put('/api/theme').send({ id: 'custom', primary: '#112233', accent: '#ffcc00' });
+    expect(put.status).toBe(200);
+    expect(put.body.id).toBe('custom');
+    expect(put.body.navy).toBe('#112233');
+    expect(put.body.accent).toBe('#ffcc00');
+    expect(put.body.primary).toBe('#112233');
+  });
+
+  it('rejects an unknown theme id or a custom theme without hex colors', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+
+    const badId = await admin.put('/api/theme').send({ id: 'neon' });
+    expect(badId.status).toBe(400);
+
+    const badCustom = await admin.put('/api/theme').send({ id: 'custom', primary: 'blue', accent: 'gold' });
+    expect(badCustom.status).toBe(400);
+  });
+});
+
 describe('LeagueStore role backfill and ensureUser', () => {
   it('maps legacy captain/member roles to manager/player when loading a data file', () => {
     const dir = mkdtempSync(join(tmpdir(), 'oakdale-legacy-roles-'));
