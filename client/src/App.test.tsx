@@ -22,6 +22,8 @@ const scheduleGames = [
     time: '6:00 PM',
     location: 'Kerr Park',
     week: 1,
+    awayAttendance: { in: 1, out: 1, none: 0, total: 2 },
+    homeAttendance: { in: 0, out: 0, none: 0, total: 0 },
   },
 ];
 
@@ -117,6 +119,18 @@ describe('App', () => {
     expect(screen.getByText('Field 1')).toBeInTheDocument();
     expect(screen.getByText('6:00 PM')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /hide details/i })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(/Da Beers: 🥎 1 · 💩 1 · — 0/)).toBeInTheDocument();
+    expect(screen.getByText(/Oakdale Tigers: 🥎 0 · 💩 0 · — 0/)).toBeInTheDocument();
+  });
+
+  it('shows compact per-team attendance chips on collapsed schedule rows', async () => {
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('1 of 2 checked in')).toHaveTextContent('🥎 1/2');
+    expect(screen.getByLabelText('No roster accounts')).toHaveTextContent('—');
   });
 
   it('shows registered members with profiles and unregistered placeholders on Rosters', async () => {
