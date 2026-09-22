@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { LeagueStore } from './store.js';
-import type { LandingContent, PublicUser, TeamAttendance } from './types.js';
+import type { LandingContent, PublicUser, Suggestion, TeamAttendance, TeamMessage } from './types.js';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_MS,
@@ -77,6 +77,13 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     if (!user) return false;
     if (user.role === 'admin') return true;
     return user.role === 'manager' && user.teamId === teamId;
+  };
+
+  /** Admins may observe any team chat; players/managers only their own team. */
+  const canAccessTeamChat = (user: PublicUser | undefined, teamId: string): boolean => {
+    if (!user) return false;
+    if (user.role === 'admin') return true;
+    return (user.role === 'player' || user.role === 'manager') && user.teamId === teamId;
   };
 
   const setSessionCookie = (res: Response, userId: string) => {
@@ -236,6 +243,31 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
+  // ---- Suggestions (public submit; admin-only list/delete) ---------------
+
+  api.post('/suggestions', (req: Request, res: Response) => {
+    try {
+      const { text, name } = req.body ?? {};
+      const suggestion: Suggestion = store.addSuggestion({ text, name });
+      res.status(201).json(suggestion);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.get('/suggestions', requireAdmin, (_req: Request, res: Response) => {
+    res.json(store.listSuggestions());
+  });
+
+  api.delete('/suggestions/:id', requireAdmin, (req: Request, res: Response) => {
+    try {
+      store.deleteSuggestion(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(404).json({ error: (err as Error).message });
+    }
+  });
+
   // ---- Rules management (admin only) ------------------------------------
 
   api.put('/rules', requireAdmin, (req: Request, res: Response) => {
@@ -292,6 +324,44 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       const { photoUrl } = req.body ?? {};
       const team = store.setTeamPhoto(req.params.id, photoUrl ?? null);
       res.json(team);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  // ---- Team group chat (members of that team, or any admin) -------------
+
+  api.get('/teams/:id/messages', requireAuth, (req: Request, res: Response) => {
+    const team = store.getTeam(req.params.id);
+    if (!team) {
+      res.status(404).json({ error: 'Team not found' });
+      return;
+    }
+    if (!canAccessTeamChat(req.user, team.id)) {
+      res.status(403).json({ error: 'You can only view your own team chat' });
+      return;
+    }
+    res.json(store.getTeamMessages(team.id));
+  });
+
+  api.post('/teams/:id/messages', requireAuth, (req: Request, res: Response) => {
+    const team = store.getTeam(req.params.id);
+    if (!team) {
+      res.status(404).json({ error: 'Team not found' });
+      return;
+    }
+    if (!canAccessTeamChat(req.user, team.id)) {
+      res.status(403).json({ error: 'You can only post to your own team chat' });
+      return;
+    }
+    try {
+      const message: TeamMessage = store.addTeamMessage(
+        team.id,
+        req.user!.id,
+        req.user!.name,
+        (req.body ?? {}).text,
+      );
+      res.status(201).json(message);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }

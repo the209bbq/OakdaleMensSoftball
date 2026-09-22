@@ -1460,3 +1460,108 @@ describe('Weekly check-in', () => {
   });
 });
 
+describe('Suggestions', () => {
+  it('accepts public posts and restricts listing/deleting to admins', async () => {
+    const { app, store } = makeApp();
+
+    const created = await request(app).post('/api/suggestions').send({ text: 'Add lights to Field 3' });
+    expect(created.status).toBe(201);
+    expect(created.body.text).toBe('Add lights to Field 3');
+    expect(created.body.authorName).toBeNull();
+    expect(created.body.id).toBeTruthy();
+
+    const named = await request(app)
+      .post('/api/suggestions')
+      .send({ text: 'More benches', name: '  Sam  ' });
+    expect(named.status).toBe(201);
+    expect(named.body.authorName).toBe('Sam');
+
+    const empty = await request(app).post('/api/suggestions').send({ text: '   ' });
+    expect(empty.status).toBe(400);
+
+    const missing = await request(app).post('/api/suggestions').send({});
+    expect(missing.status).toBe(400);
+
+    const anonGet = await request(app).get('/api/suggestions');
+    expect(anonGet.status).toBe(401);
+
+    store.registerUser({ email: 'p-sug@b.com', name: 'Pat Sug', password: 'longenough' });
+    const player = await loginAs(app, 'p-sug@b.com', 'longenough');
+    const playerGet = await player.get('/api/suggestions');
+    expect(playerGet.status).toBe(403);
+    const playerDel = await player.delete(`/api/suggestions/${created.body.id}`);
+    expect(playerDel.status).toBe(403);
+
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const list = await admin.get('/api/suggestions');
+    expect(list.status).toBe(200);
+    expect(list.body.map((s: { text: string }) => s.text)).toEqual(['More benches', 'Add lights to Field 3']);
+
+    const del = await admin.delete(`/api/suggestions/${created.body.id}`);
+    expect(del.status).toBe(200);
+    const after = await admin.get('/api/suggestions');
+    expect(after.body).toHaveLength(1);
+    expect(after.body[0].id).toBe(named.body.id);
+  });
+});
+
+describe('Team group chat', () => {
+  it('lets a team member and an admin chat; other teams, anon, and unknown teams cannot', async () => {
+    const { app, store } = makeApp();
+    const memberUser = store.registerUser({ email: 'p1-chat@b.com', name: 'Alpha', password: 'longenough' });
+    store.setUserTeam(memberUser.id, TEAM_OWN);
+    const otherUser = store.registerUser({ email: 'p2-chat@b.com', name: 'Beta', password: 'longenough' });
+    store.setUserTeam(otherUser.id, TEAM_OTHER);
+
+    const member = await loginAs(app, 'p1-chat@b.com', 'longenough');
+    const other = await loginAs(app, 'p2-chat@b.com', 'longenough');
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+
+    const first = await member.post(`/api/teams/${TEAM_OWN}/messages`).send({ text: 'See everyone Wed' });
+    expect(first.status).toBe(201);
+    expect(first.body.authorName).toBe('Alpha');
+    expect(first.body.text).toBe('See everyone Wed');
+    expect(first.body.userId).toBe(memberUser.id);
+
+    const second = await member.post(`/api/teams/${TEAM_OWN}/messages`).send({ text: 'Bring bats' });
+    expect(second.status).toBe(201);
+
+    const list = await member.get(`/api/teams/${TEAM_OWN}/messages`);
+    expect(list.status).toBe(200);
+    expect(list.body.map((m: { text: string }) => m.text)).toEqual(['See everyone Wed', 'Bring bats']);
+    expect(list.body[0].authorName).toBe('Alpha');
+
+    const otherGet = await other.get(`/api/teams/${TEAM_OWN}/messages`);
+    expect(otherGet.status).toBe(403);
+    const otherPost = await other.post(`/api/teams/${TEAM_OWN}/messages`).send({ text: 'Nope' });
+    expect(otherPost.status).toBe(403);
+
+    const adminGet = await admin.get(`/api/teams/${TEAM_OWN}/messages`);
+    expect(adminGet.status).toBe(200);
+    expect(adminGet.body).toHaveLength(2);
+    const adminPost = await admin.post(`/api/teams/${TEAM_OWN}/messages`).send({ text: 'Commissioner here' });
+    expect(adminPost.status).toBe(201);
+    expect(adminPost.body.authorName).toBe('Commish');
+    const adminList = await admin.get(`/api/teams/${TEAM_OWN}/messages`);
+    expect(adminList.status).toBe(200);
+    expect(adminList.body.map((m: { text: string }) => m.text)).toEqual([
+      'See everyone Wed',
+      'Bring bats',
+      'Commissioner here',
+    ]);
+
+    const anonGet = await request(app).get(`/api/teams/${TEAM_OWN}/messages`);
+    expect(anonGet.status).toBe(401);
+    const anonPost = await request(app).post(`/api/teams/${TEAM_OWN}/messages`).send({ text: 'hi' });
+    expect(anonPost.status).toBe(401);
+
+    const unknownGet = await member.get('/api/teams/no-such-team/messages');
+    expect(unknownGet.status).toBe(404);
+    const unknownPost = await member.post('/api/teams/no-such-team/messages').send({ text: 'hi' });
+    expect(unknownPost.status).toBe(404);
+
+    const empty = await member.post(`/api/teams/${TEAM_OWN}/messages`).send({ text: '  ' });
+    expect(empty.status).toBe(400);
+  });
+});
+

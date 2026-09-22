@@ -17,6 +17,8 @@ import type {
   Team,
   TeamAttendance,
   TeamMember,
+  Suggestion,
+  TeamMessage,
   User,
 } from './types.js';
 import { createSeedData } from './seed.js';
@@ -27,6 +29,9 @@ export const MAX_PHOTO_URL_CHARS = 800000;
 export const MAX_LANDING_HEADLINE_CHARS = 200;
 export const MAX_LANDING_BODY_CHARS = 5000;
 export const MAX_LANDING_LABEL_CHARS = 80;
+export const MAX_SUGGESTION_TEXT_CHARS = 2000;
+export const MAX_SUGGESTION_NAME_CHARS = 80;
+export const MAX_MESSAGE_TEXT_CHARS = 1000;
 
 export const DEFAULT_LANDING: LandingContent = {
   headline: 'Welcome to the Oakdale Mens Softball League',
@@ -88,6 +93,20 @@ CREATE TABLE IF NOT EXISTS check_ins (
   status TEXT NOT NULL CHECK (status IN ('in', 'out')),
   PRIMARY KEY (userId, week)
 );
+CREATE TABLE IF NOT EXISTS suggestions (
+  id TEXT PRIMARY KEY,
+  text TEXT NOT NULL,
+  authorName TEXT,
+  createdAt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  teamId TEXT NOT NULL,
+  userId TEXT NOT NULL,
+  authorName TEXT NOT NULL,
+  text TEXT NOT NULL,
+  createdAt TEXT NOT NULL
+);
 `;
 
 type TeamRow = { id: string; name: string; photoUrl: string | null };
@@ -119,6 +138,15 @@ type UserRow = {
 };
 type PendingRow = { email: string; teamId: string };
 type CheckInRow = { userId: string; week: number; status: string };
+type SuggestionRow = { id: string; text: string; authorName: string | null; createdAt: string };
+type MessageRow = {
+  id: string;
+  teamId: string;
+  userId: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+};
 
 function normalizeGame(g: Game): Game {
   return {
@@ -308,6 +336,30 @@ function gameFromRow(row: GameRow): Game {
     location: row.location,
     week: row.week,
   });
+}
+
+function suggestionFromRow(row: SuggestionRow): Suggestion {
+  return {
+    id: row.id,
+    text: row.text,
+    authorName: row.authorName,
+    createdAt: row.createdAt,
+  };
+}
+
+function messageFromRow(row: MessageRow): TeamMessage {
+  return {
+    id: row.id,
+    teamId: row.teamId,
+    userId: row.userId,
+    authorName: row.authorName,
+    text: row.text,
+    createdAt: row.createdAt,
+  };
+}
+
+function newRowId(prefix: string): string {
+  return `${prefix}${Date.now()}${Math.floor(Math.random() * 10000)}`;
 }
 
 function userFromRow(row: UserRow): User {
@@ -1192,6 +1244,75 @@ export class LeagueStore {
     }
     this.updateUserRow(user);
     return toPublicUser(user);
+  }
+
+  addSuggestion(input: { text: unknown; name?: unknown }): Suggestion {
+    const text = clampText(String(input.text ?? '').trim(), MAX_SUGGESTION_TEXT_CHARS);
+    if (!text) throw new Error('Suggestion text is required');
+    const rawName = input.name == null ? '' : String(input.name);
+    const name = clampText(rawName.trim(), MAX_SUGGESTION_NAME_CHARS) || null;
+    const suggestion: Suggestion = {
+      id: newRowId('sg'),
+      text,
+      authorName: name,
+      createdAt: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        'INSERT INTO suggestions (id, text, authorName, createdAt) VALUES (@id, @text, @authorName, @createdAt)',
+      )
+      .run(suggestion);
+    return suggestion;
+  }
+
+  listSuggestions(): Suggestion[] {
+    const rows = this.db
+      .prepare('SELECT id, text, authorName, createdAt FROM suggestions ORDER BY createdAt DESC, rowid DESC')
+      .all() as SuggestionRow[];
+    return rows.map(suggestionFromRow);
+  }
+
+  deleteSuggestion(id: string): void {
+    const result = this.db.prepare('DELETE FROM suggestions WHERE id = ?').run(id);
+    if (result.changes === 0) {
+      throw new Error(`Unknown suggestion: ${id}`);
+    }
+  }
+
+  getTeamMessages(teamId: string, limit = 200): TeamMessage[] {
+    const cap = Number.isFinite(limit) && limit > 0 ? Math.min(Math.trunc(limit), 500) : 200;
+    const rows = this.db
+      .prepare(
+        `SELECT id, teamId, userId, authorName, text, createdAt
+         FROM messages
+         WHERE teamId = ?
+         ORDER BY createdAt DESC, rowid DESC
+         LIMIT ?`,
+      )
+      .all(teamId, cap) as MessageRow[];
+    return rows.map(messageFromRow).reverse();
+  }
+
+  addTeamMessage(teamId: string, userId: string, authorName: string, text: unknown): TeamMessage {
+    if (!this.getTeam(teamId)) throw new Error(`Unknown team: ${teamId}`);
+    const trimmed = clampText(String(text ?? '').trim(), MAX_MESSAGE_TEXT_CHARS);
+    if (!trimmed) throw new Error('Message text is required');
+    const name = String(authorName ?? '').trim() || 'Anonymous';
+    const message: TeamMessage = {
+      id: newRowId('m'),
+      teamId,
+      userId,
+      authorName: name,
+      text: trimmed,
+      createdAt: new Date().toISOString(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO messages (id, teamId, userId, authorName, text, createdAt)
+         VALUES (@id, @teamId, @userId, @authorName, @text, @createdAt)`,
+      )
+      .run(message);
+    return message;
   }
 
   /** Ensure an admin account exists (bootstrapped from env at startup). */

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Team, type TeamAttendance, type TeamMember, type User } from './api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
 
@@ -39,6 +39,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('home');
   const [authOpen, setAuthOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const canOpenChat = Boolean(user && (user.teamId || user.role === 'admin'));
 
   // If a non-admin lands on the admin tab (e.g. after logout), bounce them out.
   useEffect(() => {
@@ -54,7 +56,19 @@ export default function App() {
             <span className="app-bar-title">Oakdale Mens Softball League</span>
             <span className="app-bar-sub">{TAB_TITLES[tab]}</span>
           </div>
-          <AuthControl onSignIn={() => setAuthOpen(true)} onEditProfile={() => setProfileOpen(true)} />
+          <div className="app-bar-actions">
+            {canOpenChat && (
+              <button
+                className="chat-btn"
+                type="button"
+                onClick={() => setChatOpen(true)}
+                aria-label="Open team chat"
+              >
+                <ChatIcon />
+              </button>
+            )}
+            <AuthControl onSignIn={() => setAuthOpen(true)} onEditProfile={() => setProfileOpen(true)} />
+          </div>
         </div>
       </header>
 
@@ -80,6 +94,7 @@ export default function App() {
 
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
       {profileOpen && user && <ProfileModal onClose={() => setProfileOpen(false)} />}
+      {chatOpen && user && canOpenChat && <ChatModal onClose={() => setChatOpen(false)} />}
     </div>
   );
 }
@@ -525,6 +540,7 @@ function LandingPage() {
           <div className="landing-body">{landing.body}</div>
         )}
       </section>
+      <SuggestionsBox />
     </div>
   );
 }
@@ -543,6 +559,232 @@ function fromDatetimeLocalValue(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   return trimmed.length === 16 ? `${trimmed}:00` : trimmed;
+}
+
+function SuggestionsBox() {
+  const { user } = useAuth();
+  const [text, setText] = useState('');
+  const [name, setName] = useState(user?.name ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [thanks, setThanks] = useState(false);
+
+  useEffect(() => {
+    setName((current) => current || user?.name || '');
+  }, [user?.name]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setThanks(false);
+    try {
+      await api.submitSuggestion({ text, name });
+      setText('');
+      setName(user?.name ?? '');
+      setThanks(true);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card suggestions-card">
+      <h2>Suggestions</h2>
+      <p className="muted-copy suggestions-intro">
+        Share an idea for the league. Submissions go to the commissioner.
+      </p>
+      {thanks && <p className="message">Thanks — we got your suggestion!</p>}
+      <form className="suggestions-form" onSubmit={submit}>
+        <label className="field">
+          Suggestion
+          <textarea
+            className="rules-textarea"
+            aria-label="Suggestion"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={4}
+            maxLength={2000}
+            required
+          />
+        </label>
+        <label className="field">
+          Your name (optional)
+          <input
+            aria-label="Your name (optional)"
+            placeholder="Anonymous"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={80}
+          />
+        </label>
+        {error && <p className="error inline-error">{error}</p>}
+        <button className="primary-btn" type="submit" disabled={busy}>
+          {busy ? 'Sending…' : 'Submit'}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function formatShortTime(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  const diff = Date.now() - parsed.getTime();
+  if (diff < 45_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.max(1, Math.floor(diff / 60_000))}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return parsed.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function formatSuggestionDate(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function ChatModal({ onClose }: { onClose: () => void }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [teamId, setTeamId] = useState(user?.teamId ?? '');
+  const [messages, setMessages] = useState<TeamMessage[]>([]);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+
+  const teamName = teams.find((t) => t.id === teamId)?.name ?? (teamId || 'Team');
+
+  useEffect(() => {
+    api
+      .getTeams()
+      .then((next) => {
+        setTeams(next);
+        setTeamId((current) => current || user?.teamId || next[0]?.id || '');
+      })
+      .catch((err) => setError((err as Error).message));
+  }, [user?.teamId]);
+
+  useEffect(() => {
+    if (!teamId) return undefined;
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const next = await api.getTeamMessages(teamId);
+        if (!cancelled) {
+          setMessages(next);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) setError((err as Error).message);
+      }
+    }
+
+    void load();
+    const timer = window.setInterval(() => {
+      void load();
+    }, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [teamId]);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  async function send(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!teamId || !draft.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.sendTeamMessage(teamId, draft);
+      setDraft('');
+      setMessages(await api.getTeamMessages(teamId));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal chat-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Team chat">
+        <h2 className="modal-title">Team Chat — {teamName}</h2>
+        {isAdmin && (
+          <label className="field chat-team-pick">
+            Team
+            <select
+              aria-label="Chat team"
+              value={teamId}
+              onChange={(e) => setTeamId(e.target.value)}
+            >
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <div className="chat-list" ref={scrollerRef}>
+          {messages.length === 0 ? (
+            <p className="chat-empty">No messages yet. Say hello!</p>
+          ) : (
+            messages.map((m) => {
+              const mine = m.userId === user?.id;
+              return (
+                <div key={m.id} className={`chat-bubble ${mine ? 'mine' : 'theirs'}`}>
+                  <div className="chat-meta">
+                    <span className="chat-author">{mine ? 'You' : m.authorName}</span>
+                    <span className="chat-time">{formatShortTime(m.createdAt)}</span>
+                  </div>
+                  <p className="chat-text">{m.text}</p>
+                </div>
+              );
+            })
+          )}
+        </div>
+        {error && <p className="error inline-error">{error}</p>}
+        <form className="chat-compose" onSubmit={send}>
+          <input
+            aria-label="Message"
+            placeholder="Message your team…"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            maxLength={1000}
+          />
+          <button className="primary-btn" type="submit" disabled={busy || !draft.trim()}>
+            {busy ? 'Sending…' : 'Send'}
+          </button>
+        </form>
+        <button className="modal-close" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function CountdownCard({ label, target }: { label: string; target: string | null }) {
@@ -1663,6 +1905,8 @@ function Admin() {
         </ul>
       )}
 
+      <AdminSuggestions />
+
       <h3 className="admin-users-heading">Players &amp; roles</h3>
       <ul className="user-list">
         {users.map((u) => (
@@ -1706,6 +1950,72 @@ function Admin() {
         ))}
       </ul>
     </section>
+  );
+}
+
+function AdminSuggestions() {
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  function load() {
+    api
+      .listSuggestions()
+      .then(setSuggestions)
+      .catch((e) => setError((e as Error).message));
+  }
+  useEffect(load, []);
+
+  async function remove(id: string) {
+    setError(null);
+    setMessage(null);
+    try {
+      await api.deleteSuggestion(id);
+      setSuggestions((prev) => prev.filter((s) => s.id !== id));
+      setMessage('Suggestion deleted.');
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  return (
+    <>
+      <h3 className="admin-users-heading">Suggestions</h3>
+      {error && <p className="error inline-error">{error}</p>}
+      {message && <p className="message">{message}</p>}
+      {suggestions.length === 0 ? (
+        <p className="member-empty">No suggestions yet.</p>
+      ) : (
+        <ul className="suggestion-list">
+          {suggestions.map((s) => (
+            <li key={s.id} className="suggestion-row">
+              <p className="suggestion-text">{s.text}</p>
+              <div className="suggestion-meta">
+                <span>
+                  {s.authorName?.trim() ? s.authorName : 'Anonymous'} · {formatSuggestionDate(s.createdAt)}
+                </span>
+                <button
+                  type="button"
+                  className="link-btn danger"
+                  onClick={() => remove(s.id)}
+                  aria-label={`Delete suggestion from ${s.authorName?.trim() ? s.authorName : 'Anonymous'}`}
+                >
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+function ChatIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 12a8 8 0 0 1-8 8H8l-5 3V12a8 8 0 1 1 18 0z" />
+    </svg>
   );
 }
 

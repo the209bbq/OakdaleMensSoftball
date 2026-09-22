@@ -56,11 +56,24 @@ function jsonOk(data: unknown) {
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes('/api/auth/me')) return jsonOk({ user: null });
       if (url.includes('/api/landing')) return jsonOk(landing);
       if (url.includes('/api/standings')) return jsonOk(standings);
       if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+      if (url.includes('/messages')) return jsonOk([]);
+      if (url.includes('/api/suggestions')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body ?? '{}')) as { text?: string; name?: string };
+          return jsonOk({
+            id: 'sg1',
+            text: body.text,
+            authorName: body.name?.trim() ? body.name.trim() : null,
+            createdAt: '2026-09-22T00:00:00.000Z',
+          });
+        }
+        return jsonOk([]);
+      }
       if (url.includes('/roster')) return jsonOk(rosterPayload);
       if (url.includes('/api/teams')) return jsonOk(teams);
       return jsonOk([]);
@@ -115,7 +128,9 @@ describe('App', () => {
       expect(screen.getByText('Welcome to the Oakdale Mens Softball League')).toBeInTheDocument();
     });
     expect(screen.getByText(/TODO: add real content/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Suggestions' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open team chat' })).not.toBeInTheDocument();
   });
 
   it('lets an admin open the landing editor', async () => {
@@ -340,5 +355,130 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('The season is underway!')).toBeInTheDocument();
     });
+  });
+
+  it('lets anyone submit a suggestion from Home and shows a thank-you', async () => {
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Suggestion')).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByLabelText('Suggestion'), { target: { value: 'Add lights to Field 3' } });
+    fireEvent.change(screen.getByLabelText('Your name (optional)'), { target: { value: 'Sam' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() => {
+      expect(screen.getByText('Thanks — we got your suggestion!')).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Suggestion')).toHaveValue('');
+  });
+
+  it('opens team chat from the app bar for a signed-in teammate', async () => {
+    const playerUser = {
+      id: 'u1',
+      email: 'pat@example.com',
+      name: 'Pat Shortstop',
+      role: 'player' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const inbox = [
+      {
+        id: 'm1',
+        teamId: 'tigers',
+        userId: 'u-mgr',
+        authorName: 'Coach',
+        text: 'Practice at 6',
+        createdAt: '2026-09-22T00:00:00.000Z',
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: playerUser });
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/messages')) {
+          if (init?.method === 'POST') {
+            const body = JSON.parse(String(init.body ?? '{}')) as { text: string };
+            const posted = {
+              id: 'm2',
+              teamId: 'tigers',
+              userId: playerUser.id,
+              authorName: playerUser.name,
+              text: body.text,
+              createdAt: '2026-09-22T00:01:00.000Z',
+            };
+            inbox.push(posted);
+            return jsonOk(posted);
+          }
+          return jsonOk([...inbox]);
+        }
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Open team chat' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open team chat' }));
+    await waitFor(() => {
+      expect(screen.getByText('Team Chat — Oakdale Tigers')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Practice at 6')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'See everyone Wed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(screen.getByText('See everyone Wed')).toBeInTheDocument();
+    });
+  });
+
+  it('lists suggestions for admins on the Admin tab', async () => {
+    const adminUser = {
+      id: 'u-admin',
+      email: 'admin@oakdale.local',
+      name: 'Commish',
+      role: 'admin' as const,
+      teamId: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: adminUser });
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/suggestions')) {
+          return jsonOk([
+            {
+              id: 'sg1',
+              text: 'Add lights to Field 3',
+              authorName: null,
+              createdAt: '2026-09-22T00:00:00.000Z',
+            },
+          ]);
+        }
+        if (url.includes('/api/manager-emails')) return jsonOk([]);
+        if (url.includes('/api/users')) return jsonOk([adminUser]);
+        if (url.includes('/messages')) return jsonOk([]);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Admin' }));
+    await waitFor(() => {
+      expect(screen.getByText('Add lights to Field 3')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Anonymous/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /delete suggestion/i })).toBeInTheDocument();
   });
 });
