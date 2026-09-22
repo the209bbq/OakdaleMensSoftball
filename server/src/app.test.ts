@@ -5,6 +5,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import request from 'supertest';
 import { createApp } from './app.js';
 import { LeagueStore } from './store.js';
+import { seedDemoUsers } from './demoUsers.js';
 
 const TEAM_OWN = 'nothin-but-dingers';
 const TEAM_OTHER = 'da-beers';
@@ -599,6 +600,120 @@ describe('LeagueStore role backfill and ensureUser', () => {
     expect(stored.name).toBe('Demo Manager');
     expect(store.authenticate('mgr@b.com', 'longenough')).not.toBeNull();
     expect(store.authenticate('mgr@b.com', 'different-password-that-should-not-apply')).toBeNull();
+  });
+});
+
+describe('seedDemoUsers create-only bootstrap', () => {
+  const silentLog = { log: () => {}, warn: () => {} };
+  const demoOpts = {
+    managerEmail: 'manager@oakdale.local',
+    managerName: 'Team Manager (demo)',
+    managerPassword: 'ManagerTest2026',
+    playerEmail: 'player@oakdale.local',
+    playerName: 'Player (demo)',
+    playerPassword: 'PlayerTest2026',
+    log: silentLog,
+  };
+
+  it('creates a missing demo manager on the first team and a demo player with no team', () => {
+    const store = new LeagueStore(null);
+    const logs: string[] = [];
+    const firstTeam = store.getTeams()[0];
+    expect(firstTeam).toBeTruthy();
+
+    const result = seedDemoUsers(store, {
+      ...demoOpts,
+      log: { log: (msg) => logs.push(String(msg)), warn: () => {} },
+    });
+
+    expect(result.managerCreated).toBe(true);
+    expect(result.playerCreated).toBe(true);
+    expect(logs.some((line) => line.includes(`Demo team manager assigned to ${firstTeam.name}`))).toBe(
+      true,
+    );
+
+    const manager = store.getUserByEmail('manager@oakdale.local')!;
+    expect(manager.role).toBe('manager');
+    expect(manager.teamId).toBe(firstTeam.id);
+    expect(manager.name).toBe('Team Manager (demo)');
+    expect(store.authenticate('manager@oakdale.local', 'ManagerTest2026')).not.toBeNull();
+
+    const player = store.getUserByEmail('player@oakdale.local')!;
+    expect(player.role).toBe('player');
+    expect(player.teamId).toBeNull();
+    expect(player.name).toBe('Player (demo)');
+    expect(store.authenticate('player@oakdale.local', 'PlayerTest2026')).not.toBeNull();
+  });
+
+  it('does not overwrite existing demo accounts on a second bootstrap (restart)', () => {
+    const store = new LeagueStore(null);
+    const firstTeam = store.getTeams()[0];
+    const otherTeam = store.getTeams().find((t) => t.id !== firstTeam.id)!;
+    expect(otherTeam).toBeTruthy();
+
+    seedDemoUsers(store, demoOpts);
+
+    const manager = store.getUserByEmail('manager@oakdale.local')!;
+    store.setUserRole(manager.id, 'manager', otherTeam.id);
+    store.updateProfile(manager.id, { name: 'Reassigned Manager' });
+
+    const player = store.getUserByEmail('player@oakdale.local')!;
+    store.setUserTeam(player.id, otherTeam.id);
+    store.updateProfile(player.id, { name: 'Joined Player' });
+
+    const assignmentLogs: string[] = [];
+    const second = seedDemoUsers(store, {
+      ...demoOpts,
+      managerName: 'Would Clobber Manager Name',
+      managerPassword: 'WouldClobberPassword',
+      playerName: 'Would Clobber Player Name',
+      playerPassword: 'WouldClobberPassword',
+      log: { log: (msg) => assignmentLogs.push(String(msg)), warn: () => {} },
+    });
+
+    expect(second.managerCreated).toBe(false);
+    expect(second.playerCreated).toBe(false);
+    expect(assignmentLogs.some((line) => line.includes('Demo team manager assigned'))).toBe(false);
+
+    const managerAfter = store.getUserByEmail('manager@oakdale.local')!;
+    expect(managerAfter.role).toBe('manager');
+    expect(managerAfter.teamId).toBe(otherTeam.id);
+    expect(managerAfter.name).toBe('Reassigned Manager');
+    expect(store.authenticate('manager@oakdale.local', 'ManagerTest2026')).not.toBeNull();
+    expect(store.authenticate('manager@oakdale.local', 'WouldClobberPassword')).toBeNull();
+
+    const playerAfter = store.getUserByEmail('player@oakdale.local')!;
+    expect(playerAfter.role).toBe('player');
+    expect(playerAfter.teamId).toBe(otherTeam.id);
+    expect(playerAfter.name).toBe('Joined Player');
+    expect(store.authenticate('player@oakdale.local', 'PlayerTest2026')).not.toBeNull();
+    expect(store.authenticate('player@oakdale.local', 'WouldClobberPassword')).toBeNull();
+  });
+
+  it('creates only the missing demo account and leaves an existing one unchanged', () => {
+    const store = new LeagueStore(null);
+    store.registerUser({
+      email: 'manager@oakdale.local',
+      name: 'Existing Mgr',
+      password: 'existing-password',
+      role: 'player',
+      teamId: null,
+    });
+
+    const result = seedDemoUsers(store, demoOpts);
+    expect(result.managerCreated).toBe(false);
+    expect(result.playerCreated).toBe(true);
+
+    const manager = store.getUserByEmail('manager@oakdale.local')!;
+    expect(manager.role).toBe('player');
+    expect(manager.teamId).toBeNull();
+    expect(manager.name).toBe('Existing Mgr');
+    expect(store.authenticate('manager@oakdale.local', 'existing-password')).not.toBeNull();
+    expect(store.authenticate('manager@oakdale.local', 'ManagerTest2026')).toBeNull();
+
+    const player = store.getUserByEmail('player@oakdale.local')!;
+    expect(player.role).toBe('player');
+    expect(player.teamId).toBeNull();
   });
 });
 
