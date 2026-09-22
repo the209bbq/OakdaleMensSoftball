@@ -184,7 +184,7 @@ export const api = {
   getLanding: () => request<Landing>('/api/landing'),
   updateLanding: (payload: LandingUpdate) =>
     request<Landing>('/api/landing', { method: 'PUT', body: JSON.stringify(payload) }),
-  getTheme: () => request<Theme>('/api/theme'),
+  getTheme: () => request<Theme>('/api/theme', { cache: 'no-store' }),
   updateTheme: (payload: ThemeUpdate) =>
     request<Theme>('/api/theme', { method: 'PUT', body: JSON.stringify(payload) }),
   getCurrentWeek: () => request<CurrentWeek | null>('/api/current-week'),

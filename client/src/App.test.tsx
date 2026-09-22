@@ -186,6 +186,9 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
     });
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Color scheme' })).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(screen.getByLabelText('Headline')).toHaveValue(landing.headline);
     fireEvent.change(screen.getByLabelText('Headline'), { target: { value: 'Play ball' } });
@@ -571,7 +574,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Color scheme' })).toBeInTheDocument();
     });
-    expect(screen.getByText('Everyone in the league sees the scheme you save.')).toBeInTheDocument();
+    expect(screen.getByText(/everyone in the league sees the scheme you save/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /grass field/i }));
     await waitFor(() => {
       expect(screen.getByText('Color scheme saved: Grass field.')).toBeInTheDocument();

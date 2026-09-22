@@ -58,10 +58,21 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    api
-      .getTheme()
-      .then(applyTheme)
-      .catch(() => undefined);
+    let cancelled = false;
+    async function loadTheme() {
+      try {
+        const theme = await api.getTheme();
+        if (!cancelled) applyTheme(theme);
+      } catch {
+        /* keep the last applied theme */
+      }
+    }
+    void loadTheme();
+    const timer = window.setInterval(() => void loadTheme(), 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   return (
@@ -478,6 +489,12 @@ function LandingPage() {
       )}
 
       <CountdownCard label={landing.countdownLabel} target={landing.effectiveCountdownTarget} />
+
+      {isAdmin && (
+        <section className="card">
+          <ColorSchemeAdmin onError={setError} onMessage={setMessage} />
+        </section>
+      )}
 
       <section className="card landing-announcement">
         <div className="landing-announcement-head">
@@ -1753,6 +1770,7 @@ function ColorSchemeAdmin({
   const [primary, setPrimary] = useState('#0b2545');
   const [accent, setAccent] = useState('#f2a900');
   const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -1780,7 +1798,8 @@ function ColorSchemeAdmin({
       setPrimary(saved.primary);
       setAccent(saved.accent);
       applyTheme(saved);
-      onMessage(`Color scheme saved: ${saved.label}.`);
+      setStatus(`Color scheme saved: ${saved.label}.`);
+      onMessage(null);
     } catch (err) {
       onError((err as Error).message);
     } finally {
@@ -1793,7 +1812,8 @@ function ColorSchemeAdmin({
   return (
     <div className="theme-panel">
       <h3>Color scheme</h3>
-      <p className="theme-help">Everyone in the league sees the scheme you save.</p>
+      <p className="theme-help">Everyone in the league sees the scheme you save. Tap a swatch to apply it now.</p>
+      {status && <p className="message">{status}</p>}
       <div className="theme-grid">
         {theme.presets.map((preset) => (
           <button
