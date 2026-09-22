@@ -79,7 +79,7 @@ function renderApp() {
 describe('App', () => {
   it('renders the app bar title', () => {
     renderApp();
-    expect(screen.getByText(/Oakdale MSB/i)).toBeInTheDocument();
+    expect(screen.getByText(/Oakdale Mens Softball League/i)).toBeInTheDocument();
   });
 
   it('shows a Sign in button when logged out', async () => {
