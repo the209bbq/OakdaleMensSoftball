@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { createApp } from './app.js';
 import { LeagueStore } from './store.js';
+import { seedDemoUsers } from './demoUsers.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
@@ -29,40 +30,18 @@ console.log(`[oakdale-softball] Admin account: ${admin.email}`);
 
 // Demo accounts (admin / team manager / player) are for testing.
 // Disable with SEED_DEMO_USERS=false in production.
+// Create-only: existing demo accounts are never overwritten on restart.
 if (process.env.SEED_DEMO_USERS !== 'false') {
-  const teams = store.getTeams();
-  const managerEmail = process.env.DEMO_MANAGER_EMAIL || 'manager@oakdale.local';
-  const managerName = process.env.DEMO_MANAGER_NAME || 'Team Manager (demo)';
-  const managerPassword = process.env.DEMO_MANAGER_PASSWORD || 'ManagerTest2026';
-  let seededManagerEmail: string | null = null;
-  if (teams.length === 0) {
-    console.warn('[oakdale-softball] Skipping demo team manager — no teams exist to assign');
-  } else {
-    const team = teams[0];
-    const manager = store.ensureUser({
-      email: managerEmail,
-      name: managerName,
-      password: managerPassword,
-      role: 'manager',
-      teamId: team.id,
-    });
-    seededManagerEmail = manager.email;
-    console.log(`[oakdale-softball] Demo team manager assigned to ${team.name} (${team.id})`);
-  }
-
-  const playerEmail = process.env.DEMO_PLAYER_EMAIL || 'player@oakdale.local';
-  const playerName = process.env.DEMO_PLAYER_NAME || 'Player (demo)';
-  const playerPassword = process.env.DEMO_PLAYER_PASSWORD || 'PlayerTest2026';
-  const player = store.ensureUser({
-    email: playerEmail,
-    name: playerName,
-    password: playerPassword,
-    role: 'player',
-    teamId: null,
+  const seeded = seedDemoUsers(store, {
+    managerEmail: process.env.DEMO_MANAGER_EMAIL || 'manager@oakdale.local',
+    managerName: process.env.DEMO_MANAGER_NAME || 'Team Manager (demo)',
+    managerPassword: process.env.DEMO_MANAGER_PASSWORD || 'ManagerTest2026',
+    playerEmail: process.env.DEMO_PLAYER_EMAIL || 'player@oakdale.local',
+    playerName: process.env.DEMO_PLAYER_NAME || 'Player (demo)',
+    playerPassword: process.env.DEMO_PLAYER_PASSWORD || 'PlayerTest2026',
   });
-
   console.log(
-    `[oakdale-softball] Demo account emails: ${admin.email}, ${seededManagerEmail ?? managerEmail}, ${player.email}`,
+    `[oakdale-softball] Demo account emails: ${admin.email}, ${seeded.managerEmail}, ${seeded.playerEmail}`,
   );
 }
 
