@@ -119,8 +119,9 @@ describe('App', () => {
     expect(screen.getByText('Field 1')).toBeInTheDocument();
     expect(screen.getByText('6:00 PM')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /hide details/i })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText(/Da Beers: 🥎 1 · 💩 1 · — 0/)).toBeInTheDocument();
-    expect(screen.getByText(/Oakdale Tigers: 🥎 0 · 💩 0 · — 0/)).toBeInTheDocument();
+    const attLines = screen.getAllByText((_, node) => node?.classList.contains('game-att-line') ?? false);
+    expect(attLines[0].textContent).toMatch(/Da Beers:\s*🥎 1 · 💩 1 · — 0/);
+    expect(attLines[1].textContent).toMatch(/Oakdale Tigers:\s*🥎 0 · 💩 0 · — 0/);
   });
 
   it('shows compact per-team attendance chips on collapsed schedule rows', async () => {
