@@ -2619,7 +2619,7 @@ function Admin() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [newTeam, setNewTeam] = useState('');
-  const [mgrEmails, setMgrEmails] = useState('');
+  const [mgrPlayerId, setMgrPlayerId] = useState('');
   const [mgrTeamId, setMgrTeamId] = useState('');
   const [mgrOnRoster, setMgrOnRoster] = useState(true);
   const [authorizations, setAuthorizations] = useState<ManagerAuthorization[]>([]);
@@ -2630,6 +2630,22 @@ function Admin() {
   const [testDataSummary, setTestDataSummary] = useState<string | null>(null);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
+  const managedTeamIds = useMemo(
+    () => new Set(users.filter((u) => u.role === 'manager' && u.teamId).map((u) => u.teamId as string)),
+    [users],
+  );
+  const openTeams = useMemo(() => teams.filter((t) => !managedTeamIds.has(t.id)), [teams, managedTeamIds]);
+  const playerAccounts = useMemo(() => users.filter((u) => u.role === 'player'), [users]);
+
+  useEffect(() => {
+    setMgrTeamId((current) => (openTeams.some((t) => t.id === current) ? current : openTeams[0]?.id ?? ''));
+  }, [openTeams]);
+
+  useEffect(() => {
+    setMgrPlayerId((current) =>
+      playerAccounts.some((u) => u.id === current) ? current : playerAccounts[0]?.id ?? '',
+    );
+  }, [playerAccounts]);
 
   function load() {
     api.listUsers().then(setUsers).catch((e) => setError(e.message));
@@ -2638,7 +2654,6 @@ function Admin() {
       .then((next) => {
         setTeams(next);
         setDrafts(Object.fromEntries(next.map((t) => [t.id, t.name])));
-        setMgrTeamId((current) => current || next[0]?.id || '');
       })
       .catch((e) => setError(e.message));
     api.listManagerEmails().then(setAuthorizations).catch((e) => setError(e.message));
@@ -2690,7 +2705,9 @@ function Admin() {
     setMessage(null);
     setAuthorizing(true);
     try {
-      const result = await api.authorizeManagers(mgrEmails, mgrTeamId, mgrOnRoster);
+      const player = playerAccounts.find((u) => u.id === mgrPlayerId);
+      if (!player) throw new Error('Pick a player to promote');
+      const result = await api.authorizeManagers(player.email, mgrTeamId, mgrOnRoster);
       const parts = [`Promoted ${result.promoted.length} player${result.promoted.length === 1 ? '' : 's'} to manager.`];
       if (result.skipped.length) {
         parts.push(
@@ -2698,7 +2715,6 @@ function Admin() {
         );
       }
       setMessage(parts.join(' '));
-      setMgrEmails('');
       load();
     } catch (err) {
       setError((err as Error).message);
@@ -2925,52 +2941,62 @@ function Admin() {
       </form>
 
       <h3 className="admin-users-heading">Promote players to manager</h3>
-      <form className="mgr-auth-form" onSubmit={authorizeManagers}>
-        <label className="field">
-          Player emails
-          <textarea
-            aria-label="Manager emails"
-            placeholder="player@example.com"
-            value={mgrEmails}
-            onChange={(e) => setMgrEmails(e.target.value)}
-            rows={3}
-            required
-          />
-        </label>
-        <label className="field">
-          Team:{' '}
-          <select
-            aria-label="Manager team"
-            value={mgrTeamId}
-            onChange={(e) => setMgrTeamId(e.target.value)}
-            required
-          >
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Also plays:{' '}
-          <select
-            aria-label="Manager roster option"
-            value={mgrOnRoster ? 'player' : 'only'}
-            onChange={(e) => setMgrOnRoster(e.target.value === 'player')}
-          >
-            <option value="player">Yes — for this team</option>
-            <option value="only">Manager only</option>
-          </select>
-        </label>
-        <p className="theme-help">
-          Only existing player accounts can become managers. They sign up first, then you
-          promote them. Playing managers stay on the team they manage.
-        </p>
-        <button className="primary-btn" type="submit" disabled={authorizing || !mgrTeamId}>
-          {authorizing ? 'Promoting…' : 'Promote to manager'}
-        </button>
-      </form>
+      {openTeams.length === 0 ? (
+        <p className="member-empty">Every team already has a manager.</p>
+      ) : playerAccounts.length === 0 ? (
+        <p className="member-empty">No player accounts to promote yet.</p>
+      ) : (
+        <form className="mgr-auth-form" onSubmit={authorizeManagers}>
+          <label className="field">
+            Team without a manager:{' '}
+            <select
+              aria-label="Team without a manager"
+              value={mgrTeamId}
+              onChange={(e) => setMgrTeamId(e.target.value)}
+              required
+            >
+              {openTeams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Player:{' '}
+            <select
+              aria-label="Player to promote"
+              value={mgrPlayerId}
+              onChange={(e) => setMgrPlayerId(e.target.value)}
+              required
+            >
+              {playerAccounts.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.email})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Also plays:{' '}
+            <select
+              aria-label="Manager roster option"
+              value={mgrOnRoster ? 'player' : 'only'}
+              onChange={(e) => setMgrOnRoster(e.target.value === 'player')}
+            >
+              <option value="player">Yes — for this team</option>
+              <option value="only">Manager only</option>
+            </select>
+          </label>
+          <p className="theme-help">
+            Only teams that still need a manager are listed. Pick an existing player to
+            promote. Playing managers stay on the team they manage.
+          </p>
+          <button className="primary-btn" type="submit" disabled={authorizing || !mgrTeamId || !mgrPlayerId}>
+            {authorizing ? 'Promoting…' : 'Promote to manager'}
+          </button>
+        </form>
+      )}
       {authorizations.length === 0 ? (
         <p className="member-empty">No team managers yet.</p>
       ) : (

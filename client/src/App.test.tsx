@@ -875,6 +875,72 @@ describe('App', () => {
       onRoster: true,
       createdAt: '2026-04-01T00:00:00.000Z',
     };
+    const playerUser = {
+      id: 'u-player',
+      email: 'pat@oakdale.local',
+      name: 'Pat',
+      role: 'player' as const,
+      teamId: 'beers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const adminTeams = [
+      { id: 'tigers', name: 'Oakdale Tigers' },
+      { id: 'beers', name: 'Cold Beers' },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: adminUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/manager-emails')) return jsonOk([]);
+        if (url.includes('/api/users')) return jsonOk([adminUser, managerUser, playerUser]);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(adminTeams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Admin' }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Promote players to manager' })).toBeInTheDocument();
+    });
+    const teamSelect = screen.getByLabelText('Team without a manager');
+    expect(teamSelect).toHaveDisplayValue('Cold Beers');
+    expect(teamSelect).not.toHaveTextContent('Oakdale Tigers');
+    expect(screen.getByLabelText('Player to promote')).toHaveDisplayValue(/Pat/);
+    expect(screen.getByLabelText('Manager roster option')).toHaveDisplayValue('Yes — for this team');
+    expect(
+      screen.getByText(/only teams that still need a manager are listed/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Manager type for David')).toHaveDisplayValue('Plays for this team');
+  });
+
+  it('hides the promote form when every team already has a manager', async () => {
+    const adminUser = {
+      id: 'u-admin',
+      email: 'admin@oakdale.local',
+      name: 'Commish',
+      role: 'admin' as const,
+      teamId: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const managerUser = {
+      id: 'u-mgr',
+      email: 'manager@oakdale.local',
+      name: 'David',
+      role: 'manager' as const,
+      teamId: 'tigers',
+      onRoster: true,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
@@ -898,13 +964,9 @@ describe('App', () => {
     });
     fireEvent.click(screen.getByRole('tab', { name: 'Admin' }));
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Promote players to manager' })).toBeInTheDocument();
+      expect(screen.getByText('Every team already has a manager.')).toBeInTheDocument();
     });
-    expect(screen.getByLabelText('Manager roster option')).toHaveDisplayValue('Yes — for this team');
-    expect(
-      screen.getByText(/only existing player accounts can become managers/i),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText('Manager type for David')).toHaveDisplayValue('Plays for this team');
+    expect(screen.queryByLabelText('Team without a manager')).not.toBeInTheDocument();
   });
 
   it('lets a manager choose whether they play for their own team, without a second team picker', async () => {
