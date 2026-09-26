@@ -134,6 +134,9 @@ beforeEach(() => {
       if (url.includes('/api/landing')) return jsonOk(landing);
       if (url.includes('/api/standings')) return jsonOk(standings);
       if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+      if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) {
+        return jsonOk(scheduleGames[0]);
+      }
       if (url.includes('/messages')) return jsonOk([]);
       if (url.includes('/api/suggestions')) {
         if (init?.method === 'POST') {
@@ -156,6 +159,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.history.replaceState({}, '', '/');
 });
 
 function renderApp() {
@@ -256,21 +260,24 @@ describe('App', () => {
     });
   });
 
-  it('expands a schedule game to show field, time, location, and week', async () => {
+  it('opens a schedule game on its own page', async () => {
     renderApp();
     fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
     await waitFor(() => {
       expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
     });
-    const toggle = screen.getByRole('button', { name: /show details for da beers at oakdale tigers/i });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const open = screen.getByRole('button', { name: /open game: da beers at oakdale tigers/i });
+    expect(screen.getAllByText('Upcoming').length).toBeGreaterThan(0);
     expect(screen.queryByText('Kerr Park')).not.toBeInTheDocument();
 
-    fireEvent.click(toggle);
+    fireEvent.click(open);
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Da Beers at Oakdale Tigers' })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Back to schedule' })).toBeInTheDocument();
     expect(screen.getByText('Kerr Park')).toBeInTheDocument();
     expect(screen.getByText('Field 1')).toBeInTheDocument();
     expect(screen.getByText('6:00 PM')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /hide details/i })).toHaveAttribute('aria-expanded', 'true');
     const attLines = screen.getAllByText((_, node) => node?.classList.contains('game-att-line') ?? false);
     expect(attLines[0].textContent).toMatch(/Da Beers:\s*🥎 1 · 💩 1 · — 0/);
     expect(attLines[1].textContent).toMatch(/Oakdale Tigers:\s*🥎 0 · 💩 0 · — 0/);
@@ -290,8 +297,24 @@ describe('App', () => {
     expect(screen.getByText(/Top 1 · Da Beers/)).toBeInTheDocument();
     expect(screen.getByLabelText('Da Beers lineup')).toBeInTheDocument();
     expect(screen.getByLabelText('Oakdale Tigers lineup')).toBeInTheDocument();
-    expect(screen.getAllByText('Upcoming').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /start live scorekeeping/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to schedule' }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Season Schedule' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('heading', { name: 'Da Beers at Oakdale Tigers' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open game: da beers at oakdale tigers/i })).toBeInTheDocument();
+  });
+
+  it('opens a deep-linked game page from /games/:id', async () => {
+    window.history.replaceState({}, '', '/games/g1');
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Da Beers at Oakdale Tigers' })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Back to schedule' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Live box score')).toBeInTheDocument();
   });
 
   it('lets a manager start live scorekeeping and bump runs', async () => {
@@ -338,6 +361,7 @@ describe('App', () => {
         if (url.includes('/scorelog/start') && init?.method === 'POST') return jsonOk(startedGame);
         if (url.includes('/scorelog/inning') && init?.method === 'POST') return jsonOk(scoredGame);
         if (url.includes('/scorelog/stat') && init?.method === 'POST') return jsonOk(scoredGame);
+        if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) return jsonOk(liveGame);
         if (url.includes('/api/schedule')) return jsonOk([liveGame]);
         if (url.includes('/api/teams')) return jsonOk(teams);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
@@ -351,8 +375,10 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: /show details for da beers at oakdale tigers/i }));
-    expect(screen.getByRole('button', { name: /start live scorekeeping/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /open game: da beers at oakdale tigers/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /start live scorekeeping/i })).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole('button', { name: /start live scorekeeping/i }));
     await waitFor(() => {
       expect(screen.getByText('LIVE')).toBeInTheDocument();
@@ -362,7 +388,7 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: /Increase Oakdale Tigers inning/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Increase Oakdale Tigers R' }));
     await waitFor(() => {
-      expect(screen.getByText('LIVE 0–1')).toBeInTheDocument();
+      expect(screen.getByLabelText('Live box score')).toHaveTextContent(/0\s*LIVE\s*1/);
     });
   });
 
@@ -404,6 +430,7 @@ describe('App', () => {
         if (url.includes('/api/landing')) return jsonOk(landing);
         if (url.includes('/api/standings')) return jsonOk(standings);
         if (url.includes('/lineups/') && init?.method === 'PUT') return jsonOk(saved);
+        if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) return jsonOk(editable);
         if (url.includes('/api/schedule')) return jsonOk([editable]);
         if (url.includes('/api/teams')) return jsonOk(teams);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
@@ -417,8 +444,10 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: /show details for da beers at oakdale tigers/i }));
-    expect(screen.getByRole('button', { name: 'Save Oakdale Tigers lineup' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /open game: da beers at oakdale tigers/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Save Oakdale Tigers lineup' })).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Move David down' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save Oakdale Tigers lineup' }));
     await waitFor(() => {
@@ -434,6 +463,48 @@ describe('App', () => {
     });
     expect(screen.getByLabelText('1 of 2 checked in')).toHaveTextContent('🥎 1/2');
     expect(screen.getByLabelText('No roster accounts')).toHaveTextContent('—');
+    expect(screen.queryByLabelText('Live games')).not.toBeInTheDocument();
+  });
+
+  it('pins live games at the top of the schedule', async () => {
+    const liveGame = {
+      ...scheduleGames[0],
+      scoring: {
+        ...scheduleGames[0].scoring!,
+        phase: 'live' as const,
+        open: true,
+        liveStartedAt: '2026-05-06T18:05:00.000Z',
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: null });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk([liveGame]);
+        if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) {
+          return jsonOk(liveGame);
+        }
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/messages')) return jsonOk([]);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Live games')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Live now')).toBeInTheDocument();
+    expect(screen.getAllByText(/LIVE/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('button', { name: /open game: da beers at oakdale tigers/i })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Da Beers at Oakdale Tigers' })).toBeInTheDocument();
+    });
   });
 
   it('shows registered members with profiles and unregistered placeholders on Rosters', async () => {

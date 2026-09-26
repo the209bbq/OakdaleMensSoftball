@@ -833,8 +833,7 @@ body {
   border-radius: 8px;
 }
 
-.game-toggle:hover,
-.game.expanded .game-toggle {
+.game-toggle:hover {
   background: var(--bg);
 }
 
@@ -878,9 +877,34 @@ body {
   transition: transform 0.15s ease;
 }
 
-.game.expanded .game-chevron {
-  transform: rotate(180deg);
+.live-now {
+  margin: 0 0 1.15rem;
+  padding: 0.2rem 0.45rem 0.35rem;
+  border: 1px solid color-mix(in srgb, #c2410c 32%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, #c2410c 9%, var(--card));
+}
+
+.live-now .week-heading {
+  color: #c2410c;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 0.7rem;
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--heading);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.game-page-when {
+  margin: -0.35rem 0 0.85rem;
+  color: var(--muted);
+  font-weight: 600;
 }
 
 .at {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api, type CurrentWeek, type Game, type GameBoxScore, type GameLineup, type InningHalf, type Landing, type LineupPlayer, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
@@ -14,6 +14,43 @@ const TAB_TITLES: Record<Tab, string> = {
   rules: 'Rules',
   admin: 'Admin',
 };
+
+const TABS = new Set<Tab>(['home', 'standings', 'schedule', 'rosters', 'rules', 'admin']);
+
+type AppRoute = { tab: Tab; gameId: string | null };
+
+function parseRoute(pathname: string): AppRoute {
+  const parts = pathname.split('/').filter(Boolean);
+  if (parts[0] === 'games' && parts[1]) {
+    return { tab: 'schedule', gameId: decodeURIComponent(parts[1]) };
+  }
+  const tab = parts[0];
+  if (tab && TABS.has(tab as Tab)) return { tab: tab as Tab, gameId: null };
+  return { tab: 'home', gameId: null };
+}
+
+function pathForTab(tab: Tab): string {
+  return tab === 'home' ? '/' : `/${tab}`;
+}
+
+function pathForGame(gameId: string): string {
+  return `/games/${gameId}`;
+}
+
+function useRoute() {
+  const [path, setPath] = useState(() => window.location.pathname);
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  const navigate = useCallback((next: string) => {
+    if (next === window.location.pathname) return;
+    window.history.pushState({}, '', next);
+    setPath(next);
+  }, []);
+  return { route: parseRoute(path), navigate };
+}
 
 /** Admins manage any team; team managers only their assigned team. */
 function canManageTeam(user: User | null, teamId: string | null): boolean {
@@ -43,15 +80,16 @@ function initials(name: string): string {
 
 export default function App() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<Tab>('home');
+  const { route, navigate } = useRoute();
+  const tab = route.tab;
   const [authOpen, setAuthOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
 
   // If a non-admin lands on the admin tab (e.g. after logout), bounce them out.
   useEffect(() => {
-    if (tab === 'admin' && user?.role !== 'admin') setTab('home');
-  }, [tab, user]);
+    if (tab === 'admin' && user?.role !== 'admin') navigate('/');
+  }, [tab, user, navigate]);
 
   useEffect(() => {
     if (!canOpenTeamChat(user)) setChatOpen(false);
@@ -82,7 +120,7 @@ export default function App() {
           <img className="app-logo" src="/app-icon.svg" alt="" width="28" height="28" />
           <div className="app-bar-text">
             <span className="app-bar-title">Oakdale Mens Softball League</span>
-            <span className="app-bar-sub">{TAB_TITLES[tab]}</span>
+            <span className="app-bar-sub">{route.gameId ? 'Game' : TAB_TITLES[tab]}</span>
           </div>
           <div className="app-bar-actions">
             {canOpenTeamChat(user) && (
@@ -103,20 +141,25 @@ export default function App() {
       <main className="app-content">
         {tab === 'home' && <LandingPage />}
         {tab === 'standings' && <Standings />}
-        {tab === 'schedule' && <Schedule />}
+        {tab === 'schedule' && route.gameId && (
+          <GamePage gameId={route.gameId} onBack={() => navigate(pathForTab('schedule'))} />
+        )}
+        {tab === 'schedule' && !route.gameId && (
+          <Schedule onOpenGame={(id) => navigate(pathForGame(id))} />
+        )}
         {tab === 'rosters' && <Rosters />}
         {tab === 'rules' && <Rules />}
         {tab === 'admin' && user?.role === 'admin' && <Admin />}
       </main>
 
       <nav className="tab-bar" role="tablist" aria-label="Main navigation">
-        <TabButton tab="home" current={tab} onSelect={setTab} label="Home" icon={HomeIcon} />
-        <TabButton tab="standings" current={tab} onSelect={setTab} label="Standings" icon={TrophyIcon} />
-        <TabButton tab="schedule" current={tab} onSelect={setTab} label="Schedule" icon={CalendarIcon} />
-        <TabButton tab="rosters" current={tab} onSelect={setTab} label="Rosters" icon={RosterIcon} />
-        <TabButton tab="rules" current={tab} onSelect={setTab} label="Rules" icon={RulesIcon} />
+        <TabButton tab="home" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Home" icon={HomeIcon} />
+        <TabButton tab="standings" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Standings" icon={TrophyIcon} />
+        <TabButton tab="schedule" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Schedule" icon={CalendarIcon} />
+        <TabButton tab="rosters" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Rosters" icon={RosterIcon} />
+        <TabButton tab="rules" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Rules" icon={RulesIcon} />
         {user?.role === 'admin' && (
-          <TabButton tab="admin" current={tab} onSelect={setTab} label="Admin" icon={GearIcon} />
+          <TabButton tab="admin" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Admin" icon={GearIcon} />
         )}
       </nav>
 
@@ -1093,7 +1136,37 @@ function groupGamesByWeek(games: Game[]): { week: number; date: string; games: G
   return groups;
 }
 
-function Schedule() {
+function GameRow({ game, onOpen }: { game: Game; onOpen: (id: string) => void }) {
+  return (
+    <li className={`game ${game.played ? 'played' : 'upcoming'}`}>
+      <button
+        type="button"
+        className="game-toggle"
+        aria-label={`Open game: ${game.awayTeamName} at ${game.homeTeamName} on ${formatGameDate(game.date)}`}
+        onClick={() => onOpen(game.id)}
+      >
+        <span className="game-date">{formatGameDate(game.date)}</span>
+        <span className="game-teams">
+          <span className="game-team">
+            {game.awayTeamName} <AttendanceChip attendance={game.awayAttendance} />
+          </span>
+          <span className="at">@</span>
+          <span className="game-team">
+            {game.homeTeamName} <AttendanceChip attendance={game.homeAttendance} />
+          </span>
+        </span>
+        <GameScoreLabel game={game} />
+        <span className="game-chevron" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function Schedule({ onOpenGame }: { onOpenGame: (id: string) => void }) {
   const { user } = useAuth();
   const [games, setGames] = useState<Game[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -1101,34 +1174,18 @@ function Schedule() {
   const [weeks, setWeeks] = useState('11');
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
 
   const isAdmin = user?.role === 'admin';
   const weekGroups = useMemo(() => groupGamesByWeek(games), [games]);
-  const expandedGame = games.find((g) => g.id === expanded);
-  const shouldPoll =
-    Boolean(expanded) &&
-    (expandedGame?.scoring?.phase === 'live' || expandedGame?.scoring?.phase === 'grace');
+  const liveGames = useMemo(
+    () => games.filter((g) => g.scoring?.phase === 'live' || g.scoring?.phase === 'grace'),
+    [games],
+  );
 
   function load() {
     api.getSchedule().then(setGames).catch((e) => setError(e.message));
   }
   useEffect(load, [user?.id, user?.role, user?.teamId]);
-
-  useEffect(() => {
-    if (!shouldPoll || !expanded) return;
-    const timer = window.setInterval(() => {
-      api
-        .getGame(expanded)
-        .then((next) => {
-          setGames((current) => current.map((g) => (g.id === next.id ? next : g)));
-        })
-        .catch(() => {
-          /* keep last good snapshot */
-        });
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [shouldPoll, expanded]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -1141,21 +1198,12 @@ function Schedule() {
         Number.isInteger(weeksNum) ? weeksNum : undefined,
       );
       setGames(next);
-      setExpanded(null);
       setMessage(`Generated ${next.length} games from the current teams.`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setGenerating(false);
     }
-  }
-
-  function patchGame(next: Game) {
-    setGames((current) => current.map((g) => (g.id === next.id ? next : g)));
-  }
-
-  function toggleGame(id: string) {
-    setExpanded((current) => (current === id ? null : id));
   }
 
   if (error) return <p className="error">{error}</p>;
@@ -1191,84 +1239,127 @@ function Schedule() {
         </div>
       )}
       {message && <p className="message">{message}</p>}
+      {liveGames.length > 0 && (
+        <div className="live-now" aria-label="Live games">
+          <h3 className="week-heading">Live now</h3>
+          <ul className="games">
+            {liveGames.map((g) => (
+              <GameRow key={`live-${g.id}`} game={g} onOpen={onOpenGame} />
+            ))}
+          </ul>
+        </div>
+      )}
       {weekGroups.map((group) => (
         <div key={`${group.week}-${group.date}`} className="week-group">
           <h3 className="week-heading">
             {group.week ? `Week ${group.week} — ${formatGameDate(group.date)}` : formatGameDate(group.date)}
           </h3>
           <ul className="games">
-            {group.games.map((g) => {
-              const isOpen = expanded === g.id;
-              return (
-                <li key={g.id} className={`game ${g.played ? 'played' : 'upcoming'} ${isOpen ? 'expanded' : ''}`}>
-                  <button
-                    type="button"
-                    className="game-toggle"
-                    aria-expanded={isOpen}
-                    aria-label={`${isOpen ? 'Hide' : 'Show'} details for ${g.awayTeamName} at ${g.homeTeamName} on ${formatGameDate(g.date)}`}
-                    onClick={() => toggleGame(g.id)}
-                  >
-                    <span className="game-date">{formatGameDate(g.date)}</span>
-                    <span className="game-teams">
-                      <span className="game-team">
-                        {g.awayTeamName} <AttendanceChip attendance={g.awayAttendance} />
-                      </span>
-                      <span className="at">@</span>
-                      <span className="game-team">
-                        {g.homeTeamName} <AttendanceChip attendance={g.homeAttendance} />
-                      </span>
-                    </span>
-                    <GameScoreLabel game={g} />
-                    <span className="game-chevron" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                    </span>
-                  </button>
-                  {isOpen && (
-                    <div className="game-details">
-                      <dl className="game-meta">
-                        <div>
-                          <dt>Time</dt>
-                          <dd>{g.time || 'TBD'}</dd>
-                        </div>
-                        <div>
-                          <dt>Field</dt>
-                          <dd>{g.field || 'TBD'}</dd>
-                        </div>
-                        <div>
-                          <dt>Location</dt>
-                          <dd>{g.location || 'Kerr Park'}</dd>
-                        </div>
-                        <div>
-                          <dt>Week</dt>
-                          <dd>{g.week || '—'}</dd>
-                        </div>
-                      </dl>
-                      <div className="game-attendance">
-                        <AttendanceBreakdown name={g.awayTeamName} attendance={g.awayAttendance} />
-                        <AttendanceBreakdown name={g.homeTeamName} attendance={g.homeAttendance} />
-                      </div>
-                      <GameLineups
-                        game={g}
-                        onChanged={patchGame}
-                        onMessage={setMessage}
-                        onError={setError}
-                      />
-                      <LiveScoreboard
-                        game={g}
-                        onChanged={patchGame}
-                        onMessage={setMessage}
-                        onError={setError}
-                      />
-                    </div>
-                  )}
-                </li>
-              );
-            })}
+            {group.games.map((g) => (
+              <GameRow key={g.id} game={g} onOpen={onOpenGame} />
+            ))}
           </ul>
         </div>
       ))}
+    </section>
+  );
+}
+
+function GamePage({ gameId, onBack }: { gameId: string; onBack: () => void }) {
+  const { user } = useAuth();
+  const [game, setGame] = useState<Game | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const shouldPoll = game?.scoring?.phase === 'live' || game?.scoring?.phase === 'grace';
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    api
+      .getGame(gameId)
+      .then((next) => {
+        if (!cancelled) setGame(next);
+      })
+      .catch((e) => {
+        if (!cancelled) setError((e as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gameId, user?.id, user?.role, user?.teamId]);
+
+  useEffect(() => {
+    if (!shouldPoll) return;
+    const timer = window.setInterval(() => {
+      api
+        .getGame(gameId)
+        .then(setGame)
+        .catch(() => {
+          /* keep last good snapshot */
+        });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [shouldPoll, gameId]);
+
+  if (error) {
+    return (
+      <section className="card game-page">
+        <button type="button" className="back-link" onClick={onBack} aria-label="Back to schedule">
+          ← Schedule
+        </button>
+        <p className="error">{error}</p>
+      </section>
+    );
+  }
+  if (!game) {
+    return (
+      <section className="card game-page">
+        <button type="button" className="back-link" onClick={onBack} aria-label="Back to schedule">
+          ← Schedule
+        </button>
+        <p>Loading game…</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card game-page">
+      <button type="button" className="back-link" onClick={onBack} aria-label="Back to schedule">
+        ← Schedule
+      </button>
+      <h2>
+        {game.awayTeamName} at {game.homeTeamName}
+      </h2>
+      <p className="game-page-when">
+        {formatGameDate(game.date)}
+        {game.time ? ` · ${game.time}` : ''}
+        {game.week ? ` · Week ${game.week}` : ''}
+      </p>
+      {message && <p className="message">{message}</p>}
+      <dl className="game-meta">
+        <div>
+          <dt>Time</dt>
+          <dd>{game.time || 'TBD'}</dd>
+        </div>
+        <div>
+          <dt>Field</dt>
+          <dd>{game.field || 'TBD'}</dd>
+        </div>
+        <div>
+          <dt>Location</dt>
+          <dd>{game.location || 'Kerr Park'}</dd>
+        </div>
+        <div>
+          <dt>Week</dt>
+          <dd>{game.week || '—'}</dd>
+        </div>
+      </dl>
+      <div className="game-attendance">
+        <AttendanceBreakdown name={game.awayTeamName} attendance={game.awayAttendance} />
+        <AttendanceBreakdown name={game.homeTeamName} attendance={game.homeAttendance} />
+      </div>
+      <GameLineups game={game} onChanged={setGame} onMessage={setMessage} onError={setError} />
+      <LiveScoreboard game={game} onChanged={setGame} onMessage={setMessage} onError={setError} />
     </section>
   );
 }
