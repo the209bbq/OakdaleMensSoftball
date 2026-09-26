@@ -206,14 +206,38 @@ This is **informational** — not a copy-paste deploy of this repo today.
 
 ---
 
-## C. Nearly free, keeps SQLite: Fly.io
+## C. Nearly free, keeps SQLite: Fly.io (stable `https://….fly.dev`)
 
-Fly.io runs the same Docker image with a persistent volume for `league.db`. Typical cost is about **$1–3/month** for the smallest shared-CPU VM plus a 1 GB volume. A credit card is required; it is not a $0 Always Free VM.
+This is the fastest way to a **hostname that does not change**. Fly.io runs the same Docker image with a persistent volume for `league.db`. Typical cost is about **$1–3/month** for the smallest shared-CPU VM plus a 1 GB volume. A credit card is required; it is not a $0 Always Free VM.
 
-This repo includes `fly.toml` (internal port 3001, HTTPS, volume `oakdale_data` → `/data`, `NODE_ENV=production`, `SEED_DEMO_USERS=false`). Build uses the root `Dockerfile`.
+The app URL is `https://oakdale-mens-softball.fly.dev` (or `https://<FLY_APP>.fly.dev` if you pick another name). Phones, home-screen installs, and the App Store can use that address.
+
+`fly.toml` already sets internal port 3001, `force_https`, volume `oakdale_data` → `/data`, `NODE_ENV=production`, and `SEED_DEMO_USERS=false`. Build uses the root `Dockerfile`. Passwords are **not** in git.
+
+### One-command deploy
+
+1. Create a Fly account at [fly.io/app/sign-up](https://fly.io/app/sign-up) and add a payment method (required even for the small VM).
+2. Create a **deploy token** at [fly.io/dashboard/personal/tokens](https://fly.io/dashboard/personal/tokens) (`fly tokens create deploy` also works after `fly auth login`).
+3. From the repo root (install [flyctl](https://fly.io/docs/flyctl/install/) first):
 
 ```bash
-# From the repo root (install flyctl first: https://fly.io/docs/flyctl/install/)
+export FLY_API_TOKEN='your-deploy-token'
+export ADMIN_EMAIL=you@example.com
+export ADMIN_NAME='League Commissioner'
+export ADMIN_PASSWORD='choose-a-strong-password'
+# optional: copy an existing league.db onto the Fly volume
+# export IMPORT_DB=/path/to/league.db
+
+./scripts/deploy-fly.sh
+```
+
+The script creates the app and volume if needed, sets secrets, and runs `fly deploy --remote-only` (no local Docker). It prints the HTTPS URL when it finishes.
+
+Later deploys: put `FLY_API_TOKEN` in GitHub Actions secrets and run the **Deploy to Fly** workflow, or run `fly deploy --remote-only --ha=false` from this repo.
+
+### Manual commands (same result)
+
+```bash
 fly launch --copy-config --no-deploy
 # Accept the placeholder app name or pick your own.
 
@@ -226,10 +250,10 @@ fly secrets set \
   ADMIN_PASSWORD='choose-a-strong-password' \
   SESSION_SECRET="$(openssl rand -hex 32)"
 
-fly deploy
+fly deploy --remote-only --ha=false
 ```
 
-`fly.toml` does **not** contain passwords. Open the app URL Fly prints, hit `/api/health`, then sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+Open the app URL Fly prints, hit `/api/health`, then sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
 
 ---
 
