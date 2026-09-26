@@ -757,17 +757,17 @@ describe('Landing page', () => {
 });
 
 describe('Color scheme', () => {
-  it('returns the red, white & blue theme to anyone without auth', async () => {
+  it('returns the navy and gold theme to anyone without auth', async () => {
     const { app } = makeApp();
     const res = await request(app).get('/api/theme');
     expect(res.status).toBe(200);
     expect(res.body.id).toBe('liberty');
     expect(res.body.navy).toBe('#1d3557');
-    expect(res.body.accent).toBe('#e63946');
-    expect(res.body.onAccent).toBe('#ffffff');
+    expect(res.body.accent).toBe('#f2a900');
+    expect(res.body.onAccent).toBe('#1d3557');
     expect(res.body.presets).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'liberty', label: 'Red, white & blue' }),
+        expect.objectContaining({ id: 'liberty', label: 'Navy and gold' }),
         expect.objectContaining({ id: 'night', label: 'Night game' }),
         expect.objectContaining({ id: 'grass', label: 'Grass field' }),
         expect.objectContaining({ id: 'clay', label: 'Infield clay' }),
@@ -799,7 +799,7 @@ describe('Color scheme', () => {
     expect(get.body.id).toBe('liberty');
     expect(get.body.navy).toBe('#1d3557');
     expect(get.body.heading).toBe('#1d3557');
-    expect(get.body.accent).toBe('#e63946');
+    expect(get.body.accent).toBe('#f2a900');
   });
 
   it('lets an admin save a custom primary and accent', async () => {

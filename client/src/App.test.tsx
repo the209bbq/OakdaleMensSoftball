@@ -103,7 +103,7 @@ const theme = {
   heading: '#0b2545',
   onAccent: '#0b2545',
   presets: [
-    { id: 'liberty' as const, label: 'Red, white & blue', blurb: 'Navy, clean white, and a quiet crimson', primary: '#1d3557', accent: '#e63946' },
+    { id: 'liberty' as const, label: 'Navy and gold', blurb: 'Navy, clean white, and a quiet gold', primary: '#1d3557', accent: '#f2a900' },
     { id: 'classic' as const, label: 'Classic navy', blurb: 'Original navy and gold', primary: '#0b2545', accent: '#f2a900' },
     { id: 'night' as const, label: 'Night game', blurb: 'Dark diamond, gold lights', primary: '#0a1220', accent: '#f2a900' },
     { id: 'grass' as const, label: 'Grass field', blurb: 'Green turf and yellow seams', primary: '#14532d', accent: '#facc15' },
@@ -810,14 +810,14 @@ describe('App', () => {
     const liberty = {
       ...theme,
       id: 'liberty' as const,
-      label: 'Red, white & blue',
+      label: 'Navy and gold',
       primary: '#1d3557',
-      accent: '#e63946',
+      accent: '#f2a900',
       navy: '#1d3557',
       navyLight: '#27436b',
-      accentDark: '#c1121f',
+      accentDark: '#d99400',
       heading: '#1d3557',
-      onAccent: '#ffffff',
+      onAccent: '#1d3557',
     };
     vi.stubGlobal(
       'fetch',
@@ -849,11 +849,11 @@ describe('App', () => {
       expect(screen.getByRole('heading', { name: 'Color scheme' })).toBeInTheDocument();
     });
     expect(screen.getByText(/everyone in the league sees the scheme you save/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /red, white & blue/i }));
+    fireEvent.click(screen.getByRole('button', { name: /navy and gold/i }));
     await waitFor(() => {
-      expect(screen.getByText('Color scheme saved: Red, white & blue.')).toBeInTheDocument();
+      expect(screen.getByText('Color scheme saved: Navy and gold.')).toBeInTheDocument();
     });
     expect(document.documentElement.style.getPropertyValue('--navy')).toBe('#1d3557');
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#e63946');
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#f2a900');
   });
 });

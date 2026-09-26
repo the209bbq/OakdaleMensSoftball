@@ -39,20 +39,20 @@ const HEX = /^#([0-9a-f]{6})$/i;
 export const THEME_PRESETS: ThemePreset[] = [
   {
     id: 'liberty',
-    label: 'Red, white & blue',
-    blurb: 'Navy, clean white, and a quiet crimson',
+    label: 'Navy and gold',
+    blurb: 'Navy, clean white, and a quiet gold',
     colors: {
       navy: '#1d3557',
       navyLight: '#27436b',
-      accent: '#e63946',
-      accentDark: '#c1121f',
+      accent: '#f2a900',
+      accentDark: '#d99400',
       bg: '#f7f8fb',
       card: '#ffffff',
       text: '#1d2a3a',
       muted: '#5d6d7e',
       border: '#d8e0ea',
       heading: '#1d3557',
-      onAccent: '#ffffff',
+      onAccent: '#1d3557',
     },
   },
   {

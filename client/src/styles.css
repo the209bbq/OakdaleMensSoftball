@@ -1,15 +1,15 @@
 :root {
   --navy: #1d3557;
   --navy-light: #27436b;
-  --accent: #e63946;
-  --accent-dark: #c1121f;
+  --accent: #f2a900;
+  --accent-dark: #d99400;
   --bg: #f7f8fb;
   --card: #ffffff;
   --text: #1d2a3a;
   --muted: #5d6d7e;
   --border: #d8e0ea;
   --heading: #1d3557;
-  --on-accent: #ffffff;
+  --on-accent: #1d3557;
 }
 
 * {
@@ -933,8 +933,8 @@ body {
 }
 
 .game-score.live {
-  color: #fff;
-  background: var(--accent-dark);
+  color: var(--on-accent);
+  background: var(--accent);
   border-radius: 999px;
   padding: 0.12rem 0.5rem;
   font-size: 0.72rem;

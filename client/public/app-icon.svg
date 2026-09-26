@@ -9,11 +9,11 @@
   <!-- Softball -->
   <circle cx="256" cy="256" r="150" fill="#f7f4e9" stroke="#e2ddc7" stroke-width="4"/>
   <!-- Stitching: two arcs with cross-stitches -->
-  <g stroke="#e63946" stroke-width="10" fill="none" stroke-linecap="round">
+  <g stroke="#f2a900" stroke-width="10" fill="none" stroke-linecap="round">
     <path d="M150 168 C 210 220, 210 292, 150 344"/>
     <path d="M362 168 C 302 220, 302 292, 362 344"/>
   </g>
-  <g stroke="#c1121f" stroke-width="7" stroke-linecap="round">
+  <g stroke="#d99400" stroke-width="7" stroke-linecap="round">
     <line x1="168" y1="188" x2="150" y2="196"/>
     <line x1="182" y1="214" x2="163" y2="222"/>
     <line x1="190" y1="244" x2="170" y2="248"/>

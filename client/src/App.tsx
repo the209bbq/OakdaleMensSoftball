@@ -2484,7 +2484,7 @@ function ColorSchemeAdmin({
   const [theme, setTheme] = useState<Theme | null>(null);
   const [selected, setSelected] = useState<ThemeId>('liberty');
   const [primary, setPrimary] = useState('#1d3557');
-  const [accent, setAccent] = useState('#e63946');
+  const [accent, setAccent] = useState('#f2a900');
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
