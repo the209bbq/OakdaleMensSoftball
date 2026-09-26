@@ -992,16 +992,16 @@ body {
 }
 
 .mlb-mark {
-  width: 2.35rem;
-  height: 2.35rem;
+  width: 2.7rem;
+  height: 2.7rem;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   font-weight: 800;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   flex: 0 0 auto;
 }
 
@@ -1013,9 +1013,9 @@ body {
 
 .mlb-runs {
   text-align: center;
-  font-size: 2.55rem;
+  font-size: 3rem;
   font-weight: 700;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.05em;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }

@@ -1270,7 +1270,7 @@ function TeamMark({ name, teamId, photoUrl }: { name: string; teamId: string; ph
   const colors = markColors(teamId);
   return (
     <span className="mlb-mark" style={{ background: colors.bg, color: colors.fg }} title={name}>
-      {photoUrl ? <img src={photoUrl} alt="" /> : <span>{abbr.slice(0, 3)}</span>}
+      {photoUrl ? <img src={photoUrl} alt="" /> : <span>{abbr.slice(0, 2)}</span>}
     </span>
   );
 }
@@ -1349,9 +1349,8 @@ function LiveScoreboard({
       <div className="mlb-matchup" aria-label="Live box score">
         <TeamMark name={game.awayTeamName} teamId={game.awayTeamId} photoUrl={photos[game.awayTeamId]} />
         <span className="mlb-runs">{box.awayRuns}</span>
-        <div className="mlb-status">
+        <div className="mlb-status" title={hint || undefined}>
           <span className={`mlb-phase phase-${phase}`}>{scoringPhaseLabel(phase)}</span>
-          {hint ? <span className="mlb-sub">{hint}</span> : null}
         </div>
         <span className="mlb-runs">{box.homeRuns}</span>
         <TeamMark name={game.homeTeamName} teamId={game.homeTeamId} photoUrl={photos[game.homeTeamId]} />
