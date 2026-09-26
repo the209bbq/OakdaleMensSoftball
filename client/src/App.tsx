@@ -965,10 +965,42 @@ function gameBox(game: Game): GameBoxScore {
 }
 
 function scoringPhaseLabel(phase: ScoringPhase | undefined): string {
-  if (phase === 'live') return 'Live';
-  if (phase === 'grace') return 'Open 24h';
-  if (phase === 'locked') return 'Final';
-  return 'Upcoming';
+  if (phase === 'live') return 'LIVE';
+  if (phase === 'grace') return 'OPEN';
+  if (phase === 'locked') return 'FINAL';
+  return 'UPCOMING';
+}
+
+function teamAbbr(name: string): string {
+  const words = String(name ?? '')
+    .replace(/&/g, ' ')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean);
+  if (words.length >= 2) {
+    return words
+      .slice(0, 3)
+      .map((word) => word[0] ?? '')
+      .join('')
+      .toUpperCase();
+  }
+  return (words[0] ?? name).slice(0, 3).toUpperCase();
+}
+
+const MARK_COLORS = [
+  { bg: '#e41e2d', fg: '#ffffff' },
+  { bg: '#0a2240', fg: '#ffffff' },
+  { bg: '#14532d', fg: '#facc15' },
+  { bg: '#7c2d12', fg: '#fde68a' },
+  { bg: '#1d4ed8', fg: '#ffffff' },
+  { bg: '#334155', fg: '#f8fafc' },
+  { bg: '#854d0e', fg: '#fef3c7' },
+  { bg: '#4c1d95', fg: '#f5f3ff' },
+];
+
+function markColors(teamId: string): { bg: string; fg: string } {
+  let hash = 0;
+  for (let i = 0; i < teamId.length; i += 1) hash = (hash * 31 + teamId.charCodeAt(i)) >>> 0;
+  return MARK_COLORS[hash % MARK_COLORS.length];
 }
 
 function remainingLabel(iso: string | null | undefined, now = Date.now()): string | null {
@@ -1233,6 +1265,16 @@ function boxValue(box: GameBoxScore, side: ScoreSide, stat: ScoreStat): number {
   return side === 'home' ? box.homeOuts : box.awayOuts;
 }
 
+function TeamMark({ name, teamId, photoUrl }: { name: string; teamId: string; photoUrl?: string }) {
+  const abbr = teamAbbr(name);
+  const colors = markColors(teamId);
+  return (
+    <span className="mlb-mark" style={{ background: colors.bg, color: colors.fg }} title={name}>
+      {photoUrl ? <img src={photoUrl} alt="" /> : <span>{abbr.slice(0, 3)}</span>}
+    </span>
+  );
+}
+
 function LiveScoreboard({
   game,
   onChanged,
@@ -1245,6 +1287,7 @@ function LiveScoreboard({
   onError: (text: string | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [photos, setPhotos] = useState<Record<string, string | undefined>>({});
   const box = gameBox(game);
   const scoring = game.scoring;
   const phase = scoring?.phase ?? 'upcoming';
@@ -1261,17 +1304,30 @@ function LiveScoreboard({
   const hint =
     phase === 'live'
       ? remaining
-        ? `Live game — about ${remaining} left`
-        : 'Live game'
+        ? `${remaining} left`
+        : ''
       : phase === 'grace'
         ? remaining
-          ? `Scorekeeping open for ${remaining}`
-          : 'Scorekeeping still open'
+          ? `${remaining} to edit`
+          : ''
         : phase === 'locked'
-          ? 'Scoring is locked'
+          ? ''
           : remaining
-            ? `First pitch in ${remaining}`
-            : 'Waiting for first pitch';
+            ? remaining
+            : '';
+
+  useEffect(() => {
+    api
+      .getTeams()
+      .then((list) => {
+        const next: Record<string, string | undefined> = {};
+        for (const team of list) next[team.id] = team.photoUrl;
+        setPhotos(next);
+      })
+      .catch(() => {
+        /* marks still render initials */
+      });
+  }, []);
 
   async function run(action: () => Promise<Game>, ok?: string) {
     if (busy) return;
@@ -1289,29 +1345,32 @@ function LiveScoreboard({
   }
 
   return (
-    <div className="scoreboard">
-      <div className="scoreboard-top">
-        <span className={`phase-pill phase-${phase}`}>{scoringPhaseLabel(phase)}</span>
-        <p className="scoreboard-hint">{hint}</p>
-      </div>
-      <div className="scoreboard-board" aria-label="Live box score">
-        <div className="scoreboard-row scoreboard-head">
-          <span className="scoreboard-team">Team</span>
-          {STAT_COLS.map((col) => (
-            <span key={col.key} className="scoreboard-stat-label">
-              {col.label}
-            </span>
-          ))}
+    <div className="scoreboard mlb-board">
+      <div className="mlb-matchup" aria-label="Live box score">
+        <TeamMark name={game.awayTeamName} teamId={game.awayTeamId} photoUrl={photos[game.awayTeamId]} />
+        <span className="mlb-runs">{box.awayRuns}</span>
+        <div className="mlb-status">
+          <span className={`mlb-phase phase-${phase}`}>{scoringPhaseLabel(phase)}</span>
+          {hint ? <span className="mlb-sub">{hint}</span> : null}
         </div>
+        <span className="mlb-runs">{box.homeRuns}</span>
+        <TeamMark name={game.homeTeamName} teamId={game.homeTeamId} photoUrl={photos[game.homeTeamId]} />
+      </div>
+      <hr className="mlb-rule" />
+      <div className="mlb-line" aria-label="Box score totals">
+        <span className="mlb-colhead mlb-abbr-head" />
+        {STAT_COLS.map((col) => (
+          <span key={col.key} className="mlb-colhead">
+            {col.label}
+          </span>
+        ))}
         <ScoreboardSide
           side="away"
           name={game.awayTeamName}
           box={box}
           canScore={canScore}
           busy={busy}
-          onBump={(stat, delta) =>
-            run(() => api.bumpScoreStat(game.id, 'away', stat, delta))
-          }
+          onBump={(stat, delta) => run(() => api.bumpScoreStat(game.id, 'away', stat, delta))}
         />
         <ScoreboardSide
           side="home"
@@ -1319,14 +1378,12 @@ function LiveScoreboard({
           box={box}
           canScore={canScore}
           busy={busy}
-          onBump={(stat, delta) =>
-            run(() => api.bumpScoreStat(game.id, 'home', stat, delta))
-          }
+          onBump={(stat, delta) => run(() => api.bumpScoreStat(game.id, 'home', stat, delta))}
         />
       </div>
       <div className="inning-outs">
         <div className="inning-outs-copy">
-          <strong>Outs this inning</strong>
+          <span className="mlb-outs-label">Outs</span>
           <span className="inning-outs-dots" aria-label={`${box.currentOuts} outs`}>
             {[0, 1, 2].map((i) => (
               <span key={i} className={`out-dot ${i < box.currentOuts ? 'on' : ''}`} />
@@ -1389,8 +1446,10 @@ function ScoreboardSide({
   onBump: (stat: ScoreStat, delta: number) => void;
 }) {
   return (
-    <div className={`scoreboard-row scoreboard-${side}`}>
-      <span className="scoreboard-team">{name}</span>
+    <>
+      <span className={`mlb-abbr scoreboard-${side}`} title={name}>
+        {teamAbbr(name)}
+      </span>
       {STAT_COLS.map((col) => {
         const value = boxValue(box, side, col.key);
         return (
@@ -1421,7 +1480,7 @@ function ScoreboardSide({
           </span>
         );
       })}
-    </div>
+    </>
   );
 }
 

@@ -247,6 +247,9 @@ describe('App', () => {
     expect(attLines[0].textContent).toMatch(/Da Beers:\s*🥎 1 · 💩 1 · — 0/);
     expect(attLines[1].textContent).toMatch(/Oakdale Tigers:\s*🥎 0 · 💩 0 · — 0/);
     expect(screen.getByLabelText('Live box score')).toBeInTheDocument();
+    expect(screen.getByText('UPCOMING')).toBeInTheDocument();
+    expect(screen.getAllByText('DB').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('OT').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Upcoming').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /start live scorekeeping/i })).not.toBeInTheDocument();
   });
@@ -307,7 +310,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /start live scorekeeping/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /start live scorekeeping/i }));
     await waitFor(() => {
-      expect(screen.getByText('Live')).toBeInTheDocument();
+      expect(screen.getByText('LIVE')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Increase Oakdale Tigers R' }));
     await waitFor(() => {
