@@ -1192,7 +1192,7 @@ describe('Player team membership', () => {
     const manager = await loginAs(app, 'mgr@b.com', 'longenough');
     const mgrJoin = await manager.put('/api/auth/team').send({ teamId: TEAM_OTHER });
     expect(mgrJoin.status).toBe(400);
-    expect(mgrJoin.body.error).toMatch(/managed by the league/i);
+    expect(mgrJoin.body.error).toMatch(/play for the team they manage/i);
   });
 
   it('lets an admin assign a player to any team and clear it', async () => {
@@ -1261,7 +1261,8 @@ describe('Player team membership', () => {
     expect([400, 403]).toContain(asAdmin.status);
 
     const asManager = await admin.post(`/api/users/${managerId}/team`).send({ teamId: TEAM_OWN });
-    expect([400, 403]).toContain(asManager.status);
+    expect(asManager.status).toBe(400);
+    expect(asManager.body.error).toMatch(/play for the team they manage/i);
   });
 
   it('lists player accounts for admin/manager and blocks players and anonymous callers', async () => {
@@ -1493,6 +1494,34 @@ describe('Manager email authorizations', () => {
     const check = await coachAgent.post('/api/checkin').send({ week: 1, status: 'in' });
     expect(check.status).toBe(400);
     expect(check.body.error).toMatch(/not on the roster/i);
+  });
+
+  it('moves a playing manager onto the team they manage, not their previous player team', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'pat.mgr@b.com', name: 'Pat Moves', password: 'longenough' });
+    const pat = store.getUserByEmail('pat.mgr@b.com')!;
+    store.setUserTeam(pat.id, TEAM_OTHER);
+
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const assign = await admin
+      .post(`/api/users/${pat.id}/role`)
+      .send({ role: 'manager', teamId: TEAM_OWN });
+    expect(assign.status).toBe(200);
+    expect(assign.body.role).toBe('manager');
+    expect(assign.body.teamId).toBe(TEAM_OWN);
+    expect(assign.body.onRoster).toBe(true);
+
+    const own = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
+    expect(own.body.members.map((m: { name: string }) => m.name)).toEqual(['Pat Moves']);
+    expect(own.body.manager).toEqual({ name: 'Pat Moves', onRoster: true });
+
+    const other = await request(app).get(`/api/teams/${TEAM_OTHER}/roster`);
+    expect(other.body.members.map((m: { name: string }) => m.name)).toEqual([]);
+    expect(other.body.manager).toBeNull();
+
+    const steal = await admin.post(`/api/users/${pat.id}/team`).send({ teamId: TEAM_OTHER });
+    expect(steal.status).toBe(400);
+    expect(steal.body.error).toMatch(/play for the team they manage/i);
   });
 });
 

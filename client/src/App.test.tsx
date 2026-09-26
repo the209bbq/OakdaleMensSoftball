@@ -856,4 +856,100 @@ describe('App', () => {
     expect(document.documentElement.style.getPropertyValue('--navy')).toBe('#1d3557');
     expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#f2a900');
   });
+
+  it('tells admins that playing managers stay on the team they manage', async () => {
+    const adminUser = {
+      id: 'u-admin',
+      email: 'admin@oakdale.local',
+      name: 'Commish',
+      role: 'admin' as const,
+      teamId: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const managerUser = {
+      id: 'u-mgr',
+      email: 'manager@oakdale.local',
+      name: 'David',
+      role: 'manager' as const,
+      teamId: 'tigers',
+      onRoster: true,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: adminUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/manager-emails')) return jsonOk([]);
+        if (url.includes('/api/users')) return jsonOk([adminUser, managerUser]);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Admin' }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Team Managers (by email)' })).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Manager roster option')).toHaveDisplayValue('Yes — for this team');
+    expect(
+      screen.getByText(/managers who play are always on the team they manage/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Manager type for David')).toHaveDisplayValue('Plays for this team');
+  });
+
+  it('lets a manager choose whether they play for their own team, without a second team picker', async () => {
+    const managerUser = {
+      id: 'u-mgr',
+      email: 'manager@oakdale.local',
+      name: 'David',
+      role: 'manager' as const,
+      teamId: 'tigers',
+      onRoster: true,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: managerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/messages')) return jsonOk([]);
+        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        if (url.includes('/api/members')) return jsonOk([]);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Edit profile' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }));
+    expect(screen.getByText('I play for the team I manage')).toBeInTheDocument();
+    expect(screen.getByLabelText('Manager roster option')).toHaveDisplayValue("Yes — on my team's roster");
+    expect(screen.queryByLabelText('Join a team')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Change team')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Rosters' }));
+    await waitFor(() => {
+      expect(screen.getByText('Pat Shortstop')).toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText('Join a team')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Change team')).not.toBeInTheDocument();
+  });
 });

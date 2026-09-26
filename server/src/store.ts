@@ -1499,6 +1499,9 @@ export class LeagueStore {
   setUserTeam(userId: string, teamId: string | null): PublicUser {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
+    if (user.role === 'manager') {
+      throw new Error('Managers play for the team they manage');
+    }
     if (user.role !== 'player') {
       throw new Error('Only player accounts can join a team');
     }

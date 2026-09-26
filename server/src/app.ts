@@ -154,6 +154,10 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
   });
 
   api.put('/auth/team', requireAuth, (req: Request, res: Response) => {
+    if (req.user!.role === 'manager') {
+      res.status(400).json({ error: 'Managers play for the team they manage' });
+      return;
+    }
     if (req.user!.role !== 'player') {
       res.status(400).json({ error: 'Your team is managed by the league' });
       return;
@@ -634,6 +638,10 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     const target = store.getUserById(req.params.id);
     if (!target) {
       res.status(400).json({ error: 'Unknown user' });
+      return;
+    }
+    if (target.role === 'manager') {
+      res.status(400).json({ error: 'Managers play for the team they manage' });
       return;
     }
     if (target.role !== 'player') {

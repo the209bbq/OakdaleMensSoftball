@@ -359,14 +359,14 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
           </label>
           {user?.role === 'manager' && (
             <label className="field">
-              On this team
+              I play for the team I manage
               <select
                 aria-label="Manager roster option"
                 value={onRoster ? 'player' : 'only'}
                 onChange={(e) => setOnRoster(e.target.value === 'player')}
               >
-                <option value="player">I play for this team</option>
-                <option value="only">Manager only — not on the roster</option>
+                <option value="player">Yes — on my team&apos;s roster</option>
+                <option value="only">No — manager only, not on the roster</option>
               </select>
             </label>
           )}
@@ -2947,17 +2947,20 @@ function Admin() {
           </select>
         </label>
         <label className="field">
-          On that team:{' '}
+          Also plays:{' '}
           <select
             aria-label="Manager roster option"
             value={mgrOnRoster ? 'player' : 'only'}
             onChange={(e) => setMgrOnRoster(e.target.value === 'player')}
           >
-            <option value="player">Player / manager</option>
+            <option value="player">Yes — for this team</option>
             <option value="only">Manager only</option>
           </select>
         </label>
-        <p className="theme-help">Playing managers are on their own team&apos;s roster. Manager-only does not take a roster spot.</p>
+        <p className="theme-help">
+          Managers who play are always on the team they manage. There is no second team to pick.
+          Manager-only does not take a roster spot.
+        </p>
         <button className="primary-btn" type="submit" disabled={authorizing || !mgrTeamId}>
           {authorizing ? 'Authorizing…' : 'Authorize'}
         </button>
@@ -2977,7 +2980,7 @@ function Admin() {
               <div className="role-controls">
                 <span className="manager-of">
                   {row.teamName}
-                  {row.onRoster === false ? ' · manager only' : ' · plays'}
+                  {row.onRoster === false ? ' · manager only' : ' · plays for this team'}
                 </span>
                 <button
                   type="button"
@@ -3034,7 +3037,7 @@ function Admin() {
                   value={u.onRoster === false ? 'only' : 'player'}
                   onChange={(e) => changeRole(u, 'manager', u.teamId, e.target.value === 'player')}
                 >
-                  <option value="player">Player / manager</option>
+                  <option value="player">Plays for this team</option>
                   <option value="only">Manager only</option>
                 </select>
               )}
