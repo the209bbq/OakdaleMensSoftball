@@ -1072,26 +1072,35 @@ body {
 
 .line-score-table {
   width: 100%;
-  min-width: 100%;
   border-collapse: collapse;
-  table-layout: auto;
+  table-layout: fixed;
   font-variant-numeric: tabular-nums;
+}
+
+.line-score-table.is-extras {
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
 }
 
 .line-score-table th,
 .line-score-table td {
   text-align: center;
-  padding: 0.32rem 0.12rem;
+  padding: 0.34rem 0.08rem;
   font-size: 0.78rem;
   font-weight: 600;
-  min-width: 1.45rem;
   white-space: nowrap;
 }
 
+.line-score-table.is-extras th,
+.line-score-table.is-extras td {
+  min-width: 1.35rem;
+}
+
 .line-score-table thead th {
-  color: #8b919a;
-  font-weight: 500;
-  font-size: 0.66rem;
+  color: #b4bac3;
+  font-weight: 600;
+  font-size: 0.7rem;
   letter-spacing: 0.04em;
 }
 
@@ -1102,8 +1111,8 @@ body {
   background: #0b0d10;
   text-align: left !important;
   padding-left: 0.05rem !important;
-  padding-right: 0.45rem !important;
-  min-width: 2.2rem;
+  padding-right: 0.35rem !important;
+  width: 2.35rem;
   color: #ffffff;
   font-size: 0.82rem;
   font-weight: 700;
@@ -1114,11 +1123,11 @@ body {
   position: sticky;
   z-index: 2;
   background: #0b0d10;
-  min-width: 2.4rem;
+  width: 2.15rem;
 }
 
 .line-tot-r {
-  right: 2.4rem;
+  right: 2.15rem;
 }
 
 .line-tot-h {
@@ -1144,18 +1153,46 @@ body {
 }
 
 .line-score-table .scoreboard-cell {
-  gap: 0;
+  gap: 0.08rem;
 }
 
 .line-score-table .score-step.tiny {
-  width: 0.95rem;
-  height: 0.95rem;
-  font-size: 0.8rem;
+  width: 1rem;
+  height: 1rem;
+  font-size: 0.82rem;
 }
 
 .line-score-table .scoreboard-value {
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   min-width: 0.7rem;
+}
+
+.scoreboard-value.is-blank,
+.line-cell.is-future {
+  color: #5c636e;
+}
+
+.inning-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.5rem;
+}
+
+.inning-num {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 0.85rem;
+  padding: 0;
+  cursor: pointer;
+}
+
+.inning-num:disabled {
+  cursor: default;
 }
 
 .mlb-colhead {

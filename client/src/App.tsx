@@ -1439,6 +1439,7 @@ function LineCell({
   blank,
   canScore,
   busy,
+  compact,
   decreaseLabel,
   increaseLabel,
   onMinus,
@@ -1448,14 +1449,41 @@ function LineCell({
   blank?: boolean;
   canScore: boolean;
   busy: boolean;
+  compact?: boolean;
   decreaseLabel: string;
   increaseLabel: string;
   onMinus: () => void;
   onPlus: () => void;
 }) {
-  const shown = blank && value === 0 ? '' : value;
+  const shown = blank && value === 0 ? '–' : value;
   if (!canScore) {
-    return <span className="scoreboard-value">{shown}</span>;
+    return <span className={`scoreboard-value ${blank ? 'is-blank' : ''}`}>{shown}</span>;
+  }
+  if (compact) {
+    return (
+      <span className="inning-step">
+        {value > 0 && (
+          <button
+            type="button"
+            className="score-step tiny"
+            disabled={busy}
+            aria-label={decreaseLabel}
+            onClick={onMinus}
+          >
+            −
+          </button>
+        )}
+        <button
+          type="button"
+          className="inning-num"
+          disabled={busy}
+          aria-label={increaseLabel}
+          onClick={onPlus}
+        >
+          {value}
+        </button>
+      </span>
+    );
   }
   return (
     <span className="scoreboard-cell">
@@ -1468,7 +1496,7 @@ function LineCell({
       >
         −
       </button>
-      <span className="scoreboard-value">{shown === '' ? 0 : shown}</span>
+      <span className="scoreboard-value">{shown === '–' ? 0 : shown}</span>
       <button
         type="button"
         className="score-step tiny"
@@ -1521,12 +1549,13 @@ function LineScoreRow({
         const started = inningHasStarted(side, inning, currentInning, currentHalf);
         const current = batting && inning === currentInning;
         return (
-          <td key={inning} className={`line-cell ${current ? 'is-current' : ''}`}>
+          <td key={inning} className={`line-cell ${current ? 'is-current' : ''} ${started ? '' : 'is-future'}`}>
             <LineCell
               value={value}
               blank={!started}
               canScore={canScore}
               busy={busy}
+              compact
               decreaseLabel={`Decrease ${name} inning ${inning}`}
               increaseLabel={`Increase ${name} inning ${inning}`}
               onMinus={() => onRun(() => api.bumpInningRun(gameId, side, inning, -1))}
@@ -1586,7 +1615,7 @@ function LineScore({
   return (
     <div className="line-score" aria-label="Line score">
       <div className="line-score-scroll">
-        <table className="line-score-table">
+        <table className={`line-score-table ${innings > 7 ? 'is-extras' : ''}`}>
           <thead>
             <tr>
               <th className="line-team-col" scope="col">
