@@ -140,7 +140,7 @@ export interface ManagerAuthorization {
   email: string;
   teamId: string;
   teamName: string;
-  status: 'active' | 'pending';
+  status: 'active';
   onRoster?: boolean;
 }
 
@@ -326,7 +326,7 @@ export const api = {
     request<{ rules: string }>('/api/rules', { method: 'PUT', body: JSON.stringify({ rules }) }),
   listManagerEmails: () => request<ManagerAuthorization[]>('/api/manager-emails'),
   authorizeManagers: (emails: string | string[], teamId: string, onRoster = true) =>
-    request<{ promoted: string[]; pending: string[] }>('/api/manager-emails', {
+    request<{ promoted: string[]; skipped: string[] }>('/api/manager-emails', {
       method: 'POST',
       body: JSON.stringify({ emails, teamId, onRoster }),
     }),

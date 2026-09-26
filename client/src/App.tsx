@@ -2691,7 +2691,13 @@ function Admin() {
     setAuthorizing(true);
     try {
       const result = await api.authorizeManagers(mgrEmails, mgrTeamId, mgrOnRoster);
-      setMessage(`Promoted ${result.promoted.length}, pending ${result.pending.length}`);
+      const parts = [`Promoted ${result.promoted.length} player${result.promoted.length === 1 ? '' : 's'} to manager.`];
+      if (result.skipped.length) {
+        parts.push(
+          `Skipped ${result.skipped.length} — they need a player account first.`,
+        );
+      }
+      setMessage(parts.join(' '));
       setMgrEmails('');
       load();
     } catch (err) {
@@ -2918,13 +2924,13 @@ function Admin() {
         <button type="submit">Create team</button>
       </form>
 
-      <h3 className="admin-users-heading">Team Managers (by email)</h3>
+      <h3 className="admin-users-heading">Promote players to manager</h3>
       <form className="mgr-auth-form" onSubmit={authorizeManagers}>
         <label className="field">
-          Emails
+          Player emails
           <textarea
             aria-label="Manager emails"
-            placeholder="one@example.com, two@example.com"
+            placeholder="player@example.com"
             value={mgrEmails}
             onChange={(e) => setMgrEmails(e.target.value)}
             rows={3}
@@ -2958,15 +2964,15 @@ function Admin() {
           </select>
         </label>
         <p className="theme-help">
-          Managers who play are always on the team they manage. There is no second team to pick.
-          Manager-only does not take a roster spot.
+          Only existing player accounts can become managers. They sign up first, then you
+          promote them. Playing managers stay on the team they manage.
         </p>
         <button className="primary-btn" type="submit" disabled={authorizing || !mgrTeamId}>
-          {authorizing ? 'Authorizing…' : 'Authorize'}
+          {authorizing ? 'Promoting…' : 'Promote to manager'}
         </button>
       </form>
       {authorizations.length === 0 ? (
-        <p className="member-empty">No manager authorizations yet.</p>
+        <p className="member-empty">No team managers yet.</p>
       ) : (
         <ul className="user-list">
           {authorizations.map((row) => (
@@ -3015,7 +3021,9 @@ function Admin() {
                 }}
               >
                 <option value="player">Player</option>
-                <option value="manager">Team Manager</option>
+                {(u.role === 'player' || u.role === 'manager') && (
+                  <option value="manager">Team Manager</option>
+                )}
                 <option value="admin">Admin</option>
               </select>
               {u.role === 'manager' && (

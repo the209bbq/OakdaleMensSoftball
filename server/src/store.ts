@@ -222,7 +222,6 @@ type UserRow = {
   onRoster?: number | null;
   createdAt: string;
 };
-type PendingRow = { email: string; teamId: string; onRoster?: number | null };
 type CheckInRow = { userId: string; week: number; status: string };
 type SuggestionRow = { id: string; text: string; authorName: string | null; createdAt: string };
 type MessageRow = {
@@ -1445,17 +1444,7 @@ export class LeagueStore {
       createdAt: new Date().toISOString(),
     };
 
-    const pending = this.db
-      .prepare('SELECT email, teamId, onRoster FROM pending_managers WHERE email = ?')
-      .get(email) as PendingRow | undefined;
-    if (pending) {
-      this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
-      if (this.getTeam(pending.teamId)) {
-        user.role = 'manager';
-        user.teamId = pending.teamId;
-        user.onRoster = pending.onRoster !== 0;
-      }
-    }
+    this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
 
     this.insertUserRow(user);
     return toPublicUser(user);
@@ -1469,13 +1458,18 @@ export class LeagueStore {
   }
 
   /**
-   * Assign a role. Managers are pinned to a team and, by default, play for
-   * that same team. Pass `onRoster: false` for manager-only (off the roster).
+   * Assign a role. Managers can only be promoted from an existing player
+   * account (or reassigned if they are already a manager). They are pinned
+   * to a team and, by default, play for that same team. Pass `onRoster: false`
+   * for manager-only (off the roster).
    */
   setUserRole(userId: string, role: Role, teamId: string | null = null, onRoster?: boolean): PublicUser {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
     if (role === 'manager') {
+      if (user.role !== 'player' && user.role !== 'manager') {
+        throw new Error('Managers can only be promoted from a player account');
+      }
       if (!teamId || !this.getTeam(teamId)) throw new Error('A valid team is required for managers');
       user.teamId = teamId;
       user.onRoster = onRoster === undefined ? (user.role === 'manager' ? user.onRoster !== false : true) : onRoster;
@@ -1690,18 +1684,19 @@ export class LeagueStore {
   }
 
   /**
-   * Authorize emails as managers of `teamId`. Existing accounts are promoted
-   * immediately; others are stored as pending and auto-granted on signup.
+   * Promote existing player accounts (or reassign current managers) to
+   * `teamId`. Unknown emails and non-player accounts are skipped — managers
+   * are never created at signup.
    */
   authorizeManagers(
     emails: string[],
     teamId: string,
     onRoster = true,
-  ): { promoted: string[]; pending: string[] } {
+  ): { promoted: string[]; skipped: string[] } {
     if (!this.getTeam(teamId)) throw new Error(`Unknown team: ${teamId}`);
     const plays = onRoster !== false;
     const promoted: string[] = [];
-    const pending: string[] = [];
+    const skipped: string[] = [];
     const seen = new Set<string>();
 
     const tx = this.db.transaction(() => {
@@ -1712,35 +1707,22 @@ export class LeagueStore {
         seen.add(email);
 
         const existing = this.getUserByEmail(email);
-        if (existing) {
-          this.setUserRole(existing.id, 'manager', teamId, plays);
-          this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
-          promoted.push(email);
-        } else {
-          const already = this.db
-            .prepare('SELECT email FROM pending_managers WHERE email = ?')
-            .get(email) as { email: string } | undefined;
-          if (already) {
-            this.db
-              .prepare('UPDATE pending_managers SET teamId = ?, onRoster = ? WHERE email = ?')
-              .run(teamId, plays ? 1 : 0, email);
-          } else {
-            this.db
-              .prepare('INSERT INTO pending_managers (email, teamId, onRoster) VALUES (?, ?, ?)')
-              .run(email, teamId, plays ? 1 : 0);
-          }
-          pending.push(email);
+        if (!existing || (existing.role !== 'player' && existing.role !== 'manager')) {
+          skipped.push(email);
+          continue;
         }
+        this.setUserRole(existing.id, 'manager', teamId, plays);
+        this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
+        promoted.push(email);
       }
     });
     tx();
-    return { promoted, pending };
+    return { promoted, skipped };
   }
 
-  /** Combined list of active managers and pending (not-yet-registered) authorizations. */
+  /** Active managers for the admin list. Pending email invites are unused. */
   listManagerAuthorizations(): ManagerAuthorization[] {
     const rows: ManagerAuthorization[] = [];
-    const activeEmails = new Set<string>();
 
     const users = (this.db.prepare('SELECT * FROM users').all() as UserRow[]).map(userFromRow);
     for (const user of users) {
@@ -1753,27 +1735,9 @@ export class LeagueStore {
         status: 'active',
         onRoster: user.onRoster !== false,
       });
-      activeEmails.add(user.email);
     }
 
-    const pending = this.db.prepare('SELECT email, teamId, onRoster FROM pending_managers').all() as PendingRow[];
-    for (const entry of pending) {
-      if (activeEmails.has(entry.email)) continue;
-      if (this.getUserByEmail(entry.email)) continue;
-      const team = this.getTeam(entry.teamId);
-      rows.push({
-        email: entry.email,
-        teamId: entry.teamId,
-        teamName: team?.name ?? entry.teamId,
-        status: 'pending',
-        onRoster: entry.onRoster !== 0,
-      });
-    }
-
-    return rows.sort((a, b) => {
-      if (a.status !== b.status) return a.status === 'pending' ? -1 : 1;
-      return a.email.localeCompare(b.email);
-    });
+    return rows.sort((a, b) => a.email.localeCompare(b.email));
   }
 
   /**

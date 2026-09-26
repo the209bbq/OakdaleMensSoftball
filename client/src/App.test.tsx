@@ -898,11 +898,11 @@ describe('App', () => {
     });
     fireEvent.click(screen.getByRole('tab', { name: 'Admin' }));
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Team Managers (by email)' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Promote players to manager' })).toBeInTheDocument();
     });
     expect(screen.getByLabelText('Manager roster option')).toHaveDisplayValue('Yes — for this team');
     expect(
-      screen.getByText(/managers who play are always on the team they manage/i),
+      screen.getByText(/only existing player accounts can become managers/i),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Manager type for David')).toHaveDisplayValue('Plays for this team');
   });

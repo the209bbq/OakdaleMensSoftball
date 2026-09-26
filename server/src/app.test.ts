@@ -1113,11 +1113,6 @@ describe('LeagueStore SQLite persistence and JSON import', () => {
       expect(store.getRules()).toBe('Imported league rules stay intact');
       expect(store.listManagerAuthorizations()).toEqual([
         expect.objectContaining({
-          email: 'soon@oakdale.local',
-          teamId: 'legacy-squad',
-          status: 'pending',
-        }),
-        expect.objectContaining({
           email: 'legacy.cap@oakdale.local',
           teamId: 'legacy-squad',
           status: 'active',
@@ -1298,26 +1293,17 @@ describe('Player team membership', () => {
 });
 
 describe('Manager email authorizations', () => {
-  it('queues an unknown email as pending, then auto-grants manager on register', async () => {
-    const { app } = makeApp();
+  it('keeps signup as a player even if that email was previously invited', async () => {
+    const { app, store } = makeApp();
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
 
     const post = await admin
       .post('/api/manager-emails')
       .send({ emails: 'NewMgr@oakdale.local', teamId: TEAM_OTHER });
     expect(post.status).toBe(200);
-    expect(post.body.pending).toEqual(['newmgr@oakdale.local']);
+    expect(post.body.skipped).toEqual(['newmgr@oakdale.local']);
     expect(post.body.promoted).toEqual([]);
-
-    const listed = await admin.get('/api/manager-emails');
-    expect(listed.status).toBe(200);
-    const pendingRow = listed.body.find((r: { email: string }) => r.email === 'newmgr@oakdale.local');
-    expect(pendingRow).toMatchObject({
-      email: 'newmgr@oakdale.local',
-      teamId: TEAM_OTHER,
-      teamName: 'Da Beers',
-      status: 'pending',
-    });
+    expect(store.listManagerAuthorizations().some((r) => r.email === 'newmgr@oakdale.local')).toBe(false);
 
     const agent = request.agent(app);
     const reg = await agent.post('/api/auth/register').send({
@@ -1326,22 +1312,19 @@ describe('Manager email authorizations', () => {
       password: 'longenough',
     });
     expect(reg.status).toBe(201);
-    expect(reg.body.role).toBe('manager');
-    expect(reg.body.teamId).toBe(TEAM_OTHER);
-    expect(reg.body.onRoster).toBe(true);
-    expect(reg.body.email).toBe('newmgr@oakdale.local');
+    expect(reg.body.role).toBe('player');
+    expect(reg.body.teamId).toBeNull();
 
-    const after = await admin.get('/api/manager-emails');
-    const row = after.body.find((r: { email: string }) => r.email === 'newmgr@oakdale.local');
-    expect(row).toMatchObject({ status: 'active', teamId: TEAM_OTHER });
-    expect(
-      after.body.some(
-        (r: { email: string; status: string }) => r.email === 'newmgr@oakdale.local' && r.status === 'pending',
-      ),
-    ).toBe(false);
+    const promote = await admin
+      .post('/api/manager-emails')
+      .send({ emails: 'NewMgr@oakdale.local', teamId: TEAM_OTHER });
+    expect(promote.status).toBe(200);
+    expect(promote.body.promoted).toEqual(['newmgr@oakdale.local']);
+    expect(store.getUserByEmail('newmgr@oakdale.local')?.role).toBe('manager');
+    expect(store.getUserByEmail('newmgr@oakdale.local')?.teamId).toBe(TEAM_OTHER);
   });
 
-  it('promotes an existing account immediately to active manager', async () => {
+  it('promotes an existing player account to manager', async () => {
     const { app, store } = makeApp();
     store.registerUser({ email: 'already@oakdale.local', name: 'Already', password: 'longenough' });
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
@@ -1351,7 +1334,7 @@ describe('Manager email authorizations', () => {
       .send({ emails: 'already@oakdale.local', teamId: TEAM_OWN });
     expect(post.status).toBe(200);
     expect(post.body.promoted).toEqual(['already@oakdale.local']);
-    expect(post.body.pending).toEqual([]);
+    expect(post.body.skipped).toEqual([]);
 
     const user = store.getUserByEmail('already@oakdale.local')!;
     expect(user.role).toBe('manager');
@@ -1362,7 +1345,7 @@ describe('Manager email authorizations', () => {
     expect(row).toMatchObject({ status: 'active', teamId: TEAM_OWN, teamName: 'Nothin but Dingers' });
   });
 
-  it('processes multiple emails in one request', async () => {
+  it('skips unknown emails and only promotes existing players', async () => {
     const { app, store } = makeApp();
     store.registerUser({ email: 'one@oakdale.local', name: 'One', password: 'longenough' });
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
@@ -1373,7 +1356,7 @@ describe('Manager email authorizations', () => {
     });
     expect(post.status).toBe(200);
     expect(post.body.promoted).toEqual(['one@oakdale.local']);
-    expect(post.body.pending.sort()).toEqual(['three@oakdale.local', 'two@oakdale.local']);
+    expect(post.body.skipped.sort()).toEqual(['three@oakdale.local', 'two@oakdale.local']);
 
     const listed = await admin.get('/api/manager-emails');
     const emails = listed.body
@@ -1382,23 +1365,27 @@ describe('Manager email authorizations', () => {
       )
       .map((r: { email: string; status: string }) => `${r.email}:${r.status}`)
       .sort();
-    expect(emails).toEqual([
-      'one@oakdale.local:active',
-      'three@oakdale.local:pending',
-      'two@oakdale.local:pending',
-    ]);
+    expect(emails).toEqual(['one@oakdale.local:active']);
   });
 
-  it('DELETE removes a pending entry and demotes an active manager while keeping teamId', async () => {
+  it('refuses to promote an admin to manager', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'other.admin@oakdale.local', name: 'Other Admin', password: 'longenough' });
+    const otherId = store.getUserByEmail('other.admin@oakdale.local')!.id;
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const asAdmin = await admin.post(`/api/users/${otherId}/role`).send({ role: 'admin' });
+    expect(asAdmin.status).toBe(200);
+    expect(asAdmin.body.role).toBe('admin');
+
+    const res = await admin.post(`/api/users/${otherId}/role`).send({ role: 'manager', teamId: TEAM_OWN });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/promoted from a player account/i);
+    expect(store.getUserByEmail('other.admin@oakdale.local')?.role).toBe('admin');
+  });
+
+  it('DELETE demotes an active manager while keeping teamId', async () => {
     const { app, store } = makeApp();
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
-
-    await admin.post('/api/manager-emails').send({ emails: 'pending@oakdale.local', teamId: TEAM_OTHER });
-    const dropPending = await admin.delete('/api/manager-emails/pending%40oakdale.local');
-    expect(dropPending.status).toBe(200);
-    expect(dropPending.body.ok).toBe(true);
-    const afterPending = await admin.get('/api/manager-emails');
-    expect(afterPending.body.some((r: { email: string }) => r.email === 'pending@oakdale.local')).toBe(false);
 
     store.registerUser({ email: 'active.mgr@oakdale.local', name: 'Active', password: 'longenough' });
     await admin.post('/api/manager-emails').send({ emails: 'active.mgr@oakdale.local', teamId: TEAM_OWN });

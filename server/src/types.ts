@@ -124,19 +124,19 @@ export interface TeamMember {
   checkIn: CheckInStatus | null;
 }
 
-/** Pre-authorization allowlist entry: email is granted manager of teamId on signup. */
+/** Legacy import-only row. New signups are always players. */
 export interface PendingManager {
   email: string;
   teamId: string;
   onRoster: boolean;
 }
 
-/** Combined active-manager + pending-authorization row for the admin UI. */
+/** Active manager row for the admin list. */
 export interface ManagerAuthorization {
   email: string;
   teamId: string;
   teamName: string;
-  status: 'active' | 'pending';
+  status: 'active';
   /** Playing managers are on this team's roster; manager-only is not. */
   onRoster: boolean;
 }
