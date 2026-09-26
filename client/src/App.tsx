@@ -1065,7 +1065,7 @@ function Schedule() {
   function load() {
     api.getSchedule().then(setGames).catch((e) => setError(e.message));
   }
-  useEffect(load, []);
+  useEffect(load, [user?.id, user?.role, user?.teamId]);
 
   useEffect(() => {
     if (!shouldPoll || !expanded) return;
