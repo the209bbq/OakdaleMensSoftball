@@ -1575,9 +1575,17 @@ function LineScore({
   const currentInning = box.currentInning ?? 1;
   const currentHalf = box.currentHalf ?? 'top';
   return (
-    <div className="line-score" aria-label="Line score">
+    <div className={`line-score ${innings > 7 ? 'has-extras' : ''}`} aria-label="Line score">
       <div className="line-score-scroll">
         <table className={`line-score-table ${innings > 7 ? 'is-extras' : ''} ${canScore ? 'is-scoring' : ''}`}>
+          <colgroup>
+            <col className="line-col-team" />
+            {Array.from({ length: innings }, (_, i) => (
+              <col key={i} className="line-col-inning" />
+            ))}
+            <col className="line-col-tot" />
+            <col className="line-col-tot" />
+          </colgroup>
           <thead>
             <tr>
               <th className="line-team-col" scope="col">
