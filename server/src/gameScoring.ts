@@ -8,6 +8,10 @@ export const MANAGER_EARLY_START_MS = 2 * 60 * 60 * 1000;
 export type ScoringPhase = 'upcoming' | 'live' | 'grace' | 'locked';
 export type ScoreSide = 'home' | 'away';
 export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs';
+export type InningHalf = 'top' | 'bottom';
+
+/** Men's softball is seven innings; extras are appended as the game continues. */
+export const REGULATION_INNINGS = 7;
 
 export interface ScoringWindow {
   phase: ScoringPhase;
@@ -28,6 +32,11 @@ export interface GameBoxScore {
   homeOuts: number;
   awayOuts: number;
   currentOuts: number;
+  awayLine: number[];
+  homeLine: number[];
+  currentInning: number;
+  currentHalf: InningHalf;
+  batterUp: ScoreSide;
 }
 
 /** Parse "6:00 PM" → 18:00, "7:30 PM" → 19:30, "18:00" → 18:00. */
@@ -122,6 +131,103 @@ export function wrapCurrentOuts(value: number): number {
   return n % 3;
 }
 
+export function emptyLine(length = REGULATION_INNINGS): number[] {
+  return Array.from({ length: Math.max(REGULATION_INNINGS, length) }, () => 0);
+}
+
+export function parseLine(raw: unknown): number[] {
+  let values: unknown[] = [];
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) values = parsed;
+    } catch {
+      values = [];
+    }
+  } else if (Array.isArray(raw)) {
+    values = raw;
+  }
+  return padLine(values.map((n) => clampStat(Number(n))));
+}
+
+export function padLine(line: number[], min = REGULATION_INNINGS): number[] {
+  const next = line.map((n) => clampStat(n));
+  while (next.length < min) next.push(0);
+  return next;
+}
+
+export function sumLine(line: number[]): number {
+  return line.reduce((total, n) => total + clampStat(n), 0);
+}
+
+export function bumpInningLine(line: number[], inning: number, delta: number): number[] {
+  const index = Math.max(1, Math.trunc(inning)) - 1;
+  const next = padLine(line, Math.max(REGULATION_INNINGS, index + 1));
+  next[index] = clampStat(next[index] + delta);
+  return next;
+}
+
+export function parseHalf(raw: unknown): InningHalf {
+  return raw === 'bottom' ? 'bottom' : 'top';
+}
+
+export function batterSide(half: InningHalf): ScoreSide {
+  return half === 'bottom' ? 'home' : 'away';
+}
+
+export function lineForDisplay(
+  line: number[],
+  currentInning: number,
+  otherLine: number[] = line,
+): number[] {
+  return padLine(line, Math.max(REGULATION_INNINGS, currentInning, otherLine.length, line.length));
+}
+
+/** Advance or rewind outs, flipping the half-inning and adding extras after the 7th. */
+export function stepHalfInning(
+  inning: number,
+  half: InningHalf,
+  outs: number,
+  delta: number,
+): { inning: number; half: InningHalf; outs: number } {
+  let nextInning = Math.max(1, Math.trunc(inning) || 1);
+  let nextHalf: InningHalf = half === 'bottom' ? 'bottom' : 'top';
+  let nextOuts = wrapCurrentOuts(outs);
+  const step = Math.trunc(delta);
+  if (!Number.isFinite(step) || step === 0) {
+    return { inning: nextInning, half: nextHalf, outs: nextOuts };
+  }
+  if (step > 0) {
+    for (let i = 0; i < step; i += 1) {
+      if (nextOuts < 2) {
+        nextOuts += 1;
+      } else {
+        nextOuts = 0;
+        if (nextHalf === 'top') {
+          nextHalf = 'bottom';
+        } else {
+          nextHalf = 'top';
+          nextInning += 1;
+        }
+      }
+    }
+  } else {
+    for (let i = 0; i < -step; i += 1) {
+      if (nextOuts > 0) {
+        nextOuts -= 1;
+      } else if (nextHalf === 'bottom') {
+        nextHalf = 'top';
+        nextOuts = 2;
+      } else if (nextInning > 1) {
+        nextInning -= 1;
+        nextHalf = 'bottom';
+        nextOuts = 2;
+      }
+    }
+  }
+  return { inning: nextInning, half: nextHalf, outs: nextOuts };
+}
+
 export const EMPTY_BOX: GameBoxScore = {
   homeRuns: 0,
   awayRuns: 0,
@@ -132,6 +238,11 @@ export const EMPTY_BOX: GameBoxScore = {
   homeOuts: 0,
   awayOuts: 0,
   currentOuts: 0,
+  awayLine: emptyLine(),
+  homeLine: emptyLine(),
+  currentInning: 1,
+  currentHalf: 'top',
+  batterUp: 'away',
 };
 
 export function boxFromParts(
@@ -139,9 +250,21 @@ export function boxFromParts(
   awayRuns: number | null | undefined,
   log?: Partial<GameBoxScore> | null,
 ): GameBoxScore {
+  let awayLine = parseLine(log?.awayLine);
+  let homeLine = parseLine(log?.homeLine);
+  if (sumLine(awayLine) === 0 && clampStat(awayRuns ?? 0) > 0) {
+    awayLine = bumpInningLine(emptyLine(), 1, awayRuns ?? 0);
+  }
+  if (sumLine(homeLine) === 0 && clampStat(homeRuns ?? 0) > 0) {
+    homeLine = bumpInningLine(emptyLine(), 1, homeRuns ?? 0);
+  }
+  const currentHalf = parseHalf(log?.currentHalf);
+  const currentInning = Math.max(1, clampStat(log?.currentInning ?? 1) || 1);
+  awayLine = lineForDisplay(awayLine, currentInning, homeLine);
+  homeLine = lineForDisplay(homeLine, currentInning, awayLine);
   return {
-    homeRuns: clampStat(homeRuns ?? 0),
-    awayRuns: clampStat(awayRuns ?? 0),
+    homeRuns: sumLine(homeLine),
+    awayRuns: sumLine(awayLine),
     homeHits: clampStat(log?.homeHits ?? 0),
     awayHits: clampStat(log?.awayHits ?? 0),
     homeWalks: clampStat(log?.homeWalks ?? 0),
@@ -149,6 +272,11 @@ export function boxFromParts(
     homeOuts: clampStat(log?.homeOuts ?? 0),
     awayOuts: clampStat(log?.awayOuts ?? 0),
     currentOuts: wrapCurrentOuts(log?.currentOuts ?? 0),
+    awayLine,
+    homeLine,
+    currentInning,
+    currentHalf,
+    batterUp: batterSide(currentHalf),
   };
 }
 

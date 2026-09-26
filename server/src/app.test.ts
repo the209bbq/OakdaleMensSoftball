@@ -276,7 +276,7 @@ describe('Live game log', () => {
     const gen = await admin.post('/api/schedule/generate').send({ startDate: '2027-05-05' });
     expect(gen.status).toBe(201);
     const game = gen.body[0];
-    expect(game.box).toEqual({
+    expect(game.box).toMatchObject({
       homeRuns: 0,
       awayRuns: 0,
       homeHits: 0,
@@ -286,7 +286,12 @@ describe('Live game log', () => {
       homeOuts: 0,
       awayOuts: 0,
       currentOuts: 0,
+      currentInning: 1,
+      currentHalf: 'top',
+      batterUp: 'away',
     });
+    expect(game.box.awayLine).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    expect(game.box.homeLine).toEqual([0, 0, 0, 0, 0, 0, 0]);
     expect(game.scoring.phase).toBe('upcoming');
     expect(game.scoring.canStart).toBe(true);
     expect(game.scoring.canScore).toBe(true);
@@ -352,6 +357,17 @@ describe('Live game log', () => {
     expect(out1.body.box.currentOuts).toBe(1);
     expect(out2.body.box.currentOuts).toBe(2);
     expect(out3.body.box.currentOuts).toBe(0);
+    expect(out3.body.box.currentHalf).toBe('bottom');
+    expect(out3.body.box.batterUp).toBe('home');
+    expect(out3.body.box.currentInning).toBe(1);
+
+    const extra = await manager
+      .post(`/api/games/${ownGame.id}/scorelog/inning`)
+      .send({ side: ownSide, inning: 8, delta: 1 });
+    expect(extra.status).toBe(200);
+    expect(extra.body.box.awayLine.length).toBeGreaterThanOrEqual(8);
+    expect(extra.body.box.homeLine.length).toBeGreaterThanOrEqual(8);
+    expect(extra.body.box[ownSide === 'home' ? 'homeRuns' : 'awayRuns']).toBe(2);
 
     const otherBump = await manager
       .post(`/api/games/${otherGame.id}/scorelog/stat`)

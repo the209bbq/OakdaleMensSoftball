@@ -34,6 +34,11 @@ const scheduleGames = [
       homeOuts: 0,
       awayOuts: 0,
       currentOuts: 0,
+      awayLine: [0, 0, 0, 0, 0, 0, 0],
+      homeLine: [0, 0, 0, 0, 0, 0, 0],
+      currentInning: 1,
+      currentHalf: 'top' as const,
+      batterUp: 'away' as const,
     },
     scoring: {
       phase: 'upcoming' as const,
@@ -247,9 +252,17 @@ describe('App', () => {
     expect(attLines[0].textContent).toMatch(/Da Beers:\s*🥎 1 · 💩 1 · — 0/);
     expect(attLines[1].textContent).toMatch(/Oakdale Tigers:\s*🥎 0 · 💩 0 · — 0/);
     expect(screen.getByLabelText('Live box score')).toBeInTheDocument();
+    expect(screen.getByLabelText('Line score')).toBeInTheDocument();
     expect(screen.getByText('UPCOMING')).toBeInTheDocument();
     expect(screen.getAllByText('DB').length).toBeGreaterThan(0);
     expect(screen.getAllByText('OT').length).toBeGreaterThan(0);
+    for (const inning of ['1', '2', '3', '4', '5', '6', '7']) {
+      expect(screen.getByRole('columnheader', { name: inning })).toBeInTheDocument();
+    }
+    expect(screen.getByRole('columnheader', { name: 'R' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'H' })).toBeInTheDocument();
+    expect(screen.getByLabelText('0 outs')).toBeInTheDocument();
+    expect(screen.getByLabelText('Batter up Da Beers')).toHaveTextContent(/Top 1/);
     expect(screen.getAllByText('Upcoming').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /start live scorekeeping/i })).not.toBeInTheDocument();
   });
@@ -282,7 +295,11 @@ describe('App', () => {
       ...startedGame,
       played: true,
       homeScore: 1,
-      box: { ...startedGame.box!, homeRuns: 1 },
+      box: {
+        ...startedGame.box!,
+        homeRuns: 1,
+        homeLine: [1, 0, 0, 0, 0, 0, 0],
+      },
     };
     vi.stubGlobal(
       'fetch',
@@ -292,6 +309,7 @@ describe('App', () => {
         if (url.includes('/api/landing')) return jsonOk(landing);
         if (url.includes('/api/standings')) return jsonOk(standings);
         if (url.includes('/scorelog/start') && init?.method === 'POST') return jsonOk(startedGame);
+        if (url.includes('/scorelog/inning') && init?.method === 'POST') return jsonOk(scoredGame);
         if (url.includes('/scorelog/stat') && init?.method === 'POST') return jsonOk(scoredGame);
         if (url.includes('/api/schedule')) return jsonOk([liveGame]);
         if (url.includes('/api/teams')) return jsonOk(teams);

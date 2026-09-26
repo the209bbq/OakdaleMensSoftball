@@ -565,6 +565,30 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
+  api.post('/games/:id/scorelog/inning', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      if (!canScoreGame(req.user, game, store)) {
+        const owns = canManageGame(req.user, game);
+        res.status(403).json({
+          error: owns
+            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
+            : 'You can only keep score for your own games',
+        });
+        return;
+      }
+      const { side, inning, delta } = req.body ?? {};
+      store.bumpInningRun(game.id, side as ScoreSide, Number(inning), Number(delta), req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   // ---- User & role management (admin only) ------------------------------
 
   api.get('/members', requireAuth, (req: Request, res: Response) => {

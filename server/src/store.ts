@@ -34,10 +34,17 @@ import {
 } from './theme.js';
 import {
   boxFromParts,
+  bumpInningLine,
   clampStat,
   combineGameDateTime,
-  wrapCurrentOuts,
+  emptyLine,
+  lineForDisplay,
+  parseHalf,
+  parseLine,
+  stepHalfInning,
+  sumLine,
   type GameBoxScore,
+  type InningHalf,
   type ScoreSide,
   type ScoreStat,
 } from './gameScoring.js';
@@ -157,6 +164,10 @@ CREATE TABLE IF NOT EXISTS game_logs (
   homeOuts INTEGER NOT NULL DEFAULT 0,
   awayOuts INTEGER NOT NULL DEFAULT 0,
   currentOuts INTEGER NOT NULL DEFAULT 0,
+  awayLine TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]',
+  homeLine TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]',
+  currentInning INTEGER NOT NULL DEFAULT 1,
+  currentHalf TEXT NOT NULL DEFAULT 'top',
   liveStartedAt TEXT,
   updatedAt TEXT NOT NULL,
   updatedByUserId TEXT
@@ -210,6 +221,10 @@ type GameLogRow = {
   homeOuts: number;
   awayOuts: number;
   currentOuts: number;
+  awayLine?: string | null;
+  homeLine?: string | null;
+  currentInning?: number | null;
+  currentHalf?: string | null;
   liveStartedAt: string | null;
   updatedAt: string;
   updatedByUserId: string | null;
@@ -224,6 +239,10 @@ export interface GameLog {
   homeOuts: number;
   awayOuts: number;
   currentOuts: number;
+  awayLine: number[];
+  homeLine: number[];
+  currentInning: number;
+  currentHalf: InningHalf;
   liveStartedAt: string | null;
   updatedAt: string;
   updatedByUserId: string | null;
@@ -395,6 +414,10 @@ function gameFromRow(row: GameRow): Game {
 }
 
 function gameLogFromRow(row: GameLogRow): GameLog {
+  const currentInning = Math.max(1, Number(row.currentInning) || 1);
+  const currentHalf = parseHalf(row.currentHalf);
+  const awayLine = lineForDisplay(parseLine(row.awayLine), currentInning, parseLine(row.homeLine));
+  const homeLine = lineForDisplay(parseLine(row.homeLine), currentInning, awayLine);
   return {
     gameId: row.gameId,
     homeHits: row.homeHits,
@@ -404,6 +427,10 @@ function gameLogFromRow(row: GameLogRow): GameLog {
     homeOuts: row.homeOuts,
     awayOuts: row.awayOuts,
     currentOuts: row.currentOuts,
+    awayLine,
+    homeLine,
+    currentInning,
+    currentHalf,
     liveStartedAt: row.liveStartedAt,
     updatedAt: row.updatedAt,
     updatedByUserId: row.updatedByUserId,
@@ -497,6 +524,7 @@ export class LeagueStore {
     }
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(SCHEMA);
+    this.ensureGameLogColumns();
     if (sqlitePath) this.importLegacyJsonIfNeeded(sqlitePath);
     this.seedIfEmpty();
   }
@@ -842,14 +870,18 @@ export class LeagueStore {
       throw new Error('Scores must be non-negative numbers');
     }
     const now = new Date().toISOString();
+    const awayLine = bumpInningLine(emptyLine(), 1, awayScore);
+    const homeLine = bumpInningLine(emptyLine(), 1, homeScore);
     const tx = this.db.transaction(() => {
       this.db
         .prepare('UPDATE games SET homeScore = ?, awayScore = ?, played = 1 WHERE id = ?')
         .run(homeScore, awayScore, gameId);
       this.ensureGameLog(gameId);
       this.db
-        .prepare('UPDATE game_logs SET updatedAt = ?, updatedByUserId = ? WHERE gameId = ?')
-        .run(now, userId ?? null, gameId);
+        .prepare(
+          'UPDATE game_logs SET awayLine = ?, homeLine = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?',
+        )
+        .run(JSON.stringify(awayLine), JSON.stringify(homeLine), now, userId ?? null, gameId);
     });
     tx();
     game.homeScore = homeScore;
@@ -911,11 +943,8 @@ export class LeagueStore {
     const tx = this.db.transaction(() => {
       this.ensureGameLog(gameId);
       if (stat === 'runs') {
-        const home = (game.homeScore ?? 0) + (side === 'home' ? step : 0);
-        const away = (game.awayScore ?? 0) + (side === 'away' ? step : 0);
-        this.db
-          .prepare('UPDATE games SET homeScore = ?, awayScore = ?, played = 1 WHERE id = ?')
-          .run(clampStat(home), clampStat(away), gameId);
+        const log = this.getGameLog(gameId)!;
+        this.writeInningRun(gameId, side, log.currentInning, step, now, userId);
       } else {
         const column =
           stat === 'hits'
@@ -954,13 +983,91 @@ export class LeagueStore {
     const tx = this.db.transaction(() => {
       this.ensureGameLog(gameId);
       const log = this.getGameLog(gameId)!;
-      const next = wrapCurrentOuts(log.currentOuts + step);
+      const next = stepHalfInning(log.currentInning, log.currentHalf, log.currentOuts, step);
+      const awayLine = lineForDisplay(log.awayLine, next.inning, log.homeLine);
+      const homeLine = lineForDisplay(log.homeLine, next.inning, awayLine);
       this.db
-        .prepare('UPDATE game_logs SET currentOuts = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?')
-        .run(next, now, userId, gameId);
+        .prepare(
+          `UPDATE game_logs SET currentOuts = ?, currentInning = ?, currentHalf = ?,
+           awayLine = ?, homeLine = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?`,
+        )
+        .run(
+          next.outs,
+          next.inning,
+          next.half,
+          JSON.stringify(awayLine),
+          JSON.stringify(homeLine),
+          now,
+          userId,
+          gameId,
+        );
     });
     tx();
     return this.getGameLog(gameId)!;
+  }
+
+  bumpInningRun(gameId: string, side: ScoreSide, inning: number, delta: number, userId: string): Game {
+    const game = this.getGame(gameId);
+    if (!game) {
+      throw new Error(`Unknown game: ${gameId}`);
+    }
+    if (side !== 'home' && side !== 'away') {
+      throw new Error('side must be home or away');
+    }
+    const step = Math.trunc(delta);
+    if (!Number.isFinite(step) || step === 0) {
+      return game;
+    }
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.ensureGameLog(gameId);
+      this.writeInningRun(gameId, side, inning, step, now, userId);
+    });
+    tx();
+    return this.getGame(gameId)!;
+  }
+
+  private writeInningRun(
+    gameId: string,
+    side: ScoreSide,
+    inning: number,
+    step: number,
+    now: string,
+    userId: string,
+  ): void {
+    const log = this.getGameLog(gameId)!;
+    const target = Math.max(1, Math.trunc(inning) || log.currentInning);
+    const awayLine =
+      side === 'away' ? bumpInningLine(log.awayLine, target, step) : lineForDisplay(log.awayLine, target, log.homeLine);
+    const homeLine =
+      side === 'home' ? bumpInningLine(log.homeLine, target, step) : lineForDisplay(log.homeLine, target, awayLine);
+    const awayRuns = sumLine(awayLine);
+    const homeRuns = sumLine(homeLine);
+    this.db
+      .prepare('UPDATE games SET homeScore = ?, awayScore = ?, played = 1 WHERE id = ?')
+      .run(homeRuns, awayRuns, gameId);
+    this.db
+      .prepare(
+        'UPDATE game_logs SET awayLine = ?, homeLine = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?',
+      )
+      .run(JSON.stringify(awayLine), JSON.stringify(homeLine), now, userId, gameId);
+  }
+
+  private ensureGameLogColumns(): void {
+    const cols = new Set(
+      (this.db.prepare('PRAGMA table_info(game_logs)').all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    const extras: Array<[string, string]> = [
+      ['awayLine', "TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]'"],
+      ['homeLine', "TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]'"],
+      ['currentInning', 'INTEGER NOT NULL DEFAULT 1'],
+      ['currentHalf', "TEXT NOT NULL DEFAULT 'top'"],
+    ];
+    for (const [name, spec] of extras) {
+      if (!cols.has(name)) {
+        this.db.exec(`ALTER TABLE game_logs ADD COLUMN ${name} ${spec}`);
+      }
+    }
   }
 
   private ensureGameLog(gameId: string): void {
@@ -968,10 +1075,11 @@ export class LeagueStore {
       .prepare(
         `INSERT OR IGNORE INTO game_logs (
           gameId, homeHits, awayHits, homeWalks, awayWalks, homeOuts, awayOuts,
-          currentOuts, liveStartedAt, updatedAt, updatedByUserId
-        ) VALUES (?, 0, 0, 0, 0, 0, 0, 0, NULL, ?, NULL)`,
+          currentOuts, awayLine, homeLine, currentInning, currentHalf,
+          liveStartedAt, updatedAt, updatedByUserId
+        ) VALUES (?, 0, 0, 0, 0, 0, 0, 0, ?, ?, 1, 'top', NULL, ?, NULL)`,
       )
-      .run(gameId, new Date().toISOString());
+      .run(gameId, JSON.stringify(emptyLine()), JSON.stringify(emptyLine()), new Date().toISOString());
   }
 
   getStandings(): StandingRow[] {

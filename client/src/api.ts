@@ -23,6 +23,7 @@ export interface TeamAttendance {
 export type ScoringPhase = 'upcoming' | 'live' | 'grace' | 'locked';
 export type ScoreSide = 'home' | 'away';
 export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs';
+export type InningHalf = 'top' | 'bottom';
 
 export interface GameBoxScore {
   homeRuns: number;
@@ -34,6 +35,11 @@ export interface GameBoxScore {
   homeOuts: number;
   awayOuts: number;
   currentOuts: number;
+  awayLine?: number[];
+  homeLine?: number[];
+  currentInning?: number;
+  currentHalf?: InningHalf;
+  batterUp?: ScoreSide;
 }
 
 export interface GameScoring {
@@ -219,6 +225,11 @@ export const api = {
     request<Game>(`/api/games/${gameId}/scorelog/outs`, {
       method: 'POST',
       body: JSON.stringify({ delta }),
+    }),
+  bumpInningRun: (gameId: string, side: ScoreSide, inning: number, delta: number) =>
+    request<Game>(`/api/games/${gameId}/scorelog/inning`, {
+      method: 'POST',
+      body: JSON.stringify({ side, inning, delta }),
     }),
   getTeams: () => request<Team[]>('/api/teams'),
   getRoster: (teamId: string) => request<RosterResponse>(`/api/teams/${teamId}/roster`),

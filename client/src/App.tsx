@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, type CurrentWeek, type Game, type GameBoxScore, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoreStat, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
+import { api, type CurrentWeek, type Game, type GameBoxScore, type InningHalf, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
 import { applyTheme } from './theme';
@@ -944,6 +944,8 @@ function formatGameDate(iso: string): string {
   return `${WEEKDAYS[date.getUTCDay()]} ${MONTHS[m - 1]} ${d}`;
 }
 
+const EMPTY_LINE = [0, 0, 0, 0, 0, 0, 0];
+
 const EMPTY_BOX: GameBoxScore = {
   homeRuns: 0,
   awayRuns: 0,
@@ -954,13 +956,27 @@ const EMPTY_BOX: GameBoxScore = {
   homeOuts: 0,
   awayOuts: 0,
   currentOuts: 0,
+  awayLine: EMPTY_LINE,
+  homeLine: EMPTY_LINE,
+  currentInning: 1,
+  currentHalf: 'top',
+  batterUp: 'away',
 };
 
 function gameBox(game: Game): GameBoxScore {
-  return game.box ?? {
+  const raw = game.box ?? {
     ...EMPTY_BOX,
     homeRuns: game.homeScore ?? 0,
     awayRuns: game.awayScore ?? 0,
+  };
+  return {
+    ...EMPTY_BOX,
+    ...raw,
+    awayLine: raw.awayLine && raw.awayLine.length ? raw.awayLine : EMPTY_LINE,
+    homeLine: raw.homeLine && raw.homeLine.length ? raw.homeLine : EMPTY_LINE,
+    currentInning: raw.currentInning ?? 1,
+    currentHalf: raw.currentHalf ?? 'top',
+    batterUp: raw.batterUp ?? 'away',
   };
 }
 
@@ -1251,18 +1267,9 @@ function Schedule() {
   );
 }
 
-const STAT_COLS: { key: ScoreStat; label: string }[] = [
-  { key: 'runs', label: 'R' },
-  { key: 'hits', label: 'H' },
-  { key: 'walks', label: 'BB' },
-  { key: 'outs', label: 'O' },
-];
-
-function boxValue(box: GameBoxScore, side: ScoreSide, stat: ScoreStat): number {
-  if (stat === 'runs') return side === 'home' ? box.homeRuns : box.awayRuns;
-  if (stat === 'hits') return side === 'home' ? box.homeHits : box.awayHits;
-  if (stat === 'walks') return side === 'home' ? box.homeWalks : box.awayWalks;
-  return side === 'home' ? box.homeOuts : box.awayOuts;
+function lineFor(box: GameBoxScore, side: ScoreSide): number[] {
+  const line = side === 'home' ? box.homeLine : box.awayLine;
+  return line && line.length ? line : EMPTY_LINE;
 }
 
 function TeamMark({ name, teamId, photoUrl }: { name: string; teamId: string; photoUrl?: string }) {
@@ -1356,30 +1363,15 @@ function LiveScoreboard({
         <TeamMark name={game.homeTeamName} teamId={game.homeTeamId} photoUrl={photos[game.homeTeamId]} />
       </div>
       <hr className="mlb-rule" />
-      <div className="mlb-line" aria-label="Box score totals">
-        <span className="mlb-colhead mlb-abbr-head" />
-        {STAT_COLS.map((col) => (
-          <span key={col.key} className="mlb-colhead">
-            {col.label}
-          </span>
-        ))}
-        <ScoreboardSide
-          side="away"
-          name={game.awayTeamName}
-          box={box}
-          canScore={canScore}
-          busy={busy}
-          onBump={(stat, delta) => run(() => api.bumpScoreStat(game.id, 'away', stat, delta))}
-        />
-        <ScoreboardSide
-          side="home"
-          name={game.homeTeamName}
-          box={box}
-          canScore={canScore}
-          busy={busy}
-          onBump={(stat, delta) => run(() => api.bumpScoreStat(game.id, 'home', stat, delta))}
-        />
-      </div>
+      <LineScore
+        gameId={game.id}
+        awayName={game.awayTeamName}
+        homeName={game.homeTeamName}
+        box={box}
+        canScore={canScore}
+        busy={busy}
+        onRun={(action) => run(action)}
+      />
       <div className="inning-outs">
         <div className="inning-outs-copy">
           <span className="mlb-outs-label">Outs</span>
@@ -1388,29 +1380,36 @@ function LiveScoreboard({
               <span key={i} className={`out-dot ${i < box.currentOuts ? 'on' : ''}`} />
             ))}
           </span>
+          {canScore && (
+            <div className="inning-outs-actions">
+              <button
+                type="button"
+                className="score-step"
+                disabled={busy || (box.currentOuts === 0 && box.currentInning === 1 && box.currentHalf === 'top')}
+                aria-label="Remove an out this inning"
+                onClick={() => run(() => api.bumpCurrentOuts(game.id, -1))}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="score-step"
+                disabled={busy}
+                aria-label="Add an out this inning"
+                onClick={() => run(() => api.bumpCurrentOuts(game.id, 1))}
+              >
+                +
+              </button>
+            </div>
+          )}
         </div>
-        {canScore && (
-          <div className="inning-outs-actions">
-            <button
-              type="button"
-              className="score-step"
-              disabled={busy || box.currentOuts === 0}
-              aria-label="Remove an out this inning"
-              onClick={() => run(() => api.bumpCurrentOuts(game.id, -1))}
-            >
-              −
-            </button>
-            <button
-              type="button"
-              className="score-step"
-              disabled={busy}
-              aria-label="Add an out this inning"
-              onClick={() => run(() => api.bumpCurrentOuts(game.id, 1))}
-            >
-              +
-            </button>
-          </div>
-        )}
+        <p className="batter-up" aria-label={`Batter up ${box.batterUp === 'home' ? game.homeTeamName : game.awayTeamName}`}>
+          <span className="mlb-outs-label">Batter up</span>
+          <strong>{box.batterUp === 'home' ? game.homeTeamName : game.awayTeamName}</strong>
+          <span className="batter-half">
+            {box.currentHalf === 'bottom' ? 'Bot' : 'Top'} {box.currentInning}
+          </span>
+        </p>
       </div>
       {canStart && (
         <button
@@ -1429,57 +1428,220 @@ function LiveScoreboard({
   );
 }
 
-function ScoreboardSide({
-  side,
-  name,
-  box,
+function inningHasStarted(side: ScoreSide, inning: number, currentInning: number, currentHalf: InningHalf): boolean {
+  if (inning < currentInning) return true;
+  if (inning > currentInning) return false;
+  return side === 'away' || currentHalf === 'bottom';
+}
+
+function LineCell({
+  value,
+  blank,
   canScore,
   busy,
-  onBump,
+  decreaseLabel,
+  increaseLabel,
+  onMinus,
+  onPlus,
+}: {
+  value: number;
+  blank?: boolean;
+  canScore: boolean;
+  busy: boolean;
+  decreaseLabel: string;
+  increaseLabel: string;
+  onMinus: () => void;
+  onPlus: () => void;
+}) {
+  const shown = blank && value === 0 ? '' : value;
+  if (!canScore) {
+    return <span className="scoreboard-value">{shown}</span>;
+  }
+  return (
+    <span className="scoreboard-cell">
+      <button
+        type="button"
+        className="score-step tiny"
+        disabled={busy || value === 0}
+        aria-label={decreaseLabel}
+        onClick={onMinus}
+      >
+        −
+      </button>
+      <span className="scoreboard-value">{shown === '' ? 0 : shown}</span>
+      <button
+        type="button"
+        className="score-step tiny"
+        disabled={busy}
+        aria-label={increaseLabel}
+        onClick={onPlus}
+      >
+        +
+      </button>
+    </span>
+  );
+}
+
+function LineScoreRow({
+  side,
+  name,
+  line,
+  runs,
+  hits,
+  innings,
+  currentInning,
+  currentHalf,
+  canScore,
+  busy,
+  gameId,
+  onRun,
 }: {
   side: ScoreSide;
   name: string;
+  line: number[];
+  runs: number;
+  hits: number;
+  innings: number;
+  currentInning: number;
+  currentHalf: InningHalf;
+  canScore: boolean;
+  busy: boolean;
+  gameId: string;
+  onRun: (action: () => Promise<Game>) => void;
+}) {
+  const batting = (currentHalf === 'top' && side === 'away') || (currentHalf === 'bottom' && side === 'home');
+  return (
+    <tr className={batting ? 'is-batting' : undefined}>
+      <th className="line-team-col" scope="row" title={name}>
+        {teamAbbr(name)}
+      </th>
+      {Array.from({ length: innings }, (_, i) => {
+        const inning = i + 1;
+        const value = line[i] ?? 0;
+        const started = inningHasStarted(side, inning, currentInning, currentHalf);
+        const current = batting && inning === currentInning;
+        return (
+          <td key={inning} className={`line-cell ${current ? 'is-current' : ''}`}>
+            <LineCell
+              value={value}
+              blank={!started}
+              canScore={canScore}
+              busy={busy}
+              decreaseLabel={`Decrease ${name} inning ${inning}`}
+              increaseLabel={`Increase ${name} inning ${inning}`}
+              onMinus={() => onRun(() => api.bumpInningRun(gameId, side, inning, -1))}
+              onPlus={() => onRun(() => api.bumpInningRun(gameId, side, inning, 1))}
+            />
+          </td>
+        );
+      })}
+      <td className="line-tot line-tot-r">
+        <LineCell
+          value={runs}
+          canScore={canScore}
+          busy={busy}
+          decreaseLabel={`Decrease ${name} R`}
+          increaseLabel={`Increase ${name} R`}
+          onMinus={() => onRun(() => api.bumpInningRun(gameId, side, currentInning, -1))}
+          onPlus={() => onRun(() => api.bumpInningRun(gameId, side, currentInning, 1))}
+        />
+      </td>
+      <td className="line-tot line-tot-h">
+        <LineCell
+          value={hits}
+          canScore={canScore}
+          busy={busy}
+          decreaseLabel={`Decrease ${name} H`}
+          increaseLabel={`Increase ${name} H`}
+          onMinus={() => onRun(() => api.bumpScoreStat(gameId, side, 'hits', -1))}
+          onPlus={() => onRun(() => api.bumpScoreStat(gameId, side, 'hits', 1))}
+        />
+      </td>
+    </tr>
+  );
+}
+
+function LineScore({
+  gameId,
+  awayName,
+  homeName,
+  box,
+  canScore,
+  busy,
+  onRun,
+}: {
+  gameId: string;
+  awayName: string;
+  homeName: string;
   box: GameBoxScore;
   canScore: boolean;
   busy: boolean;
-  onBump: (stat: ScoreStat, delta: number) => void;
+  onRun: (action: () => Promise<Game>) => void;
 }) {
+  const awayLine = lineFor(box, 'away');
+  const homeLine = lineFor(box, 'home');
+  const innings = Math.max(awayLine.length, homeLine.length, 7);
+  const currentInning = box.currentInning ?? 1;
+  const currentHalf = box.currentHalf ?? 'top';
   return (
-    <>
-      <span className={`mlb-abbr scoreboard-${side}`} title={name}>
-        {teamAbbr(name)}
-      </span>
-      {STAT_COLS.map((col) => {
-        const value = boxValue(box, side, col.key);
-        return (
-          <span key={col.key} className={`scoreboard-cell ${col.key === 'runs' ? 'runs' : ''}`}>
-            {canScore && (
-              <button
-                type="button"
-                className="score-step tiny"
-                disabled={busy || value === 0}
-                aria-label={`Decrease ${name} ${col.label}`}
-                onClick={() => onBump(col.key, -1)}
-              >
-                −
-              </button>
-            )}
-            <span className="scoreboard-value">{value}</span>
-            {canScore && (
-              <button
-                type="button"
-                className="score-step tiny"
-                disabled={busy}
-                aria-label={`Increase ${name} ${col.label}`}
-                onClick={() => onBump(col.key, 1)}
-              >
-                +
-              </button>
-            )}
-          </span>
-        );
-      })}
-    </>
+    <div className="line-score" aria-label="Line score">
+      <div className="line-score-scroll">
+        <table className="line-score-table">
+          <thead>
+            <tr>
+              <th className="line-team-col" scope="col">
+                <span className="visually-hidden">Team</span>
+              </th>
+              {Array.from({ length: innings }, (_, i) => (
+                <th
+                  key={i + 1}
+                  scope="col"
+                  className={currentInning === i + 1 ? 'is-current' : undefined}
+                >
+                  {i + 1}
+                </th>
+              ))}
+              <th className="line-tot line-tot-r" scope="col">
+                R
+              </th>
+              <th className="line-tot line-tot-h" scope="col">
+                H
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <LineScoreRow
+              side="away"
+              name={awayName}
+              line={awayLine}
+              runs={box.awayRuns}
+              hits={box.awayHits}
+              innings={innings}
+              currentInning={currentInning}
+              currentHalf={currentHalf}
+              canScore={canScore}
+              busy={busy}
+              gameId={gameId}
+              onRun={onRun}
+            />
+            <LineScoreRow
+              side="home"
+              name={homeName}
+              line={homeLine}
+              runs={box.homeRuns}
+              hits={box.homeHits}
+              innings={innings}
+              currentInning={currentInning}
+              currentHalf={currentHalf}
+              canScore={canScore}
+              busy={busy}
+              gameId={gameId}
+              onRun={onRun}
+            />
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

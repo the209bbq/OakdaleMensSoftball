@@ -7,6 +7,7 @@ import {
   canScoreLiveGame,
   canStartLiveGame,
   scoringWindow,
+  stepHalfInning,
   wrapCurrentOuts,
 } from './gameScoring.js';
 
@@ -68,17 +69,22 @@ describe('wrapCurrentOuts', () => {
 
 describe('boxFromParts', () => {
   it('treats missing scores as zeros and wraps current outs', () => {
-    expect(boxFromParts(null, 4, { homeHits: 3, currentOuts: 4 })).toEqual({
-      homeRuns: 0,
-      awayRuns: 4,
-      homeHits: 3,
-      awayHits: 0,
-      homeWalks: 0,
-      awayWalks: 0,
-      homeOuts: 0,
-      awayOuts: 0,
-      currentOuts: 1,
-    });
+    const box = boxFromParts(null, 4, { homeHits: 3, currentOuts: 4 });
+    expect(box.homeRuns).toBe(0);
+    expect(box.awayRuns).toBe(4);
+    expect(box.homeHits).toBe(3);
+    expect(box.currentOuts).toBe(1);
+    expect(box.awayLine[0]).toBe(4);
+    expect(box.awayLine).toHaveLength(7);
+    expect(box.homeLine).toHaveLength(7);
+    expect(box.batterUp).toBe('away');
+  });
+});
+
+describe('stepHalfInning', () => {
+  it('opens extra innings after the bottom of the 7th', () => {
+    const next = stepHalfInning(7, 'bottom', 2, 1);
+    expect(next).toEqual({ inning: 8, half: 'top', outs: 0 });
   });
 });
 
