@@ -326,6 +326,8 @@ describe('Live game log', () => {
       .send({ side: ownSide, stat: 'runs', delta: 1 });
     expect(run.status).toBe(200);
     expect(run.body.box[ownSide === 'home' ? 'homeRuns' : 'awayRuns']).toBe(1);
+    expect(run.body.homeScore).toBe(ownSide === 'home' ? 1 : 0);
+    expect(run.body.awayScore).toBe(ownSide === 'away' ? 1 : 0);
     expect(run.body.played).toBe(true);
 
     const hit = await manager

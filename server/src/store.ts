@@ -911,13 +911,11 @@ export class LeagueStore {
     const tx = this.db.transaction(() => {
       this.ensureGameLog(gameId);
       if (stat === 'runs') {
-        const current = (side === 'home' ? game.homeScore : game.awayScore) ?? 0;
-        const next = clampStat(current + step);
-        if (side === 'home') {
-          this.db.prepare('UPDATE games SET homeScore = ?, played = 1 WHERE id = ?').run(next, gameId);
-        } else {
-          this.db.prepare('UPDATE games SET awayScore = ?, played = 1 WHERE id = ?').run(next, gameId);
-        }
+        const home = (game.homeScore ?? 0) + (side === 'home' ? step : 0);
+        const away = (game.awayScore ?? 0) + (side === 'away' ? step : 0);
+        this.db
+          .prepare('UPDATE games SET homeScore = ?, awayScore = ?, played = 1 WHERE id = ?')
+          .run(clampStat(home), clampStat(away), gameId);
       } else {
         const column =
           stat === 'hits'
