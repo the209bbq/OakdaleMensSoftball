@@ -429,6 +429,7 @@ describe('Admin user management', () => {
     expect(assign.status).toBe(200);
     expect(assign.body.role).toBe('manager');
     expect(assign.body.teamId).toBe('flying-demons');
+    expect(assign.body.onRoster).toBe(true);
 
     const badTeam = await admin.post(`/api/users/${target.id}/role`).send({ role: 'manager' });
     expect(badTeam.status).toBe(400);
@@ -1326,6 +1327,7 @@ describe('Manager email authorizations', () => {
     expect(reg.status).toBe(201);
     expect(reg.body.role).toBe('manager');
     expect(reg.body.teamId).toBe(TEAM_OTHER);
+    expect(reg.body.onRoster).toBe(true);
     expect(reg.body.email).toBe('newmgr@oakdale.local');
 
     const after = await admin.get('/api/manager-emails');
@@ -1448,7 +1450,7 @@ describe('Manager email authorizations', () => {
 
     const roster = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
     expect(roster.status).toBe(200);
-    expect(roster.body.manager).toEqual({ name: 'Mgr Player' });
+    expect(roster.body.manager).toEqual({ name: 'Mgr Player', onRoster: true });
     expect(roster.body.members).toHaveLength(2);
     const managerRow = roster.body.members[0];
     expect(managerRow).toMatchObject({
@@ -1462,6 +1464,35 @@ describe('Manager email authorizations', () => {
     expect('email' in managerRow).toBe(false);
     expect(managerRow.passwordHash).toBeUndefined();
     expect(roster.body.members[1]).toMatchObject({ name: 'Pat', isManager: false });
+  });
+
+  it('keeps a manager-only account off the roster, attendance, and lineup', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'coach.only@b.com', name: 'Coach Only', password: 'longenough' });
+    const coach = store.getUserByEmail('coach.only@b.com')!;
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const assign = await admin
+      .post(`/api/users/${coach.id}/role`)
+      .send({ role: 'manager', teamId: TEAM_OWN, onRoster: false });
+    expect(assign.status).toBe(200);
+    expect(assign.body.onRoster).toBe(false);
+
+    store.registerUser({ email: 'p.only@b.com', name: 'Pat Plays', password: 'longenough' });
+    store.setUserTeam(store.getUserByEmail('p.only@b.com')!.id, TEAM_OWN);
+
+    const roster = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
+    expect(roster.status).toBe(200);
+    expect(roster.body.manager).toEqual({ name: 'Coach Only', onRoster: false });
+    expect(roster.body.members.map((m: { name: string }) => m.name)).toEqual(['Pat Plays']);
+
+    store.generateSchedule({ startDate: utcToday(), weeks: 2 });
+    expect(store.getTeamAttendance(TEAM_OWN, 1)).toEqual({ in: 0, out: 0, none: 1, total: 1 });
+    expect(store.listLineupCandidates(TEAM_OWN).map((p) => p.name)).toEqual(['Pat Plays']);
+
+    const coachAgent = await loginAs(app, 'coach.only@b.com', 'longenough');
+    const check = await coachAgent.post('/api/checkin').send({ week: 1, status: 'in' });
+    expect(check.status).toBe(400);
+    expect(check.body.error).toMatch(/not on the roster/i);
   });
 });
 

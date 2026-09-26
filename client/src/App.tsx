@@ -281,6 +281,7 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
   const [position, setPosition] = useState(user?.position ?? '');
   const [number, setNumber] = useState(user?.number != null ? String(user.number) : '');
   const [photoUrl, setPhotoUrl] = useState<string | null>(user?.photoUrl ?? null);
+  const [onRoster, setOnRoster] = useState(user?.onRoster !== false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -304,6 +305,7 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
         position,
         number: parsedNumber,
         photoUrl,
+        ...(user?.role === 'manager' ? { onRoster } : {}),
       });
       await refresh();
       onClose();
@@ -355,6 +357,19 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setNumber(e.target.value)}
             />
           </label>
+          {user?.role === 'manager' && (
+            <label className="field">
+              On this team
+              <select
+                aria-label="Manager roster option"
+                value={onRoster ? 'player' : 'only'}
+                onChange={(e) => setOnRoster(e.target.value === 'player')}
+              >
+                <option value="player">I play for this team</option>
+                <option value="only">Manager only — not on the roster</option>
+              </select>
+            </label>
+          )}
           {error && <p className="error inline-error">{error}</p>}
           <button className="primary-btn" type="submit" disabled={busy}>
             {busy ? 'Saving…' : 'Save profile'}
@@ -1916,6 +1931,7 @@ function Rosters() {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
   const [managerName, setManagerName] = useState<string | null>(null);
+  const [managerOnRoster, setManagerOnRoster] = useState(true);
   const [checkingIn, setCheckingIn] = useState(false);
   const [accounts, setAccounts] = useState<PlayerAccount[]>([]);
   const [pickMember, setPickMember] = useState('');
@@ -1952,6 +1968,7 @@ function Rosters() {
       setMembers(r.members ?? []);
       setCurrentWeek(r.currentWeek ?? null);
       setManagerName(r.manager?.name ?? null);
+      setManagerOnRoster(r.manager?.onRoster !== false);
       setTeams((prev) => prev.map((t) => (t.id === r.team.id ? r.team : t)));
     });
   }
@@ -2110,7 +2127,10 @@ function Rosters() {
     ? teams.find((t) => t.id === user.teamId)?.name ?? user.teamId
     : null;
 
-  const canCheckIn = Boolean(user && user.teamId === selected && currentWeek);
+  const playsOnTeam = Boolean(
+    user?.teamId && (user.role === 'player' || (user.role === 'manager' && user.onRoster !== false)),
+  );
+  const canCheckIn = Boolean(playsOnTeam && user && user.teamId === selected && currentWeek);
   const myCheckIn = members.find((m) => m.id === user?.id)?.checkIn ?? null;
   const checkInCounts = {
     in: members.filter((m) => m.checkIn === 'in').length,
@@ -2194,7 +2214,12 @@ function Rosters() {
           )}
           <div>
             <h3 className="roster-team-name">{selectedTeam.name}</h3>
-            {managerName && <p className="roster-manager">Manager: {managerName}</p>}
+            {managerName && (
+              <p className="roster-manager">
+                Manager: {managerName}
+                {managerOnRoster ? '' : ' · does not play'}
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -2596,6 +2621,7 @@ function Admin() {
   const [newTeam, setNewTeam] = useState('');
   const [mgrEmails, setMgrEmails] = useState('');
   const [mgrTeamId, setMgrTeamId] = useState('');
+  const [mgrOnRoster, setMgrOnRoster] = useState(true);
   const [authorizations, setAuthorizations] = useState<ManagerAuthorization[]>([]);
   const [authorizing, setAuthorizing] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -2620,11 +2646,11 @@ function Admin() {
   }
   useEffect(load, []);
 
-  async function changeRole(u: User, role: Role, teamId: string | null) {
+  async function changeRole(u: User, role: Role, teamId: string | null, onRoster?: boolean) {
     setError(null);
     setMessage(null);
     try {
-      await api.setUserRole(u.id, role, teamId);
+      await api.setUserRole(u.id, role, teamId, onRoster);
       setMessage(`Updated ${u.name}.`);
       load();
     } catch (e) {
@@ -2664,7 +2690,7 @@ function Admin() {
     setMessage(null);
     setAuthorizing(true);
     try {
-      const result = await api.authorizeManagers(mgrEmails, mgrTeamId);
+      const result = await api.authorizeManagers(mgrEmails, mgrTeamId, mgrOnRoster);
       setMessage(`Promoted ${result.promoted.length}, pending ${result.pending.length}`);
       setMgrEmails('');
       load();
@@ -2920,6 +2946,18 @@ function Admin() {
             ))}
           </select>
         </label>
+        <label className="field">
+          On that team:{' '}
+          <select
+            aria-label="Manager roster option"
+            value={mgrOnRoster ? 'player' : 'only'}
+            onChange={(e) => setMgrOnRoster(e.target.value === 'player')}
+          >
+            <option value="player">Player / manager</option>
+            <option value="only">Manager only</option>
+          </select>
+        </label>
+        <p className="theme-help">Playing managers are on their own team&apos;s roster. Manager-only does not take a roster spot.</p>
         <button className="primary-btn" type="submit" disabled={authorizing || !mgrTeamId}>
           {authorizing ? 'Authorizing…' : 'Authorize'}
         </button>
@@ -2937,7 +2975,10 @@ function Admin() {
                 </span>
               </div>
               <div className="role-controls">
-                <span className="manager-of">{row.teamName}</span>
+                <span className="manager-of">
+                  {row.teamName}
+                  {row.onRoster === false ? ' · manager only' : ' · plays'}
+                </span>
                 <button
                   type="button"
                   className="link-btn danger"
@@ -2978,13 +3019,23 @@ function Admin() {
                 <select
                   aria-label={`Team for ${u.name}`}
                   value={u.teamId ?? ''}
-                  onChange={(e) => changeRole(u, 'manager', e.target.value)}
+                  onChange={(e) => changeRole(u, 'manager', e.target.value, u.onRoster !== false)}
                 >
                   {teams.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
                     </option>
                   ))}
+                </select>
+              )}
+              {u.role === 'manager' && (
+                <select
+                  aria-label={`Manager type for ${u.name}`}
+                  value={u.onRoster === false ? 'only' : 'player'}
+                  onChange={(e) => changeRole(u, 'manager', u.teamId, e.target.value === 'player')}
+                >
+                  <option value="player">Player / manager</option>
+                  <option value="only">Manager only</option>
                 </select>
               )}
               {u.role === 'manager' && u.teamId && (

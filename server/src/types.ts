@@ -77,8 +77,14 @@ export interface User {
   email: string;
   name: string;
   role: Role;
-  /** For managers: the team they manage. For players: the team they belong to. Null for admins. */
+  /** For managers: the team they manage (and play for, unless onRoster is false). For players: the team they belong to. Null for admins. */
   teamId: string | null;
+  /**
+   * Managers default to playing for the team they manage.
+   * `false` is manager-only: they still manage, but they are not on the roster.
+   * Players and admins ignore this (players are always on their team).
+   */
+  onRoster: boolean;
   passwordHash: string;
   createdAt: string;
   /** Self-editable profile fields. */
@@ -112,7 +118,7 @@ export interface TeamMember {
   number: number | null;
   position?: string;
   photoUrl?: string;
-  /** True when this member is the team's manager (managers also play). */
+  /** True when this member is the team's manager and also plays. */
   isManager: boolean;
   /** Current-week RSVP; null means no response. */
   checkIn: CheckInStatus | null;
@@ -122,6 +128,7 @@ export interface TeamMember {
 export interface PendingManager {
   email: string;
   teamId: string;
+  onRoster: boolean;
 }
 
 /** Combined active-manager + pending-authorization row for the admin UI. */
@@ -130,6 +137,8 @@ export interface ManagerAuthorization {
   teamId: string;
   teamName: string;
   status: 'active' | 'pending';
+  /** Playing managers are on this team's roster; manager-only is not. */
+  onRoster: boolean;
 }
 
 /** Player-account picker row (no email). */

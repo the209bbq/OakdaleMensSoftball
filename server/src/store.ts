@@ -132,11 +132,13 @@ CREATE TABLE IF NOT EXISTS users (
   position TEXT,
   number INTEGER,
   photoUrl TEXT,
+  onRoster INTEGER NOT NULL DEFAULT 1,
   createdAt TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS pending_managers (
   email TEXT PRIMARY KEY,
-  teamId TEXT NOT NULL
+  teamId TEXT NOT NULL,
+  onRoster INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -217,9 +219,10 @@ type UserRow = {
   position: string | null;
   number: number | null;
   photoUrl: string | null;
+  onRoster?: number | null;
   createdAt: string;
 };
-type PendingRow = { email: string; teamId: string };
+type PendingRow = { email: string; teamId: string; onRoster?: number | null };
 type CheckInRow = { userId: string; week: number; status: string };
 type SuggestionRow = { id: string; text: string; authorName: string | null; createdAt: string };
 type MessageRow = {
@@ -461,6 +464,13 @@ function gameLogFromRow(row: GameLogRow): GameLog {
   };
 }
 
+function userOnRoster(user: Pick<User, 'role' | 'teamId' | 'onRoster'>): boolean {
+  if (!user.teamId) return false;
+  if (user.role === 'player') return true;
+  if (user.role === 'manager') return user.onRoster !== false;
+  return false;
+}
+
 function userFromRow(row: UserRow): User {
   const user: User = {
     id: row.id,
@@ -468,6 +478,7 @@ function userFromRow(row: UserRow): User {
     name: row.name,
     role: backfillRole(row.role),
     teamId: row.teamId,
+    onRoster: row.onRoster !== 0,
     passwordHash: row.passwordHash,
     createdAt: row.createdAt,
   };
@@ -548,6 +559,7 @@ export class LeagueStore {
     }
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(SCHEMA);
+    this.ensureUserColumns();
     this.ensureGameLogColumns();
     if (sqlitePath) this.importLegacyJsonIfNeeded(sqlitePath);
     this.seedIfEmpty();
@@ -620,11 +632,11 @@ export class LeagueStore {
        VALUES (@id, @date, @homeTeamId, @awayTeamId, @homeScore, @awayScore, @played, @field, @time, @location, @week)`,
     );
     const insertUser = this.db.prepare(
-      `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, createdAt)
-       VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @createdAt)`,
+      `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, onRoster, createdAt)
+       VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @onRoster, @createdAt)`,
     );
     const insertPending = this.db.prepare(
-      'INSERT INTO pending_managers (email, teamId) VALUES (@email, @teamId)',
+      'INSERT INTO pending_managers (email, teamId, onRoster) VALUES (@email, @teamId, @onRoster)',
     );
 
     const tx = this.db.transaction(() => {
@@ -651,11 +663,16 @@ export class LeagueStore {
           position: user.position ?? null,
           number: user.number ?? null,
           photoUrl: user.photoUrl ?? null,
+          onRoster: user.onRoster === false ? 0 : 1,
           createdAt: user.createdAt,
         });
       }
       for (const pending of data.pendingManagers) {
-        insertPending.run({ email: pending.email, teamId: pending.teamId });
+        insertPending.run({
+          email: pending.email,
+          teamId: pending.teamId,
+          onRoster: pending.onRoster === false ? 0 : 1,
+        });
       }
       this.db
         .prepare(
@@ -669,8 +686,8 @@ export class LeagueStore {
   private insertUserRow(user: User): void {
     this.db
       .prepare(
-        `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, createdAt)
-         VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @createdAt)`,
+        `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, onRoster, createdAt)
+         VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @onRoster, @createdAt)`,
       )
       .run({
         id: user.id,
@@ -682,6 +699,7 @@ export class LeagueStore {
         position: user.position ?? null,
         number: user.number ?? null,
         photoUrl: user.photoUrl ?? null,
+        onRoster: user.onRoster === false ? 0 : 1,
         createdAt: user.createdAt,
       });
   }
@@ -690,7 +708,8 @@ export class LeagueStore {
     this.db
       .prepare(
         `UPDATE users SET email = @email, name = @name, role = @role, teamId = @teamId,
-         passwordHash = @passwordHash, position = @position, number = @number, photoUrl = @photoUrl, createdAt = @createdAt
+         passwordHash = @passwordHash, position = @position, number = @number, photoUrl = @photoUrl,
+         onRoster = @onRoster, createdAt = @createdAt
          WHERE id = @id`,
       )
       .run({
@@ -703,6 +722,7 @@ export class LeagueStore {
         position: user.position ?? null,
         number: user.number ?? null,
         photoUrl: user.photoUrl ?? null,
+        onRoster: user.onRoster === false ? 0 : 1,
         createdAt: user.createdAt,
       });
   }
@@ -1214,6 +1234,21 @@ export class LeagueStore {
       .run(JSON.stringify(awayLine), JSON.stringify(homeLine), now, userId, gameId);
   }
 
+  private ensureUserColumns(): void {
+    const userCols = new Set(
+      (this.db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!userCols.has('onRoster')) {
+      this.db.exec('ALTER TABLE users ADD COLUMN onRoster INTEGER NOT NULL DEFAULT 1');
+    }
+    const pendingCols = new Set(
+      (this.db.prepare('PRAGMA table_info(pending_managers)').all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!pendingCols.has('onRoster')) {
+      this.db.exec('ALTER TABLE pending_managers ADD COLUMN onRoster INTEGER NOT NULL DEFAULT 1');
+    }
+  }
+
   private ensureGameLogColumns(): void {
     const cols = new Set(
       (this.db.prepare('PRAGMA table_info(game_logs)').all() as Array<{ name: string }>).map((c) => c.name),
@@ -1405,18 +1440,20 @@ export class LeagueStore {
       name,
       role: input.role ?? 'player',
       teamId: input.role === 'manager' ? input.teamId ?? null : null,
+      onRoster: true,
       passwordHash: hashPassword(input.password),
       createdAt: new Date().toISOString(),
     };
 
     const pending = this.db
-      .prepare('SELECT email, teamId FROM pending_managers WHERE email = ?')
+      .prepare('SELECT email, teamId, onRoster FROM pending_managers WHERE email = ?')
       .get(email) as PendingRow | undefined;
     if (pending) {
       this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
       if (this.getTeam(pending.teamId)) {
         user.role = 'manager';
         user.teamId = pending.teamId;
+        user.onRoster = pending.onRoster !== 0;
       }
     }
 
@@ -1431,15 +1468,20 @@ export class LeagueStore {
     return toPublicUser(user);
   }
 
-  /** Assign a role. Managers are pinned to a team; other roles clear teamId. */
-  setUserRole(userId: string, role: Role, teamId: string | null = null): PublicUser {
+  /**
+   * Assign a role. Managers are pinned to a team and, by default, play for
+   * that same team. Pass `onRoster: false` for manager-only (off the roster).
+   */
+  setUserRole(userId: string, role: Role, teamId: string | null = null, onRoster?: boolean): PublicUser {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
     if (role === 'manager') {
       if (!teamId || !this.getTeam(teamId)) throw new Error('A valid team is required for managers');
       user.teamId = teamId;
+      user.onRoster = onRoster === undefined ? (user.role === 'manager' ? user.onRoster !== false : true) : onRoster;
     } else {
       user.teamId = null;
+      user.onRoster = true;
     }
     user.role = role;
     this.updateUserRow(user);
@@ -1500,8 +1542,9 @@ export class LeagueStore {
 
   /**
    * Account members of a team for attendance: player-role users with
-   * `teamId === team` plus the team's manager. Manual placeholder roster
-   * rows have no account and are excluded (same set as `getTeamMembers`).
+   * `teamId === team` plus playing managers. Manager-only accounts are
+   * excluded. Manual placeholder roster rows have no account and are excluded
+   * (same set as `getTeamMembers`).
    */
   getTeamAttendance(teamId: string, week: number): TeamAttendance {
     const members = this.accountMemberIdsByTeam().get(teamId) ?? [];
@@ -1531,12 +1574,12 @@ export class LeagueStore {
     return out;
   }
 
-  /** Player + manager account ids grouped by teamId. */
+  /** Playing player + manager account ids grouped by teamId. */
   private accountMemberIdsByTeam(): Map<string, string[]> {
     const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
     const byTeam = new Map<string, string[]>();
     for (const user of rows.map(userFromRow)) {
-      if ((user.role !== 'player' && user.role !== 'manager') || !user.teamId) continue;
+      if (!userOnRoster(user) || !user.teamId) continue;
       const list = byTeam.get(user.teamId) ?? [];
       list.push(user.id);
       byTeam.set(user.teamId, list);
@@ -1567,6 +1610,7 @@ export class LeagueStore {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
     if (!user.teamId) throw new Error('You must be on a team to check in');
+    if (!userOnRoster(user)) throw new Error('Manager-only accounts are not on the roster');
     if (!Number.isInteger(week)) throw new Error('week is not a scheduled week');
     const scheduled = this.db.prepare('SELECT 1 AS ok FROM games WHERE week = ? LIMIT 1').get(week) as
       | { ok: number }
@@ -1591,8 +1635,9 @@ export class LeagueStore {
   }
 
   /**
-   * Player-role accounts AND the team's manager on this team, public-safe (no email).
-   * Managers sort first (they also play); then by number, then name.
+   * Playing accounts on this team, public-safe (no email). Playing managers
+   * sort first; manager-only accounts are omitted (they still appear as
+   * `getTeamManager`). Then by number, then name.
    * `checkIn` is the member's RSVP for the current week (null = no response).
    */
   getTeamMembers(teamId: string): TeamMember[] {
@@ -1601,7 +1646,7 @@ export class LeagueStore {
     const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
     return rows
       .map(userFromRow)
-      .filter((u) => (u.role === 'player' || u.role === 'manager') && u.teamId === teamId)
+      .filter((u) => userOnRoster(u) && u.teamId === teamId)
       .map(
         (u): TeamMember => ({
           id: u.id,
@@ -1635,18 +1680,23 @@ export class LeagueStore {
   }
 
   /** Manager-role user assigned to this team, or null. Name only — never email. */
-  getTeamManager(teamId: string): { name: string } | null {
+  getTeamManager(teamId: string): { name: string; onRoster: boolean } | null {
     const rows = this.db.prepare('SELECT * FROM users ORDER BY rowid').all() as UserRow[];
     const manager = rows.map(userFromRow).find((u) => u.role === 'manager' && u.teamId === teamId);
-    return manager ? { name: manager.name } : null;
+    return manager ? { name: manager.name, onRoster: manager.onRoster !== false } : null;
   }
 
   /**
    * Authorize emails as managers of `teamId`. Existing accounts are promoted
    * immediately; others are stored as pending and auto-granted on signup.
    */
-  authorizeManagers(emails: string[], teamId: string): { promoted: string[]; pending: string[] } {
+  authorizeManagers(
+    emails: string[],
+    teamId: string,
+    onRoster = true,
+  ): { promoted: string[]; pending: string[] } {
     if (!this.getTeam(teamId)) throw new Error(`Unknown team: ${teamId}`);
+    const plays = onRoster !== false;
     const promoted: string[] = [];
     const pending: string[] = [];
     const seen = new Set<string>();
@@ -1660,7 +1710,7 @@ export class LeagueStore {
 
         const existing = this.getUserByEmail(email);
         if (existing) {
-          this.setUserRole(existing.id, 'manager', teamId);
+          this.setUserRole(existing.id, 'manager', teamId, plays);
           this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
           promoted.push(email);
         } else {
@@ -1668,9 +1718,13 @@ export class LeagueStore {
             .prepare('SELECT email FROM pending_managers WHERE email = ?')
             .get(email) as { email: string } | undefined;
           if (already) {
-            this.db.prepare('UPDATE pending_managers SET teamId = ? WHERE email = ?').run(teamId, email);
+            this.db
+              .prepare('UPDATE pending_managers SET teamId = ?, onRoster = ? WHERE email = ?')
+              .run(teamId, plays ? 1 : 0, email);
           } else {
-            this.db.prepare('INSERT INTO pending_managers (email, teamId) VALUES (?, ?)').run(email, teamId);
+            this.db
+              .prepare('INSERT INTO pending_managers (email, teamId, onRoster) VALUES (?, ?, ?)')
+              .run(email, teamId, plays ? 1 : 0);
           }
           pending.push(email);
         }
@@ -1694,11 +1748,12 @@ export class LeagueStore {
         teamId: user.teamId,
         teamName: team?.name ?? user.teamId,
         status: 'active',
+        onRoster: user.onRoster !== false,
       });
       activeEmails.add(user.email);
     }
 
-    const pending = this.db.prepare('SELECT email, teamId FROM pending_managers').all() as PendingRow[];
+    const pending = this.db.prepare('SELECT email, teamId, onRoster FROM pending_managers').all() as PendingRow[];
     for (const entry of pending) {
       if (activeEmails.has(entry.email)) continue;
       if (this.getUserByEmail(entry.email)) continue;
@@ -1708,6 +1763,7 @@ export class LeagueStore {
         teamId: entry.teamId,
         teamName: team?.name ?? entry.teamId,
         status: 'pending',
+        onRoster: entry.onRoster !== 0,
       });
     }
 
@@ -1738,13 +1794,23 @@ export class LeagueStore {
    */
   updateProfile(
     userId: string,
-    input: { name: string; position?: string; number?: number | null; photoUrl?: string | null },
+    input: {
+      name: string;
+      position?: string;
+      number?: number | null;
+      photoUrl?: string | null;
+      onRoster?: boolean;
+    },
   ): PublicUser {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
     const name = (input.name ?? '').trim();
     if (!name) throw new Error('Name is required');
     user.name = name;
+    if (input.onRoster !== undefined) {
+      if (user.role !== 'manager') throw new Error('Only managers can change roster status');
+      user.onRoster = input.onRoster !== false;
+    }
     if (input.position !== undefined) {
       const position = (input.position ?? '').trim();
       if (position) user.position = position;
@@ -1919,6 +1985,7 @@ export class LeagueStore {
           name: `Guest ${i}`,
           role: 'player',
           teamId: teams[teamIndex].id,
+          onRoster: true,
           passwordHash,
           createdAt,
         };

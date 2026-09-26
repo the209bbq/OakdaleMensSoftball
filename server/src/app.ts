@@ -145,8 +145,8 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
   api.put('/auth/profile', requireAuth, (req: Request, res: Response) => {
     try {
-      const { name, position, number, photoUrl } = req.body ?? {};
-      const updated = store.updateProfile(req.user!.id, { name, position, number, photoUrl });
+      const { name, position, number, photoUrl, onRoster } = req.body ?? {};
+      const updated = store.updateProfile(req.user!.id, { name, position, number, photoUrl, onRoster });
       res.json(updated);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
@@ -680,7 +680,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
   api.post('/users/:id/role', requireAdmin, (req: Request, res: Response) => {
     try {
-      const { role, teamId } = req.body ?? {};
+      const { role, teamId, onRoster } = req.body ?? {};
       if (!['admin', 'manager', 'player'].includes(role)) {
         res.status(400).json({ error: 'role must be admin, manager, or player' });
         return;
@@ -689,7 +689,8 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         res.status(400).json({ error: 'You cannot remove your own admin access' });
         return;
       }
-      const updated = store.setUserRole(req.params.id, role, teamId ?? null);
+      const plays = typeof onRoster === 'boolean' ? onRoster : undefined;
+      const updated = store.setUserRole(req.params.id, role, teamId ?? null, plays);
       res.json(updated);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
@@ -703,7 +704,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
   });
 
   api.post('/manager-emails', requireAdmin, (req: Request, res: Response) => {
-    const { emails, teamId } = req.body ?? {};
+    const { emails, teamId, onRoster } = req.body ?? {};
     if (typeof teamId !== 'string' || !teamId) {
       res.status(400).json({ error: 'teamId is required' });
       return;
@@ -718,7 +719,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       return;
     }
     try {
-      res.json(store.authorizeManagers(parsed, teamId));
+      res.json(store.authorizeManagers(parsed, teamId, onRoster !== false));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }

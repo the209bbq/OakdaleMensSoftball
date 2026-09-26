@@ -110,6 +110,8 @@ export interface User {
   name: string;
   role: Role;
   teamId: string | null;
+  /** Managers play for their team unless this is false (manager-only). */
+  onRoster?: boolean;
   createdAt: string;
   position?: string;
   number?: number | null;
@@ -139,6 +141,7 @@ export interface ManagerAuthorization {
   teamId: string;
   teamName: string;
   status: 'active' | 'pending';
+  onRoster?: boolean;
 }
 
 /** Player-account picker row (no email). */
@@ -150,6 +153,7 @@ export interface PlayerAccount {
 
 export interface TeamManagerSummary {
   name: string;
+  onRoster?: boolean;
 }
 
 export interface RosterResponse {
@@ -165,6 +169,7 @@ export interface ProfileUpdate {
   position?: string;
   number?: number | null;
   photoUrl?: string | null;
+  onRoster?: boolean;
 }
 
 export interface Landing {
@@ -299,10 +304,10 @@ export const api = {
 
   // Admin
   listUsers: () => request<User[]>('/api/users'),
-  setUserRole: (userId: string, role: Role, teamId: string | null) =>
+  setUserRole: (userId: string, role: Role, teamId: string | null, onRoster?: boolean) =>
     request<User>(`/api/users/${userId}/role`, {
       method: 'POST',
-      body: JSON.stringify({ role, teamId }),
+      body: JSON.stringify({ role, teamId, ...(onRoster === undefined ? {} : { onRoster }) }),
     }),
   createTeam: (name: string) =>
     request<Team>('/api/teams', { method: 'POST', body: JSON.stringify({ name }) }),
@@ -320,10 +325,10 @@ export const api = {
   updateRules: (rules: string) =>
     request<{ rules: string }>('/api/rules', { method: 'PUT', body: JSON.stringify({ rules }) }),
   listManagerEmails: () => request<ManagerAuthorization[]>('/api/manager-emails'),
-  authorizeManagers: (emails: string | string[], teamId: string) =>
+  authorizeManagers: (emails: string | string[], teamId: string, onRoster = true) =>
     request<{ promoted: string[]; pending: string[] }>('/api/manager-emails', {
       method: 'POST',
-      body: JSON.stringify({ emails, teamId }),
+      body: JSON.stringify({ emails, teamId, onRoster }),
     }),
   revokeManagerEmail: (email: string) =>
     request<{ ok: boolean }>(`/api/manager-emails/${encodeURIComponent(email)}`, { method: 'DELETE' }),
