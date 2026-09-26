@@ -31,6 +31,8 @@ export interface Game {
   week: number;
 }
 
+export type { GameBoxScore, ScoreSide, ScoreStat, ScoringPhase, ScoringWindow } from './gameScoring.js';
+
 /** Account-member check-in counts for one team in one scheduled week. */
 export interface TeamAttendance {
   in: number;

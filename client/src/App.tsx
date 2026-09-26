@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
+import { api, type CurrentWeek, type Game, type GameBoxScore, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoreStat, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
 import { applyTheme } from './theme';
@@ -944,6 +944,61 @@ function formatGameDate(iso: string): string {
   return `${WEEKDAYS[date.getUTCDay()]} ${MONTHS[m - 1]} ${d}`;
 }
 
+const EMPTY_BOX: GameBoxScore = {
+  homeRuns: 0,
+  awayRuns: 0,
+  homeHits: 0,
+  awayHits: 0,
+  homeWalks: 0,
+  awayWalks: 0,
+  homeOuts: 0,
+  awayOuts: 0,
+  currentOuts: 0,
+};
+
+function gameBox(game: Game): GameBoxScore {
+  return game.box ?? {
+    ...EMPTY_BOX,
+    homeRuns: game.homeScore ?? 0,
+    awayRuns: game.awayScore ?? 0,
+  };
+}
+
+function scoringPhaseLabel(phase: ScoringPhase | undefined): string {
+  if (phase === 'live') return 'Live';
+  if (phase === 'grace') return 'Open 24h';
+  if (phase === 'locked') return 'Final';
+  return 'Upcoming';
+}
+
+function remainingLabel(iso: string | null | undefined, now = Date.now()): string | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso) - now;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const hours = Math.floor(ms / 3_600_000);
+  const minutes = Math.floor((ms % 3_600_000) / 60_000);
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    return `${days}d ${hours % 24}h`;
+  }
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${Math.max(1, minutes)}m`;
+}
+
+function GameScoreLabel({ game }: { game: Game }) {
+  const box = gameBox(game);
+  const phase = game.scoring?.phase;
+  const hasRuns = game.played || box.homeRuns > 0 || box.awayRuns > 0 || Boolean(game.scoring?.liveStartedAt);
+  const score = `${box.awayRuns}–${box.homeRuns}`;
+  if (phase === 'live') {
+    return <span className="game-score live">{hasRuns ? `LIVE ${score}` : 'LIVE'}</span>;
+  }
+  if (hasRuns || phase === 'grace' || phase === 'locked') {
+    return <span className="game-score">{score}</span>;
+  }
+  return <span className="game-score">Upcoming</span>;
+}
+
 const EMPTY_ATTENDANCE: TeamAttendance = { in: 0, out: 0, none: 0, total: 0 };
 
 function attendanceOf(value?: TeamAttendance | null): TeamAttendance {
@@ -998,18 +1053,34 @@ function Schedule() {
   const [weeks, setWeeks] = useState('11');
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [home, setHome] = useState('');
-  const [away, setAway] = useState('');
 
   const isAdmin = user?.role === 'admin';
   const weekGroups = useMemo(() => groupGamesByWeek(games), [games]);
+  const expandedGame = games.find((g) => g.id === expanded);
+  const shouldPoll =
+    Boolean(expanded) &&
+    (expandedGame?.scoring?.phase === 'live' || expandedGame?.scoring?.phase === 'grace');
 
   function load() {
     api.getSchedule().then(setGames).catch((e) => setError(e.message));
   }
   useEffect(load, []);
+
+  useEffect(() => {
+    if (!shouldPoll || !expanded) return;
+    const timer = window.setInterval(() => {
+      api
+        .getGame(expanded)
+        .then((next) => {
+          setGames((current) => current.map((g) => (g.id === next.id ? next : g)));
+        })
+        .catch(() => {
+          /* keep last good snapshot */
+        });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [shouldPoll, expanded]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -1023,7 +1094,6 @@ function Schedule() {
       );
       setGames(next);
       setExpanded(null);
-      setEditing(null);
       setMessage(`Generated ${next.length} games from the current teams.`);
     } catch (e) {
       setError((e as Error).message);
@@ -1032,31 +1102,12 @@ function Schedule() {
     }
   }
 
-  function startEdit(g: Game) {
-    setEditing(g.id);
-    setExpanded(g.id);
-    setHome(g.homeScore?.toString() ?? '');
-    setAway(g.awayScore?.toString() ?? '');
-    setMessage(null);
+  function patchGame(next: Game) {
+    setGames((current) => current.map((g) => (g.id === next.id ? next : g)));
   }
-
-  async function saveScore(g: Game) {
-    try {
-      await api.recordResult(g.id, Number(home), Number(away));
-      setEditing(null);
-      load();
-      setMessage('Score saved!');
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
-  const canReport = (g: Game) =>
-    canManageTeam(user, g.homeTeamId) || canManageTeam(user, g.awayTeamId);
 
   function toggleGame(id: string) {
     setExpanded((current) => (current === id ? null : id));
-    if (editing && editing !== id) setEditing(null);
   }
 
   if (error) return <p className="error">{error}</p>;
@@ -1119,9 +1170,7 @@ function Schedule() {
                         {g.homeTeamName} <AttendanceChip attendance={g.homeAttendance} />
                       </span>
                     </span>
-                    <span className="game-score">
-                      {g.played ? `${g.awayScore} - ${g.homeScore}` : 'Upcoming'}
-                    </span>
+                    <GameScoreLabel game={g} />
                     <span className="game-chevron" aria-hidden="true">
                       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M6 9l6 6 6-6" />
@@ -1152,34 +1201,12 @@ function Schedule() {
                         <AttendanceBreakdown name={g.awayTeamName} attendance={g.awayAttendance} />
                         <AttendanceBreakdown name={g.homeTeamName} attendance={g.homeAttendance} />
                       </div>
-                      {editing === g.id ? (
-                        <div className="score-edit">
-                          <input
-                            aria-label={`${g.awayTeamName} score`}
-                            type="number"
-                            value={away}
-                            onChange={(e) => setAway(e.target.value)}
-                          />
-                          <span className="at">-</span>
-                          <input
-                            aria-label={`${g.homeTeamName} score`}
-                            type="number"
-                            value={home}
-                            onChange={(e) => setHome(e.target.value)}
-                          />
-                          <button className="mini-btn" onClick={() => saveScore(g)}>
-                            Save
-                          </button>
-                        </div>
-                      ) : (
-                        canReport(g) && (
-                          <div className="game-actions">
-                            <button className="link-btn" onClick={() => startEdit(g)}>
-                              {g.played ? 'Edit score' : 'Report score'}
-                            </button>
-                          </div>
-                        )
-                      )}
+                      <LiveScoreboard
+                        game={g}
+                        onChanged={patchGame}
+                        onMessage={setMessage}
+                        onError={setError}
+                      />
                     </div>
                   )}
                 </li>
@@ -1189,6 +1216,212 @@ function Schedule() {
         </div>
       ))}
     </section>
+  );
+}
+
+const STAT_COLS: { key: ScoreStat; label: string }[] = [
+  { key: 'runs', label: 'R' },
+  { key: 'hits', label: 'H' },
+  { key: 'walks', label: 'BB' },
+  { key: 'outs', label: 'O' },
+];
+
+function boxValue(box: GameBoxScore, side: ScoreSide, stat: ScoreStat): number {
+  if (stat === 'runs') return side === 'home' ? box.homeRuns : box.awayRuns;
+  if (stat === 'hits') return side === 'home' ? box.homeHits : box.awayHits;
+  if (stat === 'walks') return side === 'home' ? box.homeWalks : box.awayWalks;
+  return side === 'home' ? box.homeOuts : box.awayOuts;
+}
+
+function LiveScoreboard({
+  game,
+  onChanged,
+  onMessage,
+  onError,
+}: {
+  game: Game;
+  onChanged: (game: Game) => void;
+  onMessage: (text: string | null) => void;
+  onError: (text: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const box = gameBox(game);
+  const scoring = game.scoring;
+  const phase = scoring?.phase ?? 'upcoming';
+  const canStart = Boolean(scoring?.canStart);
+  const canScore = Boolean(scoring?.canScore);
+  const remaining =
+    phase === 'live'
+      ? remainingLabel(scoring?.liveEndsAt)
+      : phase === 'grace'
+        ? remainingLabel(scoring?.closesAt)
+        : phase === 'upcoming'
+          ? remainingLabel(scoring?.opensAt)
+          : null;
+  const hint =
+    phase === 'live'
+      ? remaining
+        ? `Live game — about ${remaining} left`
+        : 'Live game'
+      : phase === 'grace'
+        ? remaining
+          ? `Scorekeeping open for ${remaining}`
+          : 'Scorekeeping still open'
+        : phase === 'locked'
+          ? 'Scoring is locked'
+          : remaining
+            ? `First pitch in ${remaining}`
+            : 'Waiting for first pitch';
+
+  async function run(action: () => Promise<Game>, ok?: string) {
+    if (busy) return;
+    setBusy(true);
+    onError(null);
+    try {
+      const next = await action();
+      onChanged(next);
+      if (ok) onMessage(ok);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="scoreboard">
+      <div className="scoreboard-top">
+        <span className={`phase-pill phase-${phase}`}>{scoringPhaseLabel(phase)}</span>
+        <p className="scoreboard-hint">{hint}</p>
+      </div>
+      <div className="scoreboard-board" aria-label="Live box score">
+        <div className="scoreboard-row scoreboard-head">
+          <span className="scoreboard-team">Team</span>
+          {STAT_COLS.map((col) => (
+            <span key={col.key} className="scoreboard-stat-label">
+              {col.label}
+            </span>
+          ))}
+        </div>
+        <ScoreboardSide
+          side="away"
+          name={game.awayTeamName}
+          box={box}
+          canScore={canScore}
+          busy={busy}
+          onBump={(stat, delta) =>
+            run(() => api.bumpScoreStat(game.id, 'away', stat, delta))
+          }
+        />
+        <ScoreboardSide
+          side="home"
+          name={game.homeTeamName}
+          box={box}
+          canScore={canScore}
+          busy={busy}
+          onBump={(stat, delta) =>
+            run(() => api.bumpScoreStat(game.id, 'home', stat, delta))
+          }
+        />
+      </div>
+      <div className="inning-outs">
+        <div className="inning-outs-copy">
+          <strong>Outs this inning</strong>
+          <span className="inning-outs-dots" aria-label={`${box.currentOuts} outs`}>
+            {[0, 1, 2].map((i) => (
+              <span key={i} className={`out-dot ${i < box.currentOuts ? 'on' : ''}`} />
+            ))}
+          </span>
+        </div>
+        {canScore && (
+          <div className="inning-outs-actions">
+            <button
+              type="button"
+              className="score-step"
+              disabled={busy || box.currentOuts === 0}
+              aria-label="Remove an out this inning"
+              onClick={() => run(() => api.bumpCurrentOuts(game.id, -1))}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              className="score-step"
+              disabled={busy}
+              aria-label="Add an out this inning"
+              onClick={() => run(() => api.bumpCurrentOuts(game.id, 1))}
+            >
+              +
+            </button>
+          </div>
+        )}
+      </div>
+      {canStart && (
+        <button
+          type="button"
+          className="start-live-btn"
+          disabled={busy}
+          onClick={() => run(() => api.startLiveGame(game.id), 'Live scorekeeping started.')}
+        >
+          Start live scorekeeping
+        </button>
+      )}
+      {!canScore && !canStart && phase === 'upcoming' && (
+        <p className="scoreboard-note">Team managers can keep score from 2 hours before first pitch through 24 hours after the game.</p>
+      )}
+    </div>
+  );
+}
+
+function ScoreboardSide({
+  side,
+  name,
+  box,
+  canScore,
+  busy,
+  onBump,
+}: {
+  side: ScoreSide;
+  name: string;
+  box: GameBoxScore;
+  canScore: boolean;
+  busy: boolean;
+  onBump: (stat: ScoreStat, delta: number) => void;
+}) {
+  return (
+    <div className={`scoreboard-row scoreboard-${side}`}>
+      <span className="scoreboard-team">{name}</span>
+      {STAT_COLS.map((col) => {
+        const value = boxValue(box, side, col.key);
+        return (
+          <span key={col.key} className={`scoreboard-cell ${col.key === 'runs' ? 'runs' : ''}`}>
+            {canScore && (
+              <button
+                type="button"
+                className="score-step tiny"
+                disabled={busy || value === 0}
+                aria-label={`Decrease ${name} ${col.label}`}
+                onClick={() => onBump(col.key, -1)}
+              >
+                −
+              </button>
+            )}
+            <span className="scoreboard-value">{value}</span>
+            {canScore && (
+              <button
+                type="button"
+                className="score-step tiny"
+                disabled={busy}
+                aria-label={`Increase ${name} ${col.label}`}
+                onClick={() => onBump(col.key, 1)}
+              >
+                +
+              </button>
+            )}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 

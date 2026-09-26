@@ -24,6 +24,27 @@ const scheduleGames = [
     week: 1,
     awayAttendance: { in: 1, out: 1, none: 0, total: 2 },
     homeAttendance: { in: 0, out: 0, none: 0, total: 0 },
+    box: {
+      homeRuns: 0,
+      awayRuns: 0,
+      homeHits: 0,
+      awayHits: 0,
+      homeWalks: 0,
+      awayWalks: 0,
+      homeOuts: 0,
+      awayOuts: 0,
+      currentOuts: 0,
+    },
+    scoring: {
+      phase: 'upcoming' as const,
+      open: false,
+      opensAt: '2026-05-06T18:00:00.000Z',
+      liveEndsAt: '2026-05-06T20:00:00.000Z',
+      closesAt: '2026-05-07T20:00:00.000Z',
+      liveStartedAt: null,
+      canStart: false,
+      canScore: false,
+    },
   },
 ];
 
@@ -225,6 +246,73 @@ describe('App', () => {
     const attLines = screen.getAllByText((_, node) => node?.classList.contains('game-att-line') ?? false);
     expect(attLines[0].textContent).toMatch(/Da Beers:\s*🥎 1 · 💩 1 · — 0/);
     expect(attLines[1].textContent).toMatch(/Oakdale Tigers:\s*🥎 0 · 💩 0 · — 0/);
+    expect(screen.getByLabelText('Live box score')).toBeInTheDocument();
+    expect(screen.getAllByText('Upcoming').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /start live scorekeeping/i })).not.toBeInTheDocument();
+  });
+
+  it('lets a manager start live scorekeeping and bump runs', async () => {
+    const managerUser = {
+      id: 'u-mgr',
+      email: 'manager@oakdale.local',
+      name: 'David',
+      role: 'manager' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const liveGame = {
+      ...scheduleGames[0],
+      scoring: { ...scheduleGames[0].scoring!, canStart: true, canScore: false },
+    };
+    const startedGame = {
+      ...liveGame,
+      scoring: {
+        ...liveGame.scoring,
+        phase: 'live' as const,
+        open: true,
+        liveStartedAt: '2026-09-26T19:00:00.000Z',
+        canStart: false,
+        canScore: true,
+      },
+    };
+    const scoredGame = {
+      ...startedGame,
+      played: true,
+      homeScore: 1,
+      box: { ...startedGame.box!, homeRuns: 1 },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: managerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/scorelog/start') && init?.method === 'POST') return jsonOk(startedGame);
+        if (url.includes('/scorelog/stat') && init?.method === 'POST') return jsonOk(scoredGame);
+        if (url.includes('/api/schedule')) return jsonOk([liveGame]);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/messages')) return jsonOk([]);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /show details for da beers at oakdale tigers/i }));
+    expect(screen.getByRole('button', { name: /start live scorekeeping/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /start live scorekeeping/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Live')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Increase Oakdale Tigers R' }));
+    await waitFor(() => {
+      expect(screen.getByText('LIVE 0–1')).toBeInTheDocument();
+    });
   });
 
   it('shows compact per-team attendance chips on collapsed schedule rows', async () => {

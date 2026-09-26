@@ -252,6 +252,10 @@ describe('Authorization', () => {
     store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
     const manager = await loginAs(app, 'mgr@b.com', 'longenough');
 
+    const started = await admin.post(`/api/games/${ownGame.id}/scorelog/start`);
+    expect(started.status).toBe(200);
+    expect(started.body.scoring.canScore).toBe(true);
+
     const own = await manager.post(`/api/games/${ownGame.id}/result`).send({ homeScore: 3, awayScore: 9 });
     expect(own.status).toBe(200);
     expect(own.body.field).toBeTruthy();
@@ -262,6 +266,130 @@ describe('Authorization', () => {
 
     const other = await manager.post(`/api/games/${otherGame.id}/result`).send({ homeScore: 1, awayScore: 2 });
     expect(other.status).toBe(403);
+  });
+});
+
+describe('Live game log', () => {
+  it('attaches a box score and scoring window to the public schedule', async () => {
+    const { app } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2027-05-05' });
+    expect(gen.status).toBe(201);
+    const game = gen.body[0];
+    expect(game.box).toEqual({
+      homeRuns: 0,
+      awayRuns: 0,
+      homeHits: 0,
+      awayHits: 0,
+      homeWalks: 0,
+      awayWalks: 0,
+      homeOuts: 0,
+      awayOuts: 0,
+      currentOuts: 0,
+    });
+    expect(game.scoring.phase).toBe('upcoming');
+    expect(game.scoring.canStart).toBe(true);
+    expect(game.scoring.canScore).toBe(true);
+
+    const anon = await request(app).get('/api/schedule');
+    expect(anon.status).toBe(200);
+    expect(anon.body[0].scoring.canStart).toBe(false);
+    expect(anon.body[0].scoring.canScore).toBe(false);
+  });
+
+  it('lets a manager start and keep score only on their own game', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2027-05-05' });
+    const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
+    const ownGame = games.find((g) => g.homeTeamId === TEAM_OWN || g.awayTeamId === TEAM_OWN)!;
+    const otherGame = games.find((g) => g.homeTeamId !== TEAM_OWN && g.awayTeamId !== TEAM_OWN)!;
+    const ownSide = ownGame.homeTeamId === TEAM_OWN ? 'home' : 'away';
+
+    store.registerUser({ email: 'score.mgr@b.com', name: 'Score Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('score.mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'score.mgr@b.com', 'longenough');
+
+    const tooEarly = await manager.post(`/api/games/${ownGame.id}/scorelog/start`);
+    expect(tooEarly.status).toBe(403);
+
+    const started = await admin.post(`/api/games/${ownGame.id}/scorelog/start`);
+    expect(started.status).toBe(200);
+    expect(started.body.scoring.phase).toBe('live');
+    expect(started.body.scoring.canStart).toBe(false);
+
+    const forbiddenStart = await manager.post(`/api/games/${otherGame.id}/scorelog/start`);
+    expect(forbiddenStart.status).toBe(403);
+
+    const run = await manager
+      .post(`/api/games/${ownGame.id}/scorelog/stat`)
+      .send({ side: ownSide, stat: 'runs', delta: 1 });
+    expect(run.status).toBe(200);
+    expect(run.body.box[ownSide === 'home' ? 'homeRuns' : 'awayRuns']).toBe(1);
+    expect(run.body.played).toBe(true);
+
+    const hit = await manager
+      .post(`/api/games/${ownGame.id}/scorelog/stat`)
+      .send({ side: ownSide, stat: 'hits', delta: 2 });
+    expect(hit.status).toBe(200);
+    expect(hit.body.box[ownSide === 'home' ? 'homeHits' : 'awayHits']).toBe(2);
+
+    const walk = await manager
+      .post(`/api/games/${ownGame.id}/scorelog/stat`)
+      .send({ side: ownSide, stat: 'walks', delta: 1 });
+    expect(walk.body.box[ownSide === 'home' ? 'homeWalks' : 'awayWalks']).toBe(1);
+
+    const teamOut = await manager
+      .post(`/api/games/${ownGame.id}/scorelog/stat`)
+      .send({ side: ownSide, stat: 'outs', delta: 1 });
+    expect(teamOut.body.box[ownSide === 'home' ? 'homeOuts' : 'awayOuts']).toBe(1);
+
+    const out1 = await manager.post(`/api/games/${ownGame.id}/scorelog/outs`).send({ delta: 1 });
+    const out2 = await manager.post(`/api/games/${ownGame.id}/scorelog/outs`).send({ delta: 1 });
+    const out3 = await manager.post(`/api/games/${ownGame.id}/scorelog/outs`).send({ delta: 1 });
+    expect(out1.body.box.currentOuts).toBe(1);
+    expect(out2.body.box.currentOuts).toBe(2);
+    expect(out3.body.box.currentOuts).toBe(0);
+
+    const otherBump = await manager
+      .post(`/api/games/${otherGame.id}/scorelog/stat`)
+      .send({ side: 'home', stat: 'runs', delta: 1 });
+    expect(otherBump.status).toBe(403);
+
+    const player = request.agent(app);
+    store.registerUser({ email: 'score.p@b.com', name: 'Score P', password: 'longenough' });
+    store.setUserTeam(store.getUserByEmail('score.p@b.com')!.id, TEAM_OWN);
+    const playerLogin = await player.post('/api/auth/login').send({ email: 'score.p@b.com', password: 'longenough' });
+    expect(playerLogin.status).toBe(200);
+    const playerBump = await player
+      .post(`/api/games/${ownGame.id}/scorelog/stat`)
+      .send({ side: ownSide, stat: 'runs', delta: 1 });
+    expect(playerBump.status).toBe(403);
+  });
+
+  it('blocks a manager from scoring a locked past game until an admin starts it', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2026-05-02' });
+    const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
+    const ownGame = games.find((g) => g.homeTeamId === TEAM_OWN || g.awayTeamId === TEAM_OWN)!;
+
+    store.registerUser({ email: 'late.mgr@b.com', name: 'Late Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('late.mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'late.mgr@b.com', 'longenough');
+
+    const locked = await manager
+      .post(`/api/games/${ownGame.id}/scorelog/stat`)
+      .send({ side: 'home', stat: 'runs', delta: 1 });
+    expect(locked.status).toBe(403);
+
+    const started = await admin.post(`/api/games/${ownGame.id}/scorelog/start`);
+    expect(started.status).toBe(200);
+    const live = await manager
+      .post(`/api/games/${ownGame.id}/scorelog/stat`)
+      .send({ side: 'home', stat: 'hits', delta: 1 });
+    expect(live.status).toBe(200);
+    expect(live.body.box.homeHits).toBe(1);
   });
 });
 

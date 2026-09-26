@@ -900,6 +900,15 @@ body {
   font-weight: 600;
 }
 
+.game-score.live {
+  color: #fff;
+  background: #c2410c;
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
 .game-details {
   padding: 0 0.5rem 0.9rem 0.5rem;
 }
@@ -964,6 +973,197 @@ body {
 
 .game-details .link-btn {
   margin-left: 0;
+}
+
+.scoreboard {
+  margin-top: 0.15rem;
+  padding: 0.75rem 0.7rem 0.8rem;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--navy) 92%, #000) 0%, var(--navy) 100%);
+  color: #f8fafc;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.scoreboard-top {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.65rem;
+}
+
+.phase-pill {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  background: color-mix(in srgb, var(--accent) 18%, #0f172a);
+  color: var(--accent);
+}
+
+.phase-pill.phase-live {
+  background: #c2410c;
+  color: #fff;
+}
+
+.phase-pill.phase-grace {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+  color: var(--navy);
+}
+
+.phase-pill.phase-locked {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.scoreboard-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.scoreboard-board {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.scoreboard-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(2.6rem, 1fr));
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.scoreboard-head {
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.scoreboard-team {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+
+.scoreboard-stat-label,
+.scoreboard-value {
+  text-align: center;
+}
+
+.scoreboard-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.08rem;
+  min-height: 2.4rem;
+}
+
+.scoreboard-cell.runs .scoreboard-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.scoreboard-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.score-step {
+  width: 2rem;
+  height: 1.7rem;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 88%, #fff);
+  color: var(--navy);
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.score-step.tiny {
+  width: 100%;
+  max-width: 2.4rem;
+  height: 1.35rem;
+  font-size: 0.95rem;
+}
+
+.score-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.inning-outs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-top: 0.7rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid color-mix(in srgb, #fff 12%, transparent);
+}
+
+.inning-outs-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: #e2e8f0;
+}
+
+.inning-outs-dots {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.out-dot {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, #fff 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 22%, transparent);
+}
+
+.out-dot.on {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.inning-outs-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.start-live-btn {
+  width: 100%;
+  margin-top: 0.7rem;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+  background: var(--accent);
+  color: var(--on-accent, var(--navy));
+  font-weight: 800;
+}
+
+.start-live-btn:disabled {
+  opacity: 0.55;
+}
+
+.scoreboard-note {
+  margin: 0.65rem 0 0;
+  font-size: 0.75rem;
+  color: #cbd5e1;
 }
 
 .field {

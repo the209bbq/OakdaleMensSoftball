@@ -20,6 +20,33 @@ export interface TeamAttendance {
   total: number;
 }
 
+export type ScoringPhase = 'upcoming' | 'live' | 'grace' | 'locked';
+export type ScoreSide = 'home' | 'away';
+export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs';
+
+export interface GameBoxScore {
+  homeRuns: number;
+  awayRuns: number;
+  homeHits: number;
+  awayHits: number;
+  homeWalks: number;
+  awayWalks: number;
+  homeOuts: number;
+  awayOuts: number;
+  currentOuts: number;
+}
+
+export interface GameScoring {
+  phase: ScoringPhase;
+  open: boolean;
+  opensAt: string | null;
+  liveEndsAt: string | null;
+  closesAt: string | null;
+  liveStartedAt: string | null;
+  canStart: boolean;
+  canScore: boolean;
+}
+
 export interface Game {
   id: string;
   date: string;
@@ -36,6 +63,8 @@ export interface Game {
   week: number;
   homeAttendance?: TeamAttendance;
   awayAttendance?: TeamAttendance;
+  box?: GameBoxScore;
+  scoring?: GameScoring;
 }
 
 export interface StandingRow {
@@ -178,6 +207,19 @@ export const api = {
   // Public reads
   getStandings: () => request<StandingRow[]>('/api/standings'),
   getSchedule: () => request<Game[]>('/api/schedule'),
+  getGame: (gameId: string) => request<Game>(`/api/games/${gameId}`),
+  startLiveGame: (gameId: string) =>
+    request<Game>(`/api/games/${gameId}/scorelog/start`, { method: 'POST' }),
+  bumpScoreStat: (gameId: string, side: ScoreSide, stat: ScoreStat, delta: number) =>
+    request<Game>(`/api/games/${gameId}/scorelog/stat`, {
+      method: 'POST',
+      body: JSON.stringify({ side, stat, delta }),
+    }),
+  bumpCurrentOuts: (gameId: string, delta: number) =>
+    request<Game>(`/api/games/${gameId}/scorelog/outs`, {
+      method: 'POST',
+      body: JSON.stringify({ delta }),
+    }),
   getTeams: () => request<Team[]>('/api/teams'),
   getRoster: (teamId: string) => request<RosterResponse>(`/api/teams/${teamId}/roster`),
   getRules: () => request<{ rules: string }>('/api/rules'),

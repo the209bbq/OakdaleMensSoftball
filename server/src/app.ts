@@ -4,13 +4,21 @@ import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { LeagueStore } from './store.js';
-import type { LandingContent, PublicUser, TeamAttendance } from './types.js';
+import type { Game, LandingContent, PublicUser, TeamAttendance } from './types.js';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_MS,
   createSessionToken,
   verifySessionToken,
 } from './auth.js';
+import {
+  canScoreLiveGame,
+  canStartLiveGame,
+  scheduledStartMs,
+  scoringWindow,
+  type ScoreSide,
+  type ScoreStat,
+} from './gameScoring.js';
 
 export interface AppOptions {
   clientDist?: string;
@@ -172,8 +180,17 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     res.json(store.getStandings());
   });
 
-  api.get('/schedule', (_req: Request, res: Response) => {
-    res.json(withTeamNames(store));
+  api.get('/schedule', (req: Request, res: Response) => {
+    res.json(withTeamNames(store, req.user));
+  });
+
+  api.get('/games/:id', (req: Request, res: Response) => {
+    const game = store.getGame(req.params.id);
+    if (!game) {
+      res.status(404).json({ error: 'Game not found' });
+      return;
+    }
+    res.json(decorateGame(store, game, req.user));
   });
 
   api.get('/current-week', (_req: Request, res: Response) => {
@@ -444,7 +461,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         weekCount = n;
       }
       store.generateSchedule({ startDate, weeks: weekCount });
-      res.status(201).json(withTeamNames(store));
+      res.status(201).json(withTeamNames(store, req.user));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
@@ -459,14 +476,90 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         res.status(404).json({ error: 'Game not found' });
         return;
       }
-      const allowed = canManageTeam(req.user, game.homeTeamId) || canManageTeam(req.user, game.awayTeamId);
-      if (!allowed) {
-        res.status(403).json({ error: 'You can only report scores for your own games' });
+      if (!canScoreGame(req.user, game, store)) {
+        const owns = canManageGame(req.user, game);
+        res.status(403).json({
+          error: owns
+            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
+            : 'You can only report scores for your own games',
+        });
         return;
       }
       const { homeScore, awayScore } = req.body ?? {};
-      const updated = store.recordResult(req.params.id, Number(homeScore), Number(awayScore));
-      res.json(updated);
+      const updated = store.recordResult(req.params.id, Number(homeScore), Number(awayScore), req.user!.id);
+      res.json(decorateGame(store, updated, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.post('/games/:id/scorelog/start', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      if (!canManageGame(req.user, game)) {
+        res.status(403).json({ error: 'You can only keep score for your own games' });
+        return;
+      }
+      if (!canStartGame(req.user, game, store)) {
+        res.status(403).json({
+          error: 'Live scorekeeping opens two hours before first pitch and stays open through the 24-hour grace window.',
+        });
+        return;
+      }
+      store.startLiveGame(game.id, req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.post('/games/:id/scorelog/stat', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      if (!canScoreGame(req.user, game, store)) {
+        const owns = canManageGame(req.user, game);
+        res.status(403).json({
+          error: owns
+            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
+            : 'You can only keep score for your own games',
+        });
+        return;
+      }
+      const { side, stat, delta } = req.body ?? {};
+      store.bumpScoreStat(game.id, side as ScoreSide, stat as ScoreStat, Number(delta), req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.post('/games/:id/scorelog/outs', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      if (!canScoreGame(req.user, game, store)) {
+        const owns = canManageGame(req.user, game);
+        res.status(403).json({
+          error: owns
+            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
+            : 'You can only keep score for your own games',
+        });
+        return;
+      }
+      const { delta } = req.body ?? {};
+      store.bumpCurrentOuts(game.id, Number(delta), req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
@@ -624,17 +717,61 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
 const EMPTY_ATTENDANCE: TeamAttendance = { in: 0, out: 0, none: 0, total: 0 };
 
-function withTeamNames(store: LeagueStore) {
+function canManageGame(user: PublicUser | undefined, game: Game): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  return user.role === 'manager' && (user.teamId === game.homeTeamId || user.teamId === game.awayTeamId);
+}
+
+function scoringFor(store: LeagueStore, game: Game, nowMs = Date.now()) {
+  const log = store.getGameLog(game.id);
+  const scheduledMs = scheduledStartMs(game.date, game.time);
+  const liveStartedAtMs = log?.liveStartedAt ? Date.parse(log.liveStartedAt) : null;
+  const window = scoringWindow(scheduledMs, Number.isNaN(liveStartedAtMs ?? NaN) ? null : liveStartedAtMs, nowMs);
+  return { log, scheduledMs, liveStartedAtMs: Number.isNaN(liveStartedAtMs ?? NaN) ? null : liveStartedAtMs, window };
+}
+
+function canStartGame(user: PublicUser | undefined, game: Game, store: LeagueStore, nowMs = Date.now()): boolean {
+  if (!canManageGame(user, game)) return false;
+  const { scheduledMs, liveStartedAtMs } = scoringFor(store, game, nowMs);
+  return canStartLiveGame(scheduledMs, liveStartedAtMs, nowMs, user?.role === 'admin');
+}
+
+function canScoreGame(user: PublicUser | undefined, game: Game, store: LeagueStore, nowMs = Date.now()): boolean {
+  if (!canManageGame(user, game)) return false;
+  const { window } = scoringFor(store, game, nowMs);
+  return canScoreLiveGame(window, user?.role === 'admin');
+}
+
+function decorateGame(store: LeagueStore, game: Game, user?: PublicUser, attendance?: Map<string, TeamAttendance>) {
   const teams = new Map(store.getTeams().map((t) => [t.id, t.name]));
+  const { log, window, scheduledMs, liveStartedAtMs } = scoringFor(store, game);
+  const isAdmin = user?.role === 'admin';
+  const owns = canManageGame(user, game);
+  return {
+    ...game,
+    homeTeamName: teams.get(game.homeTeamId) ?? game.homeTeamId,
+    awayTeamName: teams.get(game.awayTeamId) ?? game.awayTeamId,
+    homeAttendance: attendance?.get(`${game.homeTeamId}:${game.week}`) ?? EMPTY_ATTENDANCE,
+    awayAttendance: attendance?.get(`${game.awayTeamId}:${game.week}`) ?? EMPTY_ATTENDANCE,
+    box: store.getGameBox(game, log),
+    scoring: {
+      phase: window.phase,
+      open: window.open,
+      opensAt: window.opensAt,
+      liveEndsAt: window.liveEndsAt,
+      closesAt: window.closesAt,
+      liveStartedAt: log?.liveStartedAt ?? null,
+      canStart: owns && canStartLiveGame(scheduledMs, liveStartedAtMs, Date.now(), isAdmin),
+      canScore: owns && canScoreLiveGame(window, isAdmin),
+    },
+  };
+}
+
+function withTeamNames(store: LeagueStore, user?: PublicUser) {
   const games = store.getSchedule();
   const attendance = store.getAttendanceForGames(games);
-  return games.map((g) => ({
-    ...g,
-    homeTeamName: teams.get(g.homeTeamId) ?? g.homeTeamId,
-    awayTeamName: teams.get(g.awayTeamId) ?? g.awayTeamId,
-    homeAttendance: attendance.get(`${g.homeTeamId}:${g.week}`) ?? EMPTY_ATTENDANCE,
-    awayAttendance: attendance.get(`${g.awayTeamId}:${g.week}`) ?? EMPTY_ATTENDANCE,
-  }));
+  return games.map((g) => decorateGame(store, g, user, attendance));
 }
 
 /** Split a string or string[] of emails on commas / whitespace / newlines. */

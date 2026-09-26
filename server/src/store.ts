@@ -32,6 +32,17 @@ import {
   type Theme,
   type ThemeInput,
 } from './theme.js';
+import {
+  boxFromParts,
+  clampStat,
+  combineGameDateTime,
+  wrapCurrentOuts,
+  type GameBoxScore,
+  type ScoreSide,
+  type ScoreStat,
+} from './gameScoring.js';
+
+export { combineGameDateTime };
 
 export const MAX_PHOTO_URL_CHARS = 800000;
 export const MAX_LANDING_HEADLINE_CHARS = 200;
@@ -137,6 +148,19 @@ CREATE TABLE IF NOT EXISTS messages (
   createdAt TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_team_created ON messages (teamId, createdAt);
+CREATE TABLE IF NOT EXISTS game_logs (
+  gameId TEXT PRIMARY KEY,
+  homeHits INTEGER NOT NULL DEFAULT 0,
+  awayHits INTEGER NOT NULL DEFAULT 0,
+  homeWalks INTEGER NOT NULL DEFAULT 0,
+  awayWalks INTEGER NOT NULL DEFAULT 0,
+  homeOuts INTEGER NOT NULL DEFAULT 0,
+  awayOuts INTEGER NOT NULL DEFAULT 0,
+  currentOuts INTEGER NOT NULL DEFAULT 0,
+  liveStartedAt TEXT,
+  updatedAt TEXT NOT NULL,
+  updatedByUserId TEXT
+);
 `;
 
 type TeamRow = { id: string; name: string; photoUrl: string | null };
@@ -177,6 +201,33 @@ type MessageRow = {
   text: string;
   createdAt: string;
 };
+type GameLogRow = {
+  gameId: string;
+  homeHits: number;
+  awayHits: number;
+  homeWalks: number;
+  awayWalks: number;
+  homeOuts: number;
+  awayOuts: number;
+  currentOuts: number;
+  liveStartedAt: string | null;
+  updatedAt: string;
+  updatedByUserId: string | null;
+};
+
+export interface GameLog {
+  gameId: string;
+  homeHits: number;
+  awayHits: number;
+  homeWalks: number;
+  awayWalks: number;
+  homeOuts: number;
+  awayOuts: number;
+  currentOuts: number;
+  liveStartedAt: string | null;
+  updatedAt: string;
+  updatedByUserId: string | null;
+}
 
 function normalizeGame(g: Game): Game {
   return {
@@ -221,31 +272,6 @@ function normalizePhotoUrl(value: unknown): string | null {
     throw new Error(`photoUrl must be ${MAX_PHOTO_URL_CHARS} characters or fewer`);
   }
   return value;
-}
-
-/** Parse "6:00 PM" → 18:00, "7:30 PM" → 19:30, "18:00" → 18:00. */
-function parseGameClock(time: string): { hours: number; minutes: number } | null {
-  const match = String(time ?? '')
-    .trim()
-    .match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
-  if (!match) return null;
-  let hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  const ampm = match[3]?.toUpperCase();
-  if (ampm === 'PM' && hours < 12) hours += 12;
-  if (ampm === 'AM' && hours === 12) hours = 0;
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return { hours, minutes };
-}
-
-/** Combine a YYYY-MM-DD date with a "6:00 PM"-style time into a naive local datetime. */
-export function combineGameDateTime(date: string, time: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const clock = parseGameClock(time) ?? { hours: 0, minutes: 0 };
-  const hh = String(clock.hours).padStart(2, '0');
-  const mm = String(clock.minutes).padStart(2, '0');
-  return `${date}T${hh}:${mm}:00`;
 }
 
 function parseStoredLanding(raw: string | undefined): LandingContent {
@@ -366,6 +392,22 @@ function gameFromRow(row: GameRow): Game {
     location: row.location,
     week: row.week,
   });
+}
+
+function gameLogFromRow(row: GameLogRow): GameLog {
+  return {
+    gameId: row.gameId,
+    homeHits: row.homeHits,
+    awayHits: row.awayHits,
+    homeWalks: row.homeWalks,
+    awayWalks: row.awayWalks,
+    homeOuts: row.homeOuts,
+    awayOuts: row.awayOuts,
+    currentOuts: row.currentOuts,
+    liveStartedAt: row.liveStartedAt,
+    updatedAt: row.updatedAt,
+    updatedByUserId: row.updatedByUserId,
+  };
 }
 
 function userFromRow(row: UserRow): User {
@@ -758,6 +800,7 @@ export class LeagueStore {
        VALUES (@id, @date, @homeTeamId, @awayTeamId, @homeScore, @awayScore, @played, @field, @time, @location, @week)`,
     );
     const tx = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM game_logs').run();
       this.db.prepare('DELETE FROM games').run();
       this.db.prepare('DELETE FROM check_ins').run();
       for (const game of games) {
@@ -790,7 +833,7 @@ export class LeagueStore {
     return player;
   }
 
-  recordResult(gameId: string, homeScore: number, awayScore: number): Game {
+  recordResult(gameId: string, homeScore: number, awayScore: number, userId?: string): Game {
     const game = this.getGame(gameId);
     if (!game) {
       throw new Error(`Unknown game: ${gameId}`);
@@ -798,13 +841,139 @@ export class LeagueStore {
     if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore) || homeScore < 0 || awayScore < 0) {
       throw new Error('Scores must be non-negative numbers');
     }
-    this.db
-      .prepare('UPDATE games SET homeScore = ?, awayScore = ?, played = 1 WHERE id = ?')
-      .run(homeScore, awayScore, gameId);
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare('UPDATE games SET homeScore = ?, awayScore = ?, played = 1 WHERE id = ?')
+        .run(homeScore, awayScore, gameId);
+      this.ensureGameLog(gameId);
+      this.db
+        .prepare('UPDATE game_logs SET updatedAt = ?, updatedByUserId = ? WHERE gameId = ?')
+        .run(now, userId ?? null, gameId);
+    });
+    tx();
     game.homeScore = homeScore;
     game.awayScore = awayScore;
     game.played = true;
     return game;
+  }
+
+  getGameLog(gameId: string): GameLog | undefined {
+    const row = this.db.prepare('SELECT * FROM game_logs WHERE gameId = ?').get(gameId) as GameLogRow | undefined;
+    return row ? gameLogFromRow(row) : undefined;
+  }
+
+  getGameLogs(): Map<string, GameLog> {
+    const rows = this.db.prepare('SELECT * FROM game_logs').all() as GameLogRow[];
+    return new Map(rows.map((row) => [row.gameId, gameLogFromRow(row)]));
+  }
+
+  getGameBox(game: Game, log?: GameLog | null): GameBoxScore {
+    return boxFromParts(game.homeScore, game.awayScore, log ?? this.getGameLog(game.id));
+  }
+
+  startLiveGame(gameId: string, userId: string, now = new Date()): GameLog {
+    const game = this.getGame(gameId);
+    if (!game) {
+      throw new Error(`Unknown game: ${gameId}`);
+    }
+    const iso = now.toISOString();
+    const tx = this.db.transaction(() => {
+      this.ensureGameLog(gameId);
+      const existing = this.getGameLog(gameId);
+      if (existing?.liveStartedAt) return;
+      this.db
+        .prepare(
+          'UPDATE game_logs SET liveStartedAt = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?',
+        )
+        .run(iso, iso, userId, gameId);
+    });
+    tx();
+    return this.getGameLog(gameId)!;
+  }
+
+  bumpScoreStat(gameId: string, side: ScoreSide, stat: ScoreStat, delta: number, userId: string): Game {
+    const game = this.getGame(gameId);
+    if (!game) {
+      throw new Error(`Unknown game: ${gameId}`);
+    }
+    if (side !== 'home' && side !== 'away') {
+      throw new Error('side must be home or away');
+    }
+    if (stat !== 'runs' && stat !== 'hits' && stat !== 'walks' && stat !== 'outs') {
+      throw new Error('stat must be runs, hits, walks, or outs');
+    }
+    const step = Math.trunc(delta);
+    if (!Number.isFinite(step) || step === 0) {
+      return game;
+    }
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.ensureGameLog(gameId);
+      if (stat === 'runs') {
+        const current = (side === 'home' ? game.homeScore : game.awayScore) ?? 0;
+        const next = clampStat(current + step);
+        if (side === 'home') {
+          this.db.prepare('UPDATE games SET homeScore = ?, played = 1 WHERE id = ?').run(next, gameId);
+        } else {
+          this.db.prepare('UPDATE games SET awayScore = ?, played = 1 WHERE id = ?').run(next, gameId);
+        }
+      } else {
+        const column =
+          stat === 'hits'
+            ? side === 'home'
+              ? 'homeHits'
+              : 'awayHits'
+            : stat === 'walks'
+              ? side === 'home'
+                ? 'homeWalks'
+                : 'awayWalks'
+              : side === 'home'
+                ? 'homeOuts'
+                : 'awayOuts';
+        const log = this.getGameLog(gameId)!;
+        const next = clampStat(Number(log[column]) + step);
+        this.db.prepare(`UPDATE game_logs SET ${column} = ? WHERE gameId = ?`).run(next, gameId);
+      }
+      this.db
+        .prepare('UPDATE game_logs SET updatedAt = ?, updatedByUserId = ? WHERE gameId = ?')
+        .run(now, userId, gameId);
+    });
+    tx();
+    return this.getGame(gameId)!;
+  }
+
+  bumpCurrentOuts(gameId: string, delta: number, userId: string): GameLog {
+    const game = this.getGame(gameId);
+    if (!game) {
+      throw new Error(`Unknown game: ${gameId}`);
+    }
+    const step = Math.trunc(delta);
+    if (!Number.isFinite(step)) {
+      throw new Error('delta must be a number');
+    }
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.ensureGameLog(gameId);
+      const log = this.getGameLog(gameId)!;
+      const next = wrapCurrentOuts(log.currentOuts + step);
+      this.db
+        .prepare('UPDATE game_logs SET currentOuts = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?')
+        .run(next, now, userId, gameId);
+    });
+    tx();
+    return this.getGameLog(gameId)!;
+  }
+
+  private ensureGameLog(gameId: string): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO game_logs (
+          gameId, homeHits, awayHits, homeWalks, awayWalks, homeOuts, awayOuts,
+          currentOuts, liveStartedAt, updatedAt, updatedByUserId
+        ) VALUES (?, 0, 0, 0, 0, 0, 0, 0, NULL, ?, NULL)`,
+      )
+      .run(gameId, new Date().toISOString());
   }
 
   getStandings(): StandingRow[] {
@@ -1572,6 +1741,7 @@ export class LeagueStore {
         this.db.prepare('SELECT COUNT(*) AS c FROM games').get() as { c: number }
       ).c;
       this.db.prepare('UPDATE games SET homeScore = NULL, awayScore = NULL, played = 0').run();
+      this.db.prepare('DELETE FROM game_logs').run();
 
       return {
         guestsRemoved: simUsers.length,
