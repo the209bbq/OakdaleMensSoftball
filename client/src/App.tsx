@@ -1336,6 +1336,7 @@ function GamePage({ gameId, onBack }: { gameId: string; onBack: () => void }) {
         {game.week ? ` · Week ${game.week}` : ''}
       </p>
       {message && <p className="message">{message}</p>}
+      <LiveScoreboard game={game} onChanged={setGame} onMessage={setMessage} onError={setError} />
       <dl className="game-meta">
         <div>
           <dt>Time</dt>
@@ -1359,7 +1360,6 @@ function GamePage({ gameId, onBack }: { gameId: string; onBack: () => void }) {
         <AttendanceBreakdown name={game.homeTeamName} attendance={game.homeAttendance} />
       </div>
       <GameLineups game={game} onChanged={setGame} onMessage={setMessage} onError={setError} />
-      <LiveScoreboard game={game} onChanged={setGame} onMessage={setMessage} onError={setError} />
     </section>
   );
 }

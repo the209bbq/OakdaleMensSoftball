@@ -902,9 +902,17 @@ body {
 }
 
 .game-page-when {
-  margin: -0.35rem 0 0.85rem;
+  margin: -0.35rem 0 0.75rem;
   color: var(--muted);
   font-weight: 600;
+}
+
+.game-page h2 {
+  margin-bottom: 0.25rem;
+}
+
+.game-page .scoreboard {
+  margin: 0 0 1.1rem;
 }
 
 .at {
