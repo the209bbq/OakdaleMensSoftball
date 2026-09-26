@@ -2482,9 +2482,9 @@ function ColorSchemeAdmin({
   onMessage: (message: string | null) => void;
 }) {
   const [theme, setTheme] = useState<Theme | null>(null);
-  const [selected, setSelected] = useState<ThemeId>('grass');
-  const [primary, setPrimary] = useState('#14532d');
-  const [accent, setAccent] = useState('#facc15');
+  const [selected, setSelected] = useState<ThemeId>('liberty');
+  const [primary, setPrimary] = useState('#1d3557');
+  const [accent, setAccent] = useState('#e63946');
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 

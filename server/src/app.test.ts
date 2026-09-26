@@ -757,15 +757,17 @@ describe('Landing page', () => {
 });
 
 describe('Color scheme', () => {
-  it('returns the grass field theme to anyone without auth', async () => {
+  it('returns the red, white & blue theme to anyone without auth', async () => {
     const { app } = makeApp();
     const res = await request(app).get('/api/theme');
     expect(res.status).toBe(200);
-    expect(res.body.id).toBe('grass');
-    expect(res.body.navy).toBe('#14532d');
-    expect(res.body.accent).toBe('#facc15');
+    expect(res.body.id).toBe('liberty');
+    expect(res.body.navy).toBe('#1d3557');
+    expect(res.body.accent).toBe('#e63946');
+    expect(res.body.onAccent).toBe('#ffffff');
     expect(res.body.presets).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ id: 'liberty', label: 'Red, white & blue' }),
         expect.objectContaining({ id: 'night', label: 'Night game' }),
         expect.objectContaining({ id: 'grass', label: 'Grass field' }),
         expect.objectContaining({ id: 'clay', label: 'Infield clay' }),
@@ -787,16 +789,17 @@ describe('Color scheme', () => {
   it('lets an admin switch to a preset and reflects it on a subsequent public read', async () => {
     const { app } = makeApp();
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
-    const put = await admin.put('/api/theme').send({ id: 'grass' });
+    const put = await admin.put('/api/theme').send({ id: 'liberty' });
     expect(put.status).toBe(200);
-    expect(put.body.id).toBe('grass');
-    expect(put.body.navy).toBe('#14532d');
+    expect(put.body.id).toBe('liberty');
+    expect(put.body.navy).toBe('#1d3557');
 
     const get = await request(app).get('/api/theme');
     expect(get.status).toBe(200);
-    expect(get.body.id).toBe('grass');
-    expect(get.body.navy).toBe('#14532d');
-    expect(get.body.heading).toBe('#14532d');
+    expect(get.body.id).toBe('liberty');
+    expect(get.body.navy).toBe('#1d3557');
+    expect(get.body.heading).toBe('#1d3557');
+    expect(get.body.accent).toBe('#e63946');
   });
 
   it('lets an admin save a custom primary and accent', async () => {

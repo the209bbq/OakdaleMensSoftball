@@ -1,4 +1,4 @@
-export type ThemeId = 'classic' | 'night' | 'grass' | 'clay' | 'custom';
+export type ThemeId = 'classic' | 'night' | 'grass' | 'clay' | 'liberty' | 'custom';
 
 export interface ThemeColors {
   navy: string;

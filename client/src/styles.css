@@ -1,15 +1,15 @@
 :root {
-  --navy: #14532d;
-  --navy-light: #166534;
-  --accent: #facc15;
-  --accent-dark: #ca8a04;
-  --bg: #f3f7f1;
+  --navy: #1d3557;
+  --navy-light: #27436b;
+  --accent: #e63946;
+  --accent-dark: #c1121f;
+  --bg: #f7f8fb;
   --card: #ffffff;
-  --text: #14532d;
-  --muted: #4d7c5a;
-  --border: #d4e3d4;
-  --heading: #14532d;
-  --on-accent: #14532d;
+  --text: #1d2a3a;
+  --muted: #5d6d7e;
+  --border: #d8e0ea;
+  --heading: #1d3557;
+  --on-accent: #ffffff;
 }
 
 * {
@@ -880,13 +880,13 @@ body {
 .live-now {
   margin: 0 0 1.15rem;
   padding: 0.2rem 0.45rem 0.35rem;
-  border: 1px solid color-mix(in srgb, #c2410c 32%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--accent-dark) 32%, var(--border));
   border-radius: 12px;
-  background: color-mix(in srgb, #c2410c 9%, var(--card));
+  background: color-mix(in srgb, var(--accent) 9%, var(--card));
 }
 
 .live-now .week-heading {
-  color: #c2410c;
+  color: var(--accent-dark);
 }
 
 .back-link {
@@ -934,7 +934,7 @@ body {
 
 .game-score.live {
   color: #fff;
-  background: #c2410c;
+  background: var(--accent-dark);
   border-radius: 999px;
   padding: 0.12rem 0.5rem;
   font-size: 0.72rem;
@@ -2105,7 +2105,13 @@ body {
   height: 18px;
   border-radius: 6px;
   margin-bottom: 0.35rem;
-  background: linear-gradient(90deg, var(--swatch-primary, var(--navy)) 62%, var(--swatch-accent, var(--accent)) 62%);
+  border: 1px solid color-mix(in srgb, var(--swatch-primary, var(--navy)) 22%, var(--border));
+  background: linear-gradient(
+    90deg,
+    var(--swatch-primary, var(--navy)) 0 38%,
+    #ffffff 38% 62%,
+    var(--swatch-accent, var(--accent)) 62% 100%
+  );
 }
 
 .theme-swatch-label {

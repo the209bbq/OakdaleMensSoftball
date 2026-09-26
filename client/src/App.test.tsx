@@ -103,6 +103,7 @@ const theme = {
   heading: '#0b2545',
   onAccent: '#0b2545',
   presets: [
+    { id: 'liberty' as const, label: 'Red, white & blue', blurb: 'Navy, clean white, and a quiet crimson', primary: '#1d3557', accent: '#e63946' },
     { id: 'classic' as const, label: 'Classic navy', blurb: 'Original navy and gold', primary: '#0b2545', accent: '#f2a900' },
     { id: 'night' as const, label: 'Night game', blurb: 'Dark diamond, gold lights', primary: '#0a1220', accent: '#f2a900' },
     { id: 'grass' as const, label: 'Grass field', blurb: 'Green turf and yellow seams', primary: '#14532d', accent: '#facc15' },
@@ -806,14 +807,17 @@ describe('App', () => {
       teamId: null,
       createdAt: '2026-04-01T00:00:00.000Z',
     };
-    const grass = {
+    const liberty = {
       ...theme,
-      id: 'grass' as const,
-      label: 'Grass field',
-      primary: '#14532d',
-      accent: '#facc15',
-      navy: '#14532d',
-      heading: '#14532d',
+      id: 'liberty' as const,
+      label: 'Red, white & blue',
+      primary: '#1d3557',
+      accent: '#e63946',
+      navy: '#1d3557',
+      navyLight: '#27436b',
+      accentDark: '#c1121f',
+      heading: '#1d3557',
+      onAccent: '#ffffff',
     };
     vi.stubGlobal(
       'fetch',
@@ -821,7 +825,7 @@ describe('App', () => {
         if (url.includes('/api/auth/me')) return jsonOk({ user: adminUser });
         if (url.includes('/api/theme') && init?.method === 'PUT') {
           const body = JSON.parse(String(init.body ?? '{}')) as { id?: string };
-          return jsonOk(body.id === 'grass' ? grass : theme);
+          return jsonOk(body.id === 'liberty' ? liberty : theme);
         }
         if (url.includes('/api/theme')) return jsonOk(theme);
         if (url.includes('/api/landing')) return jsonOk(landing);
@@ -845,10 +849,11 @@ describe('App', () => {
       expect(screen.getByRole('heading', { name: 'Color scheme' })).toBeInTheDocument();
     });
     expect(screen.getByText(/everyone in the league sees the scheme you save/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /grass field/i }));
+    fireEvent.click(screen.getByRole('button', { name: /red, white & blue/i }));
     await waitFor(() => {
-      expect(screen.getByText('Color scheme saved: Grass field.')).toBeInTheDocument();
+      expect(screen.getByText('Color scheme saved: Red, white & blue.')).toBeInTheDocument();
     });
-    expect(document.documentElement.style.getPropertyValue('--navy')).toBe('#14532d');
+    expect(document.documentElement.style.getPropertyValue('--navy')).toBe('#1d3557');
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#e63946');
   });
 });
