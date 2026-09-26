@@ -1530,6 +1530,7 @@ function LineupEditor({
   }, [lineup.teamId, lineup.saved, lineup.slots.map((p) => p.id).join('|')]);
 
   const lockLabel = formatLineupLock(lineup.locksAt);
+  const lockPassed = Boolean(lineup.locksAt && Date.parse(lineup.locksAt) <= Date.now());
 
   async function save() {
     if (busy) return;
@@ -1562,12 +1563,12 @@ function LineupEditor({
       <h3 className="lineup-heading">{teamName} lineup</h3>
       {lineup.canEdit ? (
         <p className="lineup-note">
-          {lockLabel ? `Changes lock ${lockLabel}.` : 'Set the batting order before the game.'}
+          {lockLabel ? `You can change this until ${lockLabel}.` : 'Set the batting order before the game.'}
         </p>
+      ) : lockPassed ? (
+        <p className="lineup-note">{lockLabel ? `Lineup locked since ${lockLabel}.` : 'Lineup is locked for this game.'}</p>
       ) : (
-        <p className="lineup-note">
-          {lockLabel ? `Lineup locked since ${lockLabel}.` : 'Lineup is locked for this game.'}
-        </p>
+        <p className="lineup-note">Only this team's manager can set the batting order, until 24 hours before first pitch.</p>
       )}
       <ol className="lineup-list">
         {order.map((id, index) => {
