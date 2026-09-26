@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, type CurrentWeek, type Game, type GameBoxScore, type InningHalf, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
+import { api, type CurrentWeek, type Game, type GameBoxScore, type GameLineup, type InningHalf, type Landing, type LineupPlayer, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
 import { applyTheme } from './theme';
@@ -1249,6 +1249,12 @@ function Schedule() {
                         <AttendanceBreakdown name={g.awayTeamName} attendance={g.awayAttendance} />
                         <AttendanceBreakdown name={g.homeTeamName} attendance={g.homeAttendance} />
                       </div>
+                      <GameLineups
+                        game={g}
+                        onChanged={patchGame}
+                        onMessage={setMessage}
+                        onError={setError}
+                      />
                       <LiveScoreboard
                         game={g}
                         onChanged={patchGame}
@@ -1403,13 +1409,25 @@ function LiveScoreboard({
             </div>
           )}
         </div>
-        <p className="batter-up" aria-label={`Batter up ${box.batterUp === 'home' ? game.homeTeamName : game.awayTeamName}`}>
-          <span className="mlb-outs-label">Batter up</span>
-          <strong>{box.batterUp === 'home' ? game.homeTeamName : game.awayTeamName}</strong>
+        <div className="batter-up">
+          <p
+            className="batter-slot"
+            aria-label={`Batter up ${playerLabel(battingLineup(game, box)?.atBat) || battingTeamName(game, box)}`}
+          >
+            <span className="mlb-outs-label">Batter up</span>
+            <strong>{playerLabel(battingLineup(game, box)?.atBat) || battingTeamName(game, box)}</strong>
+          </p>
+          <p
+            className="batter-slot"
+            aria-label={`On deck ${playerLabel(battingLineup(game, box)?.onDeck) || 'none'}`}
+          >
+            <span className="mlb-outs-label">On deck</span>
+            <strong>{playerLabel(battingLineup(game, box)?.onDeck) || '—'}</strong>
+          </p>
           <span className="batter-half">
-            {box.currentHalf === 'bottom' ? 'Bot' : 'Top'} {box.currentInning}
+            {box.currentHalf === 'bottom' ? 'Bot' : 'Top'} {box.currentInning} · {battingTeamName(game, box)}
           </span>
-        </p>
+        </div>
       </div>
       {canStart && (
         <button
@@ -1425,6 +1443,160 @@ function LiveScoreboard({
         <p className="scoreboard-note">Team managers can keep score from 2 hours before first pitch through 24 hours after the game.</p>
       )}
     </div>
+  );
+}
+
+function battingTeamName(game: Game, box: GameBoxScore): string {
+  return box.batterUp === 'home' ? game.homeTeamName : game.awayTeamName;
+}
+
+function battingLineup(game: Game, box: GameBoxScore): GameLineup | undefined {
+  return box.batterUp === 'home' ? game.lineups?.home : game.lineups?.away;
+}
+
+function playerLabel(player?: LineupPlayer | null): string {
+  if (!player) return '';
+  return player.number != null ? `#${player.number} ${player.name}` : player.name;
+}
+
+function formatLineupLock(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function GameLineups({
+  game,
+  onChanged,
+  onMessage,
+  onError,
+}: {
+  game: Game;
+  onChanged: (game: Game) => void;
+  onMessage: (text: string | null) => void;
+  onError: (text: string | null) => void;
+}) {
+  const away = game.lineups?.away;
+  const home = game.lineups?.home;
+  if (!away && !home) return null;
+  return (
+    <div className="lineup-pair">
+      {away && (
+        <LineupEditor
+          gameId={game.id}
+          teamName={game.awayTeamName}
+          lineup={away}
+          onChanged={onChanged}
+          onMessage={onMessage}
+          onError={onError}
+        />
+      )}
+      {home && (
+        <LineupEditor
+          gameId={game.id}
+          teamName={game.homeTeamName}
+          lineup={home}
+          onChanged={onChanged}
+          onMessage={onMessage}
+          onError={onError}
+        />
+      )}
+    </div>
+  );
+}
+
+function LineupEditor({
+  gameId,
+  teamName,
+  lineup,
+  onChanged,
+  onMessage,
+  onError,
+}: {
+  gameId: string;
+  teamName: string;
+  lineup: GameLineup;
+  onChanged: (game: Game) => void;
+  onMessage: (text: string | null) => void;
+  onError: (text: string | null) => void;
+}) {
+  const [order, setOrder] = useState<string[]>(() => lineup.slots.map((p) => p.id));
+  const [busy, setBusy] = useState(false);
+  const byId = useMemo(() => new Map(lineup.slots.map((p) => [p.id, p])), [lineup.slots]);
+
+  useEffect(() => {
+    setOrder(lineup.slots.map((p) => p.id));
+  }, [lineup.teamId, lineup.saved, lineup.slots.map((p) => p.id).join('|')]);
+
+  const lockLabel = formatLineupLock(lineup.locksAt);
+
+  async function save() {
+    if (busy) return;
+    setBusy(true);
+    onError(null);
+    try {
+      onChanged(await api.saveLineup(gameId, lineup.teamId, order));
+      onMessage(`Saved ${teamName} lineup.`);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function move(id: string, dir: -1 | 1) {
+    setOrder((current) => {
+      const index = current.indexOf(id);
+      const nextIndex = index + dir;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      const [slot] = next.splice(index, 1);
+      next.splice(nextIndex, 0, slot);
+      return next;
+    });
+  }
+
+  return (
+    <section className="lineup-card" aria-label={`${teamName} lineup`}>
+      <h3 className="lineup-heading">{teamName} lineup</h3>
+      {lineup.canEdit ? (
+        <p className="lineup-note">
+          {lockLabel ? `Changes lock ${lockLabel}.` : 'Set the batting order before the game.'}
+        </p>
+      ) : (
+        <p className="lineup-note">
+          {lockLabel ? `Lineup locked since ${lockLabel}.` : 'Lineup is locked for this game.'}
+        </p>
+      )}
+      <ol className="lineup-list">
+        {order.map((id, index) => {
+          const player = byId.get(id);
+          if (!player) return null;
+          return (
+            <li key={id} className="lineup-row">
+              <span className="lineup-spot">{index + 1}</span>
+              <span className="lineup-name">{playerLabel(player)}</span>
+              {lineup.canEdit && (
+                <span className="lineup-moves">
+                  <button type="button" className="score-step tiny" disabled={busy || index === 0} aria-label={`Move ${player.name} up`} onClick={() => move(id, -1)}>
+                    ↑
+                  </button>
+                  <button type="button" className="score-step tiny" disabled={busy || index === order.length - 1} aria-label={`Move ${player.name} down`} onClick={() => move(id, 1)}>
+                    ↓
+                  </button>
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {lineup.canEdit && (
+        <button type="button" className="lineup-save" disabled={busy || order.length === 0} onClick={() => void save()}>
+          {busy ? 'Saving…' : `Save ${teamName} lineup`}
+        </button>
+      )}
+    </section>
   );
 }
 

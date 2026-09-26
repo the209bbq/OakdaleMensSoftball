@@ -12,6 +12,7 @@ import {
   verifySessionToken,
 } from './auth.js';
 import {
+  canEditLineup,
   canScoreLiveGame,
   canStartLiveGame,
   scheduledStartMs,
@@ -565,6 +566,36 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
+  api.put('/games/:id/lineups/:teamId', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      const teamId = req.params.teamId;
+      if (teamId !== game.homeTeamId && teamId !== game.awayTeamId) {
+        res.status(404).json({ error: 'Team is not playing in this game' });
+        return;
+      }
+      if (!canManageTeam(req.user, teamId)) {
+        res.status(403).json({ error: 'You can only set the lineup for your own team' });
+        return;
+      }
+      const { scheduledMs } = scoringFor(store, game);
+      if (!canEditLineup(scheduledMs, Date.now(), req.user!.role === 'admin')) {
+        res.status(403).json({
+          error: 'Lineups lock 24 hours before first pitch. Managers can set the batting order before then.',
+        });
+        return;
+      }
+      store.setGameLineup(game.id, teamId, req.body?.playerIds ?? [], req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   api.post('/games/:id/scorelog/inning', requireAuth, (req: Request, res: Response) => {
     try {
       const game = store.getGame(req.params.id);
@@ -779,6 +810,10 @@ function decorateGame(store: LeagueStore, game: Game, user?: PublicUser, attenda
     homeAttendance: attendance?.get(`${game.homeTeamId}:${game.week}`) ?? EMPTY_ATTENDANCE,
     awayAttendance: attendance?.get(`${game.awayTeamId}:${game.week}`) ?? EMPTY_ATTENDANCE,
     box: store.getGameBox(game, log),
+    lineups: {
+      away: store.buildGameLineup(game, game.awayTeamId, user),
+      home: store.buildGameLineup(game, game.homeTeamId, user),
+    },
     scoring: {
       phase: window.phase,
       open: window.open,

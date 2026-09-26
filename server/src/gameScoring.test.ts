@@ -3,10 +3,13 @@ import {
   GAME_DURATION_MS,
   MANAGER_EARLY_START_MS,
   SCORING_GRACE_MS,
+  LINEUP_LOCK_MS,
   boxFromParts,
+  canEditLineup,
   canScoreLiveGame,
   canStartLiveGame,
   scoringWindow,
+  stepBatterIndex,
   stepHalfInning,
   wrapCurrentOuts,
 } from './gameScoring.js';
@@ -85,6 +88,21 @@ describe('stepHalfInning', () => {
   it('opens extra innings after the bottom of the 7th', () => {
     const next = stepHalfInning(7, 'bottom', 2, 1);
     expect(next).toEqual({ inning: 8, half: 'top', outs: 0 });
+  });
+});
+
+describe('canEditLineup', () => {
+  it('lets managers edit until 24 hours before first pitch', () => {
+    expect(canEditLineup(START, START - LINEUP_LOCK_MS - 1, false)).toBe(true);
+    expect(canEditLineup(START, START - LINEUP_LOCK_MS, false)).toBe(false);
+    expect(canEditLineup(START, START - LINEUP_LOCK_MS, true)).toBe(true);
+  });
+});
+
+describe('stepBatterIndex', () => {
+  it('wraps around the lineup', () => {
+    expect(stepBatterIndex(2, 3, 1)).toBe(0);
+    expect(stepBatterIndex(0, 3, -1)).toBe(2);
   });
 });
 

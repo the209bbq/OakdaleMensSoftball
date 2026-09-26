@@ -5,9 +5,11 @@ import type {
   CheckInStatus,
   CurrentWeek,
   Game,
+  GameLineup,
   Landing,
   LandingContent,
   LeagueData,
+  LineupPlayer,
   ManagerAuthorization,
   Player,
   PlayerAccount,
@@ -35,14 +37,20 @@ import {
 import {
   boxFromParts,
   bumpInningLine,
+  canEditLineup,
   clampStat,
   combineGameDateTime,
   emptyLine,
   lineForDisplay,
+  lineupLocksAt,
   parseHalf,
   parseLine,
+  parsePlayerIds,
+  scheduledStartMs,
+  stepBatterIndex,
   stepHalfInning,
   sumLine,
+  wrapBatterIndex,
   type GameBoxScore,
   type InningHalf,
   type ScoreSide,
@@ -168,9 +176,19 @@ CREATE TABLE IF NOT EXISTS game_logs (
   homeLine TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]',
   currentInning INTEGER NOT NULL DEFAULT 1,
   currentHalf TEXT NOT NULL DEFAULT 'top',
+  awayBatterIndex INTEGER NOT NULL DEFAULT 0,
+  homeBatterIndex INTEGER NOT NULL DEFAULT 0,
   liveStartedAt TEXT,
   updatedAt TEXT NOT NULL,
   updatedByUserId TEXT
+);
+CREATE TABLE IF NOT EXISTS game_lineups (
+  gameId TEXT NOT NULL,
+  teamId TEXT NOT NULL,
+  playerIds TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  updatedByUserId TEXT,
+  PRIMARY KEY (gameId, teamId)
 );
 `;
 
@@ -225,6 +243,8 @@ type GameLogRow = {
   homeLine?: string | null;
   currentInning?: number | null;
   currentHalf?: string | null;
+  awayBatterIndex?: number | null;
+  homeBatterIndex?: number | null;
   liveStartedAt: string | null;
   updatedAt: string;
   updatedByUserId: string | null;
@@ -243,6 +263,8 @@ export interface GameLog {
   homeLine: number[];
   currentInning: number;
   currentHalf: InningHalf;
+  awayBatterIndex: number;
+  homeBatterIndex: number;
   liveStartedAt: string | null;
   updatedAt: string;
   updatedByUserId: string | null;
@@ -431,6 +453,8 @@ function gameLogFromRow(row: GameLogRow): GameLog {
     homeLine,
     currentInning,
     currentHalf,
+    awayBatterIndex: Math.max(0, Number(row.awayBatterIndex) || 0),
+    homeBatterIndex: Math.max(0, Number(row.homeBatterIndex) || 0),
     liveStartedAt: row.liveStartedAt,
     updatedAt: row.updatedAt,
     updatedByUserId: row.updatedByUserId,
@@ -829,6 +853,7 @@ export class LeagueStore {
     );
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM game_logs').run();
+      this.db.prepare('DELETE FROM game_lineups').run();
       this.db.prepare('DELETE FROM games').run();
       this.db.prepare('DELETE FROM check_ins').run();
       for (const game of games) {
@@ -904,6 +929,131 @@ export class LeagueStore {
     return boxFromParts(game.homeScore, game.awayScore, log ?? this.getGameLog(game.id));
   }
 
+  listLineupCandidates(teamId: string): LineupPlayer[] {
+    const members = this.getTeamMembers(teamId).map(
+      (m): LineupPlayer => ({
+        id: m.id,
+        name: m.name,
+        number: m.number,
+        position: m.position,
+      }),
+    );
+    const seen = new Set(members.map((m) => m.id));
+    const extras = this.getRoster(teamId)
+      .filter((p) => !seen.has(p.id))
+      .map(
+        (p): LineupPlayer => ({
+          id: p.id,
+          name: p.name,
+          number: p.number,
+          position: p.position,
+        }),
+      );
+    return [...members, ...extras];
+  }
+
+  getLineupSlots(gameId: string, teamId: string): { slots: LineupPlayer[]; saved: boolean } {
+    const candidates = this.listLineupCandidates(teamId);
+    const byId = new Map(candidates.map((c) => [c.id, c]));
+    const row = this.db
+      .prepare('SELECT playerIds FROM game_lineups WHERE gameId = ? AND teamId = ?')
+      .get(gameId, teamId) as { playerIds: string } | undefined;
+    const savedIds = parsePlayerIds(row?.playerIds);
+    const slots = savedIds.map((id) => byId.get(id)).filter((slot): slot is LineupPlayer => Boolean(slot));
+    if (slots.length > 0) return { slots, saved: true };
+    return { slots: candidates, saved: false };
+  }
+
+  buildGameLineup(game: Game, teamId: string, user?: PublicUser | null, nowMs = Date.now()): GameLineup {
+    const { slots, saved } = this.getLineupSlots(game.id, teamId);
+    const log = this.getGameLog(game.id);
+    const index =
+      teamId === game.homeTeamId ? (log?.homeBatterIndex ?? 0) : teamId === game.awayTeamId ? (log?.awayBatterIndex ?? 0) : 0;
+    const atBat = slots.length ? slots[wrapBatterIndex(index, slots.length)] : null;
+    const onDeck = slots.length ? slots[wrapBatterIndex(index + 1, slots.length)] : null;
+    const scheduledMs = scheduledStartMs(game.date, game.time);
+    const isAdmin = user?.role === 'admin';
+    const ownsTeam = Boolean(user && (isAdmin || (user.role === 'manager' && user.teamId === teamId)));
+    return {
+      teamId,
+      slots,
+      atBat,
+      onDeck,
+      canEdit: ownsTeam && canEditLineup(scheduledMs, nowMs, isAdmin),
+      locksAt: lineupLocksAt(scheduledMs),
+      saved,
+    };
+  }
+
+  setGameLineup(gameId: string, teamId: string, playerIds: string[], userId: string): void {
+    const game = this.getGame(gameId);
+    if (!game) throw new Error(`Unknown game: ${gameId}`);
+    if (teamId !== game.homeTeamId && teamId !== game.awayTeamId) {
+      throw new Error('Team is not playing in this game');
+    }
+    const allowed = new Set(this.listLineupCandidates(teamId).map((p) => p.id));
+    const ids = parsePlayerIds(playerIds);
+    if (ids.length === 0) throw new Error('Lineup needs at least one player');
+    if (new Set(ids).size !== ids.length) throw new Error('Lineup cannot list the same player twice');
+    const unknown = ids.find((id) => !allowed.has(id));
+    if (unknown) throw new Error('Every lineup player must be on this team');
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO game_lineups (gameId, teamId, playerIds, updatedAt, updatedByUserId)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(gameId, teamId) DO UPDATE SET
+           playerIds = excluded.playerIds,
+           updatedAt = excluded.updatedAt,
+           updatedByUserId = excluded.updatedByUserId`,
+      )
+      .run(gameId, teamId, JSON.stringify(ids), now, userId);
+  }
+
+  private lineupLength(gameId: string, teamId: string): number {
+    return this.getLineupSlots(gameId, teamId).slots.length;
+  }
+
+  private stepOutsAndBatters(
+    log: GameLog,
+    awayLen: number,
+    homeLen: number,
+    delta: number,
+  ): {
+    inning: number;
+    half: InningHalf;
+    outs: number;
+    awayBatterIndex: number;
+    homeBatterIndex: number;
+  } {
+    let inning = log.currentInning;
+    let half = log.currentHalf;
+    let outs = log.currentOuts;
+    let awayBatterIndex = log.awayBatterIndex;
+    let homeBatterIndex = log.homeBatterIndex;
+    const step = Math.trunc(delta);
+    if (step > 0) {
+      for (let i = 0; i < step; i += 1) {
+        if (half === 'top') awayBatterIndex = stepBatterIndex(awayBatterIndex, awayLen, 1);
+        else homeBatterIndex = stepBatterIndex(homeBatterIndex, homeLen, 1);
+        const next = stepHalfInning(inning, half, outs, 1);
+        inning = next.inning;
+        half = next.half;
+        outs = next.outs;
+      }
+    } else {
+      for (let i = 0; i < -step; i += 1) {
+        const next = stepHalfInning(inning, half, outs, -1);
+        inning = next.inning;
+        half = next.half;
+        outs = next.outs;
+        if (half === 'top') awayBatterIndex = stepBatterIndex(awayBatterIndex, awayLen, -1);
+        else homeBatterIndex = stepBatterIndex(homeBatterIndex, homeLen, -1);
+      }
+    }
+    return { inning, half, outs, awayBatterIndex, homeBatterIndex };
+  }
+
   startLiveGame(gameId: string, userId: string, now = new Date()): GameLog {
     const game = this.getGame(gameId);
     if (!game) {
@@ -961,6 +1111,12 @@ export class LeagueStore {
         const log = this.getGameLog(gameId)!;
         const next = clampStat(Number(log[column]) + step);
         this.db.prepare(`UPDATE game_logs SET ${column} = ? WHERE gameId = ?`).run(next, gameId);
+        if (stat === 'hits' || stat === 'walks') {
+          const length = this.lineupLength(gameId, side === 'home' ? game.homeTeamId : game.awayTeamId);
+          const indexCol = side === 'home' ? 'homeBatterIndex' : 'awayBatterIndex';
+          const nextIndex = stepBatterIndex(log[indexCol], length, step);
+          this.db.prepare(`UPDATE game_logs SET ${indexCol} = ? WHERE gameId = ?`).run(nextIndex, gameId);
+        }
       }
       this.db
         .prepare('UPDATE game_logs SET updatedAt = ?, updatedByUserId = ? WHERE gameId = ?')
@@ -983,18 +1139,23 @@ export class LeagueStore {
     const tx = this.db.transaction(() => {
       this.ensureGameLog(gameId);
       const log = this.getGameLog(gameId)!;
-      const next = stepHalfInning(log.currentInning, log.currentHalf, log.currentOuts, step);
+      const awayLen = this.lineupLength(gameId, game.awayTeamId);
+      const homeLen = this.lineupLength(gameId, game.homeTeamId);
+      const next = this.stepOutsAndBatters(log, awayLen, homeLen, step);
       const awayLine = lineForDisplay(log.awayLine, next.inning, log.homeLine);
       const homeLine = lineForDisplay(log.homeLine, next.inning, awayLine);
       this.db
         .prepare(
           `UPDATE game_logs SET currentOuts = ?, currentInning = ?, currentHalf = ?,
+           awayBatterIndex = ?, homeBatterIndex = ?,
            awayLine = ?, homeLine = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?`,
         )
         .run(
           next.outs,
           next.inning,
           next.half,
+          next.awayBatterIndex,
+          next.homeBatterIndex,
           JSON.stringify(awayLine),
           JSON.stringify(homeLine),
           now,
@@ -1062,6 +1223,8 @@ export class LeagueStore {
       ['homeLine', "TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]'"],
       ['currentInning', 'INTEGER NOT NULL DEFAULT 1'],
       ['currentHalf', "TEXT NOT NULL DEFAULT 'top'"],
+      ['awayBatterIndex', 'INTEGER NOT NULL DEFAULT 0'],
+      ['homeBatterIndex', 'INTEGER NOT NULL DEFAULT 0'],
     ];
     for (const [name, spec] of extras) {
       if (!cols.has(name)) {
@@ -1848,6 +2011,7 @@ export class LeagueStore {
       ).c;
       this.db.prepare('UPDATE games SET homeScore = NULL, awayScore = NULL, played = 0').run();
       this.db.prepare('DELETE FROM game_logs').run();
+      this.db.prepare('DELETE FROM game_lineups').run();
 
       return {
         guestsRemoved: simUsers.length,

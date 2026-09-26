@@ -50,6 +50,29 @@ const scheduleGames = [
       canStart: false,
       canScore: false,
     },
+    lineups: {
+      away: {
+        teamId: 'beers',
+        slots: [
+          { id: 'u-pat', name: 'Pat Lead', number: 1 },
+          { id: 'u-chris', name: 'Chris Deck', number: 2 },
+        ],
+        atBat: { id: 'u-pat', name: 'Pat Lead', number: 1 },
+        onDeck: { id: 'u-chris', name: 'Chris Deck', number: 2 },
+        canEdit: false,
+        locksAt: '2026-05-05T18:00:00.000Z',
+        saved: true,
+      },
+      home: {
+        teamId: 'tigers',
+        slots: [{ id: 'u-david', name: 'David', number: 11 }],
+        atBat: { id: 'u-david', name: 'David', number: 11 },
+        onDeck: { id: 'u-david', name: 'David', number: 11 },
+        canEdit: false,
+        locksAt: '2026-05-05T18:00:00.000Z',
+        saved: true,
+      },
+    },
   },
 ];
 
@@ -262,7 +285,11 @@ describe('App', () => {
     expect(screen.getByRole('columnheader', { name: 'R' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'H' })).toBeInTheDocument();
     expect(screen.getByLabelText('0 outs')).toBeInTheDocument();
-    expect(screen.getByLabelText('Batter up Da Beers')).toHaveTextContent(/Top 1/);
+    expect(screen.getByLabelText('Batter up #1 Pat Lead')).toBeInTheDocument();
+    expect(screen.getByLabelText('On deck #2 Chris Deck')).toBeInTheDocument();
+    expect(screen.getByText(/Top 1 · Da Beers/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Da Beers lineup')).toBeInTheDocument();
+    expect(screen.getByLabelText('Oakdale Tigers lineup')).toBeInTheDocument();
     expect(screen.getAllByText('Upcoming').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /start live scorekeeping/i })).not.toBeInTheDocument();
   });
@@ -336,6 +363,66 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Increase Oakdale Tigers R' }));
     await waitFor(() => {
       expect(screen.getByText('LIVE 0–1')).toBeInTheDocument();
+    });
+  });
+
+  it('lets a manager reorder and save their lineup', async () => {
+    const managerUser = {
+      id: 'u-mgr',
+      email: 'manager@oakdale.local',
+      name: 'David',
+      role: 'manager' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const editable = {
+      ...scheduleGames[0],
+      lineups: {
+        away: scheduleGames[0].lineups!.away,
+        home: {
+          ...scheduleGames[0].lineups!.home,
+          slots: [
+            { id: 'u-david', name: 'David', number: 11 },
+            { id: 'u-pat', name: 'Pat Shortstop', number: 12 },
+          ],
+          canEdit: true,
+        },
+      },
+    };
+    const saved = {
+      ...editable,
+      lineups: {
+        ...editable.lineups,
+        home: { ...editable.lineups.home, saved: true },
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: managerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/lineups/') && init?.method === 'PUT') return jsonOk(saved);
+        if (url.includes('/api/schedule')) return jsonOk([editable]);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/messages')) return jsonOk([]);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /show details for da beers at oakdale tigers/i }));
+    expect(screen.getByRole('button', { name: 'Save Oakdale Tigers lineup' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Move David down' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Oakdale Tigers lineup' }));
+    await waitFor(() => {
+      expect(screen.getByText('Saved Oakdale Tigers lineup.')).toBeInTheDocument();
     });
   });
 

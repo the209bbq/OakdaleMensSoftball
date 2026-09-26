@@ -1939,3 +1939,83 @@ describe('Admin test data simulation', () => {
   });
 });
 
+describe('Game lineups', () => {
+  it('lets a manager set their lineup on a future game and blocks the other team', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2027-05-05' });
+    const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
+    const ownGame = games.find((g) => g.homeTeamId === TEAM_OWN || g.awayTeamId === TEAM_OWN)!;
+    store.registerUser({ email: 'lu.mgr@b.com', name: 'Lu Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('lu.mgr@b.com')!.id, 'manager', TEAM_OWN);
+    store.registerUser({ email: 'lu.p@b.com', name: 'Lead Off', password: 'longenough' });
+    const lead = store.getUserByEmail('lu.p@b.com')!;
+    store.setUserTeam(lead.id, TEAM_OWN);
+    const bench = store.addPlayer({ teamId: TEAM_OWN, name: 'Bench Guy', number: 99, position: 'RF' });
+    const manager = await loginAs(app, 'lu.mgr@b.com', 'longenough');
+    const mgrId = store.getUserByEmail('lu.mgr@b.com')!.id;
+
+    const saved = await manager
+      .put(`/api/games/${ownGame.id}/lineups/${TEAM_OWN}`)
+      .send({ playerIds: [lead.id, mgrId, bench.id] });
+    expect(saved.status).toBe(200);
+    const side = ownGame.homeTeamId === TEAM_OWN ? 'home' : 'away';
+    expect(saved.body.lineups[side].saved).toBe(true);
+    expect(saved.body.lineups[side].atBat.name).toBe('Lead Off');
+    expect(saved.body.lineups[side].onDeck.name).toBe('Lu Mgr');
+    expect(saved.body.lineups[side].canEdit).toBe(true);
+
+    const otherTeam = ownGame.homeTeamId === TEAM_OWN ? ownGame.awayTeamId : ownGame.homeTeamId;
+    const wrong = await manager.put(`/api/games/${ownGame.id}/lineups/${otherTeam}`).send({ playerIds: [lead.id] });
+    expect(wrong.status).toBe(403);
+  });
+
+  it('locks manager lineup edits inside 24 hours of first pitch', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2020-05-06' });
+    const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
+    const ownGame = games.find((g) => g.homeTeamId === TEAM_OWN || g.awayTeamId === TEAM_OWN)!;
+    store.registerUser({ email: 'lock.mgr@b.com', name: 'Lock Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('lock.mgr@b.com')!.id, 'manager', TEAM_OWN);
+    store.registerUser({ email: 'lock.p@b.com', name: 'Locked Player', password: 'longenough' });
+    const player = store.getUserByEmail('lock.p@b.com')!;
+    store.setUserTeam(player.id, TEAM_OWN);
+    const manager = await loginAs(app, 'lock.mgr@b.com', 'longenough');
+
+    const locked = await manager.put(`/api/games/${ownGame.id}/lineups/${TEAM_OWN}`).send({ playerIds: [player.id] });
+    expect(locked.status).toBe(403);
+    const asAdmin = await admin.put(`/api/games/${ownGame.id}/lineups/${TEAM_OWN}`).send({ playerIds: [player.id] });
+    expect(asAdmin.status).toBe(200);
+    expect(asAdmin.body.lineups[ownGame.homeTeamId === TEAM_OWN ? 'home' : 'away'].atBat.name).toBe('Locked Player');
+  });
+
+  it('advances batter up and on deck after an out', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2027-05-05' });
+    const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
+    const ownGame = games.find((g) => g.awayTeamId === TEAM_OWN || g.homeTeamId === TEAM_OWN)!;
+    store.registerUser({ email: 'bat.mgr@b.com', name: 'Bat Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('bat.mgr@b.com')!.id, 'manager', TEAM_OWN);
+    store.registerUser({ email: 'bat.1@b.com', name: 'First Bat', password: 'longenough' });
+    store.registerUser({ email: 'bat.2@b.com', name: 'Second Bat', password: 'longenough' });
+    const first = store.getUserByEmail('bat.1@b.com')!;
+    const second = store.getUserByEmail('bat.2@b.com')!;
+    store.setUserTeam(first.id, TEAM_OWN);
+    store.setUserTeam(second.id, TEAM_OWN);
+    await admin.put(`/api/games/${ownGame.id}/lineups/${TEAM_OWN}`).send({ playerIds: [first.id, second.id] });
+    await admin.post(`/api/games/${ownGame.id}/scorelog/start`);
+    const side = ownGame.awayTeamId === TEAM_OWN ? 'away' : 'home';
+    if (side === 'home') {
+      await admin.post(`/api/games/${ownGame.id}/scorelog/outs`).send({ delta: 3 });
+    }
+    const before = await admin.get(`/api/games/${ownGame.id}`);
+    expect(before.body.lineups[side].atBat.name).toBe('First Bat');
+    expect(before.body.lineups[side].onDeck.name).toBe('Second Bat');
+    const afterOut = await admin.post(`/api/games/${ownGame.id}/scorelog/outs`).send({ delta: 1 });
+    expect(afterOut.body.lineups[side].atBat.name).toBe('Second Bat');
+    expect(afterOut.body.lineups[side].onDeck.name).toBe('First Bat');
+  });
+});
+

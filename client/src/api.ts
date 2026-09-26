@@ -25,6 +25,23 @@ export type ScoreSide = 'home' | 'away';
 export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs';
 export type InningHalf = 'top' | 'bottom';
 
+export interface LineupPlayer {
+  id: string;
+  name: string;
+  number: number | null;
+  position?: string;
+}
+
+export interface GameLineup {
+  teamId: string;
+  slots: LineupPlayer[];
+  atBat: LineupPlayer | null;
+  onDeck: LineupPlayer | null;
+  canEdit: boolean;
+  locksAt: string | null;
+  saved: boolean;
+}
+
 export interface GameBoxScore {
   homeRuns: number;
   awayRuns: number;
@@ -71,6 +88,7 @@ export interface Game {
   awayAttendance?: TeamAttendance;
   box?: GameBoxScore;
   scoring?: GameScoring;
+  lineups?: { away: GameLineup; home: GameLineup };
 }
 
 export interface StandingRow {
@@ -230,6 +248,11 @@ export const api = {
     request<Game>(`/api/games/${gameId}/scorelog/inning`, {
       method: 'POST',
       body: JSON.stringify({ side, inning, delta }),
+    }),
+  saveLineup: (gameId: string, teamId: string, playerIds: string[]) =>
+    request<Game>(`/api/games/${gameId}/lineups/${teamId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ playerIds }),
     }),
   getTeams: () => request<Team[]>('/api/teams'),
   getRoster: (teamId: string) => request<RosterResponse>(`/api/teams/${teamId}/roster`),

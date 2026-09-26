@@ -33,6 +33,24 @@ export interface Game {
 
 export type { GameBoxScore, ScoreSide, ScoreStat, ScoringPhase, ScoringWindow } from './gameScoring.js';
 
+/** One batter in a game lineup (account member or unregistered roster row). */
+export interface LineupPlayer {
+  id: string;
+  name: string;
+  number: number | null;
+  position?: string;
+}
+
+export interface GameLineup {
+  teamId: string;
+  slots: LineupPlayer[];
+  atBat: LineupPlayer | null;
+  onDeck: LineupPlayer | null;
+  canEdit: boolean;
+  locksAt: string | null;
+  saved: boolean;
+}
+
 /** Account-member check-in counts for one team in one scheduled week. */
 export interface TeamAttendance {
   in: number;

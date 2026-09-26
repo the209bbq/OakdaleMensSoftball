@@ -12,6 +12,8 @@ export type InningHalf = 'top' | 'bottom';
 
 /** Men's softball is seven innings; extras are appended as the game continues. */
 export const REGULATION_INNINGS = 7;
+/** Managers may edit a game lineup until 24 hours before first pitch. */
+export const LINEUP_LOCK_MS = 24 * 60 * 60 * 1000;
 
 export interface ScoringWindow {
   phase: ScoringPhase;
@@ -283,4 +285,48 @@ export function boxFromParts(
 /** Admins may score any game. Managers only while the window is open. */
 export function canScoreLiveGame(window: ScoringWindow, isAdmin: boolean): boolean {
   return isAdmin || window.open;
+}
+
+export function parsePlayerIds(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.map((id) => String(id ?? '').trim()).filter(Boolean);
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      return parsePlayerIds(JSON.parse(raw));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+export function wrapBatterIndex(index: number, length: number): number {
+  if (length <= 0) return 0;
+  const n = Math.trunc(index);
+  if (!Number.isFinite(n)) return 0;
+  return ((n % length) + length) % length;
+}
+
+export function stepBatterIndex(index: number, length: number, delta: number): number {
+  return wrapBatterIndex(index + Math.trunc(delta || 0), length);
+}
+
+export function lineupLocksAtMs(scheduledMs: number | null): number | null {
+  if (scheduledMs == null || !Number.isFinite(scheduledMs)) return null;
+  return scheduledMs - LINEUP_LOCK_MS;
+}
+
+export function lineupLocksAt(scheduledMs: number | null): string | null {
+  const ms = lineupLocksAtMs(scheduledMs);
+  if (ms == null) return null;
+  return new Date(ms).toISOString();
+}
+
+/** Admins may always edit. Managers may edit until 24 hours before first pitch. */
+export function canEditLineup(scheduledMs: number | null, nowMs: number, isAdmin: boolean): boolean {
+  if (isAdmin) return true;
+  const locksAt = lineupLocksAtMs(scheduledMs);
+  if (locksAt == null) return true;
+  return nowMs < locksAt;
 }

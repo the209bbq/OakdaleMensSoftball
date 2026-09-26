@@ -1320,11 +1320,20 @@ body {
 .batter-up {
   margin: 0;
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.45rem;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.18rem;
   color: #ffffff;
   font-size: 0.78rem;
+  min-width: 0;
+}
+
+.batter-slot {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.4rem;
 }
 
 .batter-up strong {
@@ -1337,6 +1346,80 @@ body {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.lineup-pair {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0 0 0.75rem;
+}
+
+.lineup-card {
+  padding: 0.7rem 0.75rem 0.8rem;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.lineup-heading {
+  margin: 0 0 0.2rem;
+  font-size: 0.92rem;
+  color: var(--heading);
+}
+
+.lineup-note {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.lineup-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lineup-row {
+  display: grid;
+  grid-template-columns: 1.3rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.lineup-spot {
+  font-weight: 700;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.lineup-name {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lineup-moves {
+  display: flex;
+  gap: 0.1rem;
+}
+
+.lineup-moves .score-step {
+  color: var(--heading);
+}
+
+.lineup-save {
+  width: 100%;
+  margin-top: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+  background: var(--card);
+  color: var(--heading);
+  font-weight: 700;
 }
 
 .visually-hidden {
