@@ -1123,11 +1123,19 @@ body {
   position: sticky;
   z-index: 2;
   background: #0b0d10;
-  width: 2.15rem;
+  width: 1.7rem;
 }
 
 .line-tot-r {
-  right: 2.15rem;
+  right: 1.7rem;
+}
+
+.line-score-table.is-scoring .line-tot {
+  width: 3.15rem;
+}
+
+.line-score-table.is-scoring .line-tot-r {
+  right: 3.15rem;
 }
 
 .line-tot-h {

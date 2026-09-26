@@ -1615,7 +1615,7 @@ function LineScore({
   return (
     <div className="line-score" aria-label="Line score">
       <div className="line-score-scroll">
-        <table className={`line-score-table ${innings > 7 ? 'is-extras' : ''}`}>
+        <table className={`line-score-table ${innings > 7 ? 'is-extras' : ''} ${canScore ? 'is-scoring' : ''}`}>
           <thead>
             <tr>
               <th className="line-team-col" scope="col">
