@@ -1368,19 +1368,23 @@ describe('Manager email authorizations', () => {
     expect(emails).toEqual(['one@oakdale.local:active']);
   });
 
-  it('refuses to promote an admin to manager', async () => {
+  it('refuses to promote anyone to admin', async () => {
     const { app, store } = makeApp();
-    store.registerUser({ email: 'other.admin@oakdale.local', name: 'Other Admin', password: 'longenough' });
-    const otherId = store.getUserByEmail('other.admin@oakdale.local')!.id;
+    store.registerUser({ email: 'player.only@oakdale.local', name: 'Pat', password: 'longenough' });
+    const playerId = store.getUserByEmail('player.only@oakdale.local')!.id;
+    const adminUser = store.getUserByEmail('admin@oakdale.local')!;
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
-    const asAdmin = await admin.post(`/api/users/${otherId}/role`).send({ role: 'admin' });
-    expect(asAdmin.status).toBe(200);
-    expect(asAdmin.body.role).toBe('admin');
 
-    const res = await admin.post(`/api/users/${otherId}/role`).send({ role: 'manager', teamId: TEAM_OWN });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/promoted from a player account/i);
-    expect(store.getUserByEmail('other.admin@oakdale.local')?.role).toBe('admin');
+    const asAdmin = await admin.post(`/api/users/${playerId}/role`).send({ role: 'admin' });
+    expect(asAdmin.status).toBe(400);
+    expect(asAdmin.body.error).toMatch(/admin access cannot be granted/i);
+    expect(store.getUserByEmail('player.only@oakdale.local')?.role).toBe('player');
+
+    expect(() => store.setUserRole(playerId, 'admin')).toThrow(/admin access cannot be granted/i);
+    expect(() => store.setUserRole(adminUser.id, 'manager', TEAM_OWN)).toThrow(
+      /promoted from a player account/i,
+    );
+    expect(store.getUserByEmail('admin@oakdale.local')?.role).toBe('admin');
   });
 
   it('DELETE demotes an active manager while keeping teamId', async () => {

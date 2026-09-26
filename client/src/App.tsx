@@ -3029,6 +3029,9 @@ function Admin() {
       )}
 
       <h3 className="admin-users-heading">Players &amp; roles</h3>
+      <p className="theme-help">
+        There is one league admin. You can promote players to manager, but not to admin.
+      </p>
       <ul className="user-list">
         {users.map((u) => (
           <li key={u.id} className="user-row">
@@ -3040,17 +3043,20 @@ function Admin() {
               <select
                 aria-label={`Role for ${u.name}`}
                 value={u.role}
-                disabled={u.id === me?.id}
+                disabled={u.role === 'admin' || u.id === me?.id}
                 onChange={(e) => {
                   const role = e.target.value as Role;
-                  changeRole(u, role, role === 'manager' ? u.teamId ?? teams[0]?.id ?? null : null);
+                  changeRole(u, role, role === 'manager' ? u.teamId ?? openTeams[0]?.id ?? u.teamId ?? null : null);
                 }}
               >
-                <option value="player">Player</option>
-                {(u.role === 'player' || u.role === 'manager') && (
-                  <option value="manager">Team Manager</option>
+                {u.role === 'admin' ? (
+                  <option value="admin">Admin</option>
+                ) : (
+                  <>
+                    <option value="player">Player</option>
+                    <option value="manager">Team Manager</option>
+                  </>
                 )}
-                <option value="admin">Admin</option>
               </select>
               {u.role === 'manager' && (
                 <select

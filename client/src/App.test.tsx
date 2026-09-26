@@ -921,6 +921,11 @@ describe('App', () => {
       screen.getByText(/only teams that still need a manager are listed/i),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Manager type for David')).toHaveDisplayValue('Plays for this team');
+    expect(screen.getByLabelText('Role for Pat')).not.toHaveTextContent('Admin');
+    expect(screen.getByLabelText('Role for David')).not.toHaveTextContent('Admin');
+    expect(screen.getByLabelText('Role for Commish')).toHaveDisplayValue('Admin');
+    expect(screen.getByLabelText('Role for Commish')).toBeDisabled();
+    expect(screen.getByText(/there is one league admin/i)).toBeInTheDocument();
   });
 
   it('hides the promote form when every team already has a manager', async () => {

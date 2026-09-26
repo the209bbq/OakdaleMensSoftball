@@ -689,11 +689,15 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
   api.post('/users/:id/role', requireAdmin, (req: Request, res: Response) => {
     try {
       const { role, teamId, onRoster } = req.body ?? {};
-      if (!['admin', 'manager', 'player'].includes(role)) {
-        res.status(400).json({ error: 'role must be admin, manager, or player' });
+      if (role === 'admin') {
+        res.status(400).json({ error: 'Admin access cannot be granted' });
         return;
       }
-      if (req.params.id === req.user!.id && role !== 'admin') {
+      if (!['manager', 'player'].includes(role)) {
+        res.status(400).json({ error: 'role must be manager or player' });
+        return;
+      }
+      if (req.params.id === req.user!.id) {
         res.status(400).json({ error: 'You cannot remove your own admin access' });
         return;
       }

@@ -1466,6 +1466,10 @@ export class LeagueStore {
   setUserRole(userId: string, role: Role, teamId: string | null = null, onRoster?: boolean): PublicUser {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
+    if (role === 'admin') {
+      if (user.role === 'admin') return toPublicUser(user);
+      throw new Error('Admin access cannot be granted');
+    }
     if (role === 'manager') {
       if (user.role !== 'player' && user.role !== 'manager') {
         throw new Error('Managers can only be promoted from a player account');
@@ -1814,6 +1818,15 @@ export class LeagueStore {
     const desiredTeamId = input.role === 'manager' ? input.teamId ?? null : null;
     const existing = this.getUserByEmail(input.email);
     if (existing) {
+      if (input.role === 'admin') {
+        if (existing.role !== 'admin') {
+          existing.role = 'admin';
+          existing.teamId = null;
+          existing.onRoster = true;
+          this.updateUserRow(existing);
+        }
+        return toPublicUser(existing);
+      }
       if (existing.role !== input.role || existing.teamId !== desiredTeamId) {
         return this.setUserRole(existing.id, input.role, desiredTeamId);
       }
