@@ -1439,7 +1439,6 @@ function LineCell({
   blank,
   canScore,
   busy,
-  compact,
   decreaseLabel,
   increaseLabel,
   onMinus,
@@ -1449,7 +1448,6 @@ function LineCell({
   blank?: boolean;
   canScore: boolean;
   busy: boolean;
-  compact?: boolean;
   decreaseLabel: string;
   increaseLabel: string;
   onMinus: () => void;
@@ -1458,32 +1456,6 @@ function LineCell({
   const shown = blank && value === 0 ? '–' : value;
   if (!canScore) {
     return <span className={`scoreboard-value ${blank ? 'is-blank' : ''}`}>{shown}</span>;
-  }
-  if (compact) {
-    return (
-      <span className="inning-step">
-        {value > 0 && (
-          <button
-            type="button"
-            className="score-step tiny"
-            disabled={busy}
-            aria-label={decreaseLabel}
-            onClick={onMinus}
-          >
-            −
-          </button>
-        )}
-        <button
-          type="button"
-          className="inning-num"
-          disabled={busy}
-          aria-label={increaseLabel}
-          onClick={onPlus}
-        >
-          {value}
-        </button>
-      </span>
-    );
   }
   return (
     <span className="scoreboard-cell">
@@ -1550,17 +1522,7 @@ function LineScoreRow({
         const current = batting && inning === currentInning;
         return (
           <td key={inning} className={`line-cell ${current ? 'is-current' : ''} ${started ? '' : 'is-future'}`}>
-            <LineCell
-              value={value}
-              blank={!started}
-              canScore={canScore}
-              busy={busy}
-              compact
-              decreaseLabel={`Decrease ${name} inning ${inning}`}
-              increaseLabel={`Increase ${name} inning ${inning}`}
-              onMinus={() => onRun(() => api.bumpInningRun(gameId, side, inning, -1))}
-              onPlus={() => onRun(() => api.bumpInningRun(gameId, side, inning, 1))}
-            />
+            <span className={`scoreboard-value ${started ? '' : 'is-blank'}`}>{started || value > 0 ? value : '–'}</span>
           </td>
         );
       })}

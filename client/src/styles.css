@@ -1180,29 +1180,6 @@ body {
   color: #5c636e;
 }
 
-.inning-step {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.5rem;
-}
-
-.inning-num {
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  min-width: 0.85rem;
-  padding: 0;
-  cursor: pointer;
-}
-
-.inning-num:disabled {
-  cursor: default;
-}
-
 .mlb-colhead {
   color: #8b919a;
   font-size: 0.72rem;

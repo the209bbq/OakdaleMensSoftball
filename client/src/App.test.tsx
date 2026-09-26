@@ -330,6 +330,9 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('LIVE')).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: 'Increase Oakdale Tigers R' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Increase Oakdale Tigers H' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Increase Oakdale Tigers inning/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Increase Oakdale Tigers R' }));
     await waitFor(() => {
       expect(screen.getByText('LIVE 0–1')).toBeInTheDocument();
