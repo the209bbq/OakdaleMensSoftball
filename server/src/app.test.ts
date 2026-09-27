@@ -10,6 +10,8 @@ import type { Mailer, MailMessage } from './mailer.js';
 
 const TEAM_OWN = 'nothin-but-dingers';
 const TEAM_OTHER = 'da-beers';
+const TINY_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const SEEDED_TEAM_NAMES = [
   'Nothin but Dingers',
   'Sig & Twisted',
@@ -122,11 +124,114 @@ describe('Public read endpoints', () => {
     expect(res.status).toBe(200);
     expect(res.body.fullLineupSize).toBe(10);
     expect(res.body.freeAgencyOpen).toBe(true);
-    expect(res.body.freeAgents).toEqual([{ id: free.id, name: 'Free Agent Joe' }]);
+    expect(res.body.freeAgents[0]).toMatchObject({
+      id: free.id,
+      name: 'Free Agent Joe',
+      waiverStatus: 'none',
+    });
     const own = res.body.teams.find((t: { id: string }) => t.id === TEAM_OWN);
     expect(own.lineupStatus).toBe('need_guys');
     expect(own.checkedInCount).toBe(1);
     expect(own.memberCount).toBe(1);
+    expect(own.weekGame).toMatchObject({
+      field: expect.any(String),
+      time: expect.any(String),
+      opponentName: expect.any(String),
+    });
+  });
+});
+
+describe('Player profiles, phone, waivers, and invites', () => {
+  it('hides a player phone unless they share it with managers', async () => {
+    const { app, store } = makeApp();
+    const player = store.registerUser({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    store.updateProfile(player.id, { name: 'Pat', phone: '209-555-0100', sharePhone: false });
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const other = store.registerUser({ email: 'q@b.com', name: 'Quincy', password: 'longenough' });
+
+    const guest = await request(app).get(`/api/players/${player.id}`);
+    expect(guest.status).toBe(200);
+    expect(guest.body.phone).toBeNull();
+    expect(guest.body.canSeePhone).toBe(false);
+    expect(guest.body.stats).toEqual({ gamesPlayed: 0, hits: 0, atBats: 0, average: '.000' });
+
+    const asOther = await loginAs(app, 'q@b.com', 'longenough');
+    const hidden = await asOther.get(`/api/players/${player.id}`);
+    expect(hidden.body.canSeePhone).toBe(false);
+    expect(hidden.body.phone).toBeNull();
+
+    const asMgr = await loginAs(app, 'mgr@b.com', 'longenough');
+    const stillHidden = await asMgr.get(`/api/players/${player.id}`);
+    expect(stillHidden.body.canSeePhone).toBe(false);
+
+    store.updateProfile(player.id, { name: 'Pat', sharePhone: true });
+    const shared = await asMgr.get(`/api/players/${player.id}`);
+    expect(shared.body.canSeePhone).toBe(true);
+    expect(shared.body.phone).toBe('209-555-0100');
+
+    const asSelf = await loginAs(app, 'p@b.com', 'longenough');
+    const mine = await asSelf.get(`/api/players/${player.id}`);
+    expect(mine.body.phone).toBe('209-555-0100');
+    void other;
+  });
+
+  it('lets a player upload a waiver and a manager approve it', async () => {
+    const { app, store } = makeApp();
+    const player = store.registerUser({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+
+    const asPlayer = await loginAs(app, 'p@b.com', 'longenough');
+    const uploaded = await asPlayer.put('/api/auth/profile').send({
+      name: 'Pat',
+      waiverUrl: TINY_PNG,
+    });
+    expect(uploaded.status).toBe(200);
+    expect(uploaded.body.waiverStatus).toBe('pending');
+
+    const asMgr = await loginAs(app, 'mgr@b.com', 'longenough');
+    const pending = await asMgr.get('/api/waivers/pending');
+    expect(pending.body.some((row: { id: string }) => row.id === player.id)).toBe(true);
+
+    const approved = await asMgr.post(`/api/players/${player.id}/waiver`).send({ status: 'approved' });
+    expect(approved.status).toBe(200);
+    expect(approved.body.waiverStatus).toBe('approved');
+  });
+
+  it('lets a manager invite a free agent and the player accept', async () => {
+    const { app, store } = makeApp();
+    store.generateSchedule({ startDate: utcToday(), weeks: 1 });
+    store.registerUser({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+
+    const asMgr = await loginAs(app, 'mgr@b.com', 'longenough');
+    const patId = store.getUserByEmail('p@b.com')!.id;
+    const invite = await asMgr.post('/api/fa-invites').send({ userId: patId });
+    expect(invite.status).toBe(201);
+    expect(invite.body.status).toBe('pending');
+    expect(invite.body.teamId).toBe(TEAM_OWN);
+
+    const asPlayer = await loginAs(app, 'p@b.com', 'longenough');
+    const inbox = await asPlayer.get('/api/fa-invites');
+    expect(inbox.body[0].id).toBe(invite.body.id);
+
+    const accept = await asPlayer.post(`/api/fa-invites/${invite.body.id}/respond`).send({ accept: true });
+    expect(accept.status).toBe(200);
+    expect(accept.body.status).toBe('accepted');
+    expect(store.getUserByEmail('p@b.com')?.teamId).toBe(TEAM_OWN);
+  });
+
+  it('saves skill level on the public profile', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    const asPlayer = await loginAs(app, 'p@b.com', 'longenough');
+    const put = await asPlayer.put('/api/auth/profile').send({ name: 'Pat', skillLevel: 'competitive' });
+    expect(put.status).toBe(200);
+    expect(put.body.skillLevel).toBe('competitive');
+    const view = await request(app).get(`/api/players/${store.getUserByEmail('p@b.com')!.id}`);
+    expect(view.body.skillLevel).toBe('competitive');
   });
 });
 
@@ -559,9 +664,6 @@ describe('Admin user management', () => {
     expect(anon.status).toBe(401);
   });
 });
-
-const TINY_PNG =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 describe('Team rename', () => {
   it('lets an admin rename a team and keeps the id stable', async () => {
@@ -2077,6 +2179,10 @@ describe('Admin test data simulation', () => {
 
     const standings = store.getStandings();
     expect(standings.every((row) => row.gamesPlayed > 0)).toBe(true);
+    const guestStats = store.getPlayerStats(guests[0].id);
+    expect(guestStats.gamesPlayed).toBeGreaterThan(0);
+    expect(guestStats.atBats).toBeGreaterThan(0);
+    expect(guestStats.average).toMatch(/^\.?\d{3}$|^1\.000$/);
     expect(standings.some((row) => row.wins > 0)).toBe(true);
     expect(standings.some((row) => row.losses > 0)).toBe(true);
     const winCounts = new Set(standings.map((row) => row.wins));
@@ -2240,6 +2346,39 @@ describe('Game lineups', () => {
     const afterOut = await admin.post(`/api/games/${ownGame.id}/scorelog/outs`).send({ delta: 1 });
     expect(afterOut.body.lineups[side].atBat.name).toBe('Second Bat');
     expect(afterOut.body.lineups[side].onDeck.name).toBe('First Bat');
+  });
+
+  it('credits hits, outs, and walks to the batter up for profile stats', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2027-05-05' });
+    const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
+    const ownGame = games.find((g) => g.awayTeamId === TEAM_OWN || g.homeTeamId === TEAM_OWN)!;
+    store.registerUser({ email: 'stat.1@b.com', name: 'Pat Bat', password: 'longenough' });
+    store.registerUser({ email: 'stat.2@b.com', name: 'Chris Bat', password: 'longenough' });
+    const pat = store.getUserByEmail('stat.1@b.com')!;
+    const chris = store.getUserByEmail('stat.2@b.com')!;
+    store.setUserTeam(pat.id, TEAM_OWN);
+    store.setUserTeam(chris.id, TEAM_OWN);
+    await admin.put(`/api/games/${ownGame.id}/lineups/${TEAM_OWN}`).send({ playerIds: [pat.id, chris.id] });
+    await admin.post(`/api/games/${ownGame.id}/scorelog/start`);
+    const side = ownGame.awayTeamId === TEAM_OWN ? 'away' : 'home';
+    if (side === 'home') {
+      await admin.post(`/api/games/${ownGame.id}/scorelog/outs`).send({ delta: 3 });
+    }
+    await admin.post(`/api/games/${ownGame.id}/scorelog/stat`).send({ side, stat: 'hits', delta: 1 });
+    await admin.post(`/api/games/${ownGame.id}/scorelog/outs`).send({ delta: 1 });
+    await admin.post(`/api/games/${ownGame.id}/scorelog/stat`).send({ side, stat: 'hits', delta: 1 });
+    await admin.post(`/api/games/${ownGame.id}/scorelog/stat`).send({ side, stat: 'walks', delta: 1 });
+
+    const patStats = (await admin.get(`/api/players/${pat.id}`)).body.stats;
+    const chrisStats = (await admin.get(`/api/players/${chris.id}`)).body.stats;
+    expect(patStats).toEqual({ gamesPlayed: 1, hits: 2, atBats: 2, average: '1.000' });
+    expect(chrisStats).toEqual({ gamesPlayed: 1, hits: 0, atBats: 1, average: '.000' });
+
+    await admin.post(`/api/games/${ownGame.id}/scorelog/stat`).send({ side, stat: 'hits', delta: -1 });
+    const afterUndo = (await admin.get(`/api/players/${pat.id}`)).body.stats;
+    expect(afterUndo).toEqual({ gamesPlayed: 1, hits: 1, atBats: 1, average: '1.000' });
   });
 });
 

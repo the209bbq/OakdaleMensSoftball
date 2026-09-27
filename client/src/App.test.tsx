@@ -137,8 +137,36 @@ const teamBoard = {
       checkedInCount: 1,
       lineupStatus: 'need_guys' as const,
       manager: { name: 'Coach' },
+      weekGame: {
+        id: 'g1',
+        date: '2026-05-06',
+        time: '6:00 PM',
+        field: 'Field 1',
+        location: 'Kerr Park',
+        opponentName: 'Da Beers',
+        home: true,
+      },
     },
   ],
+};
+
+const playerProfile = {
+  id: 'u-fa',
+  name: 'Free Agent Joe',
+  number: 7,
+  position: 'OF',
+  photoUrl: undefined,
+  skillLevel: 'regular' as const,
+  teamId: null,
+  teamName: null,
+  isManager: false,
+  waiverStatus: 'none' as const,
+  waiverUrl: null,
+  canReviewWaiver: false,
+  phone: null,
+  sharePhone: false,
+  canSeePhone: false,
+  stats: { gamesPlayed: 2, hits: 5, atBats: 12, average: '.417' },
 };
 
 function jsonOk(data: unknown) {
@@ -170,6 +198,8 @@ beforeEach(() => {
         }
         return jsonOk([]);
       }
+      if (url.includes('/api/fa-invites')) return jsonOk([]);
+      if (url.includes('/api/players/')) return jsonOk(playerProfile);
       if (url.includes('/api/team-board')) return jsonOk(teamBoard);
       if (url.includes('/roster')) return jsonOk(rosterPayload);
       if (url.includes('/api/teams')) return jsonOk(teams);
@@ -603,6 +633,7 @@ describe('App', () => {
     });
     expect(screen.getByText('Need guys')).toBeInTheDocument();
     expect(screen.getByText('1/10 in')).toBeInTheDocument();
+    expect(screen.getByText(/vs Da Beers · Field 1 · 6:00 PM/)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Free agency' })).toBeInTheDocument();
     expect(screen.getByText('Free Agent Joe')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign up as a free agent/i })).toBeInTheDocument();
@@ -626,6 +657,26 @@ describe('App', () => {
     expect(screen.getByLabelText("Pat Shortstop hasn't checked in")).toHaveTextContent('—');
     expect(screen.queryByRole('button', { name: /i'm there/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save name/i })).not.toBeInTheDocument();
+  });
+
+  it('opens a player profile with a stat line from the free-agent list', async () => {
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Teams' }));
+    await waitFor(() => {
+      expect(screen.getByText('Free Agent Joe')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('Free Agent Joe'));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Free Agent Joe' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('#7')).toBeInTheDocument();
+    expect(screen.getByText(/OF · Regular/)).toBeInTheDocument();
+    expect(screen.getByText('GP')).toBeInTheDocument();
+    expect(screen.getByText('Hits')).toBeInTheDocument();
+    expect(screen.getByText('AB')).toBeInTheDocument();
+    expect(screen.getByText('AVG')).toBeInTheDocument();
+    expect(screen.getByText('.417')).toBeInTheDocument();
+    expect(screen.getByText('Phone is hidden unless this player shares it with managers.')).toBeInTheDocument();
   });
 
   it('hides free-agent signup after playoffs begin and opens register from the CTA', async () => {
@@ -662,7 +713,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('Full lineup')).toBeInTheDocument();
     });
-    expect(screen.getByText('Free agency closed — playoffs have started.')).toBeInTheDocument();
+    expect(screen.getByText(/Free agency closed — playoffs have started/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /sign up as a free agent/i })).not.toBeInTheDocument();
     expect(screen.queryByText('Free Agent Joe')).not.toBeInTheDocument();
   });
@@ -1209,6 +1260,11 @@ describe('App', () => {
     expect(header).not.toHaveTextContent('PS');
     fireEvent.click(header);
     expect(screen.getByRole('heading', { name: 'Your profile' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Phone number')).toBeInTheDocument();
+    expect(screen.getByLabelText('Let managers see my number')).toBeInTheDocument();
+    expect(screen.getByText(/Off by default. Managers use this to reach you about a game./)).toBeInTheDocument();
+    expect(screen.getByLabelText('Skill level')).toBeInTheDocument();
+    expect(screen.getByLabelText('Upload signed waiver')).toBeInTheDocument();
   });
 
   it('lets an admin send a signup-email test when mail is configured', async () => {

@@ -116,6 +116,79 @@ export interface User {
   position?: string;
   number?: number | null;
   photoUrl?: string;
+  skillLevel?: SkillLevel | null;
+  phone?: string | null;
+  sharePhone?: boolean;
+  waiverUrl?: string | null;
+  waiverStatus?: WaiverStatus;
+}
+
+export const SKILL_LEVELS = ['rec', 'regular', 'competitive'] as const;
+export type SkillLevel = (typeof SKILL_LEVELS)[number];
+export const SKILL_LEVEL_LABELS: Record<SkillLevel, string> = {
+  rec: 'Recreational',
+  regular: 'Regular',
+  competitive: 'Competitive',
+};
+
+export type WaiverStatus = 'none' | 'pending' | 'approved' | 'rejected';
+export const WAIVER_STATUS_LABELS: Record<WaiverStatus, string> = {
+  none: 'No waiver',
+  pending: 'Waiver pending',
+  approved: 'Waiver approved',
+  rejected: 'Needs a new waiver',
+};
+
+export interface PlayerStats {
+  gamesPlayed: number;
+  hits: number;
+  atBats: number;
+  average: string;
+}
+
+export interface TeamWeekGame {
+  id: string;
+  date: string;
+  time: string;
+  field: string;
+  location: string;
+  opponentName: string;
+  home: boolean;
+}
+
+export interface PublicPlayerProfile {
+  id: string;
+  name: string;
+  number: number | null;
+  position?: string;
+  photoUrl?: string;
+  skillLevel: SkillLevel | null;
+  teamId: string | null;
+  teamName: string | null;
+  isManager: boolean;
+  waiverStatus: WaiverStatus;
+  waiverUrl?: string | null;
+  canReviewWaiver: boolean;
+  phone?: string | null;
+  sharePhone: boolean;
+  canSeePhone: boolean;
+  stats: PlayerStats;
+}
+
+export interface FaInvite {
+  id: string;
+  fromUserId: string;
+  fromName: string;
+  teamId: string;
+  teamName: string;
+  toUserId: string;
+  toName: string;
+  gameId: string | null;
+  week: number | null;
+  field: string | null;
+  time: string | null;
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled';
+  createdAt: string;
 }
 
 /** Public-safe player account on a team roster (no email). */
@@ -127,6 +200,8 @@ export interface TeamMember {
   photoUrl?: string;
   isManager?: boolean;
   checkIn?: 'in' | 'out' | null;
+  skillLevel?: SkillLevel | null;
+  waiverStatus?: WaiverStatus;
 }
 
 export type CheckInStatus = 'in' | 'out';
@@ -180,6 +255,12 @@ export type LineupStatus = 'need_guys' | 'full_lineup';
 export interface FreeAgent {
   id: string;
   name: string;
+  photoUrl?: string;
+  number?: number | null;
+  position?: string;
+  skillLevel?: SkillLevel | null;
+  waiverStatus?: WaiverStatus;
+  invitedByMe?: boolean;
 }
 
 export interface TeamBoardRow extends Team {
@@ -187,6 +268,7 @@ export interface TeamBoardRow extends Team {
   checkedInCount: number;
   lineupStatus: LineupStatus;
   manager: TeamManagerSummary | null;
+  weekGame?: TeamWeekGame | null;
 }
 
 export interface TeamBoard {
@@ -204,6 +286,10 @@ export interface ProfileUpdate {
   number?: number | null;
   photoUrl?: string | null;
   onRoster?: boolean;
+  skillLevel?: SkillLevel | null;
+  phone?: string | null;
+  sharePhone?: boolean;
+  waiverUrl?: string | null;
 }
 
 export interface Landing {
@@ -295,7 +381,23 @@ export const api = {
     }),
   getTeams: () => request<Team[]>('/api/teams'),
   getTeamBoard: () => request<TeamBoard>('/api/team-board'),
+  getPlayer: (id: string) => request<PublicPlayerProfile>(`/api/players/${id}`),
   getRoster: (teamId: string) => request<RosterResponse>(`/api/teams/${teamId}/roster`),
+  listPendingWaivers: () => request<PublicPlayerProfile[]>('/api/waivers/pending'),
+  reviewWaiver: (playerId: string, status: 'approved' | 'rejected') =>
+    request<PublicPlayerProfile>(`/api/players/${playerId}/waiver`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    }),
+  listFaInvites: () => request<FaInvite[]>('/api/fa-invites'),
+  inviteFreeAgent: (userId: string) =>
+    request<FaInvite>('/api/fa-invites', { method: 'POST', body: JSON.stringify({ userId }) }),
+  respondFaInvite: (id: string, accept: boolean) =>
+    request<FaInvite>(`/api/fa-invites/${id}/respond`, {
+      method: 'POST',
+      body: JSON.stringify({ accept }),
+    }),
+  cancelFaInvite: (id: string) => request<FaInvite>(`/api/fa-invites/${id}`, { method: 'DELETE' }),
   getRules: () => request<{ rules: string }>('/api/rules'),
   getLanding: () => request<Landing>('/api/landing'),
   updateLanding: (payload: LandingUpdate) =>

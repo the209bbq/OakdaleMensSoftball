@@ -177,8 +177,18 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
   api.put('/auth/profile', requireAuth, (req: Request, res: Response) => {
     try {
-      const { name, position, number, photoUrl, onRoster } = req.body ?? {};
-      const updated = store.updateProfile(req.user!.id, { name, position, number, photoUrl, onRoster });
+      const { name, position, number, photoUrl, onRoster, skillLevel, phone, sharePhone, waiverUrl } = req.body ?? {};
+      const updated = store.updateProfile(req.user!.id, {
+        name,
+        position,
+        number,
+        photoUrl,
+        onRoster,
+        skillLevel,
+        phone,
+        sharePhone,
+        waiverUrl,
+      });
       res.json(updated);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
@@ -217,8 +227,83 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     res.json(store.getTeams());
   });
 
-  api.get('/team-board', (_req: Request, res: Response) => {
-    res.json(store.getTeamBoard());
+  api.get('/team-board', (req: Request, res: Response) => {
+    res.json(store.getTeamBoard(req.user));
+  });
+
+  api.get('/players/:id', (req: Request, res: Response) => {
+    const profile = store.getPublicPlayer(req.params.id, req.user);
+    if (!profile) {
+      res.status(404).json({ error: 'Player not found' });
+      return;
+    }
+    res.json(profile);
+  });
+
+  api.get('/waivers/pending', requireAuth, (req: Request, res: Response) => {
+    if (req.user!.role !== 'admin' && req.user!.role !== 'manager') {
+      res.status(403).json({ error: 'Admin or team manager access required' });
+      return;
+    }
+    res.json(store.listPendingWaivers(req.user!));
+  });
+
+  api.post('/players/:id/waiver', requireAuth, (req: Request, res: Response) => {
+    if (req.user!.role !== 'admin' && req.user!.role !== 'manager') {
+      res.status(403).json({ error: 'Admin or team manager access required' });
+      return;
+    }
+    const status = (req.body ?? {}).status;
+    if (status !== 'approved' && status !== 'rejected') {
+      res.status(400).json({ error: "status must be 'approved' or 'rejected'" });
+      return;
+    }
+    try {
+      res.json(store.reviewWaiver(req.user!, req.params.id, status));
+    } catch (err) {
+      const message = (err as Error).message;
+      res.status(message.includes('only review') ? 403 : 400).json({ error: message });
+    }
+  });
+
+  api.get('/fa-invites', requireAuth, (req: Request, res: Response) => {
+    res.json(store.listFaInvites(req.user!));
+  });
+
+  api.post('/fa-invites', requireAuth, (req: Request, res: Response) => {
+    const toUserId = (req.body ?? {}).userId;
+    if (typeof toUserId !== 'string' || !toUserId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+    try {
+      res.status(201).json(store.createFaInvite(req.user!, toUserId));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.post('/fa-invites/:id/respond', requireAuth, (req: Request, res: Response) => {
+    const accept = (req.body ?? {}).accept;
+    if (typeof accept !== 'boolean') {
+      res.status(400).json({ error: 'accept must be true or false' });
+      return;
+    }
+    try {
+      res.json(store.respondFaInvite(req.user!, req.params.id, accept));
+    } catch (err) {
+      const message = (err as Error).message;
+      res.status(message.includes('not for you') ? 403 : 400).json({ error: message });
+    }
+  });
+
+  api.delete('/fa-invites/:id', requireAuth, (req: Request, res: Response) => {
+    try {
+      res.json(store.cancelFaInvite(req.user!, req.params.id));
+    } catch (err) {
+      const message = (err as Error).message;
+      res.status(message.includes('only cancel') ? 403 : 400).json({ error: message });
+    }
   });
 
   api.get('/standings', (_req: Request, res: Response) => {
