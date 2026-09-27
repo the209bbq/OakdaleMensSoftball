@@ -8,6 +8,7 @@ import {
   canEditLineup,
   canScoreLiveGame,
   canStartLiveGame,
+  formatBattingAverage,
   scoringWindow,
   stepBatterIndex,
   stepHalfInning,
@@ -103,6 +104,15 @@ describe('stepBatterIndex', () => {
   it('wraps around the lineup', () => {
     expect(stepBatterIndex(2, 3, 1)).toBe(0);
     expect(stepBatterIndex(0, 3, -1)).toBe(2);
+  });
+});
+
+describe('formatBattingAverage', () => {
+  it('formats empty, thirds, and a perfect average', () => {
+    expect(formatBattingAverage(0, 0)).toBe('.000');
+    expect(formatBattingAverage(1, 3)).toBe('.333');
+    expect(formatBattingAverage(2, 3)).toBe('.667');
+    expect(formatBattingAverage(5, 5)).toBe('1.000');
   });
 });
 

@@ -2620,16 +2620,20 @@ function PlayerProfilePage({
 
       <dl className="stat-line">
         <div>
-          <dt>GP</dt>
+          <dt title="Games Played">GP</dt>
           <dd>{stats.gamesPlayed}</dd>
         </div>
         <div>
-          <dt>In</dt>
-          <dd>{stats.checkedIn}</dd>
+          <dt title="Hits">Hits</dt>
+          <dd>{stats.hits}</dd>
         </div>
         <div>
-          <dt>Out</dt>
-          <dd>{stats.checkedOut}</dd>
+          <dt title="At Bats">AB</dt>
+          <dd>{stats.atBats}</dd>
+        </div>
+        <div>
+          <dt title="Average">AVG</dt>
+          <dd>{stats.average}</dd>
         </div>
       </dl>
 

@@ -166,7 +166,7 @@ const playerProfile = {
   phone: null,
   sharePhone: false,
   canSeePhone: false,
-  stats: { gamesPlayed: 2, checkedIn: 2, checkedOut: 1 },
+  stats: { gamesPlayed: 2, hits: 5, atBats: 12, average: '.417' },
 };
 
 function jsonOk(data: unknown) {
@@ -672,6 +672,10 @@ describe('App', () => {
     expect(screen.getByText('#7')).toBeInTheDocument();
     expect(screen.getByText(/OF · Regular/)).toBeInTheDocument();
     expect(screen.getByText('GP')).toBeInTheDocument();
+    expect(screen.getByText('Hits')).toBeInTheDocument();
+    expect(screen.getByText('AB')).toBeInTheDocument();
+    expect(screen.getByText('AVG')).toBeInTheDocument();
+    expect(screen.getByText('.417')).toBeInTheDocument();
     expect(screen.getByText('Phone is hidden unless this player shares it with managers.')).toBeInTheDocument();
   });
 

@@ -79,8 +79,10 @@ export type WaiverStatus = 'none' | 'pending' | 'approved' | 'rejected';
 
 export interface PlayerStats {
   gamesPlayed: number;
-  checkedIn: number;
-  checkedOut: number;
+  hits: number;
+  atBats: number;
+  /** Batting average as `.333` / `1.000`. */
+  average: string;
 }
 
 export interface TeamWeekGame {

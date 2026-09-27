@@ -312,6 +312,16 @@ export function stepBatterIndex(index: number, length: number, delta: number): n
   return wrapBatterIndex(index + Math.trunc(delta || 0), length);
 }
 
+/** Softball batting average: `.000` with no AB, `.333`, or `1.000`. */
+export function formatBattingAverage(hits: number, atBats: number): string {
+  const h = Math.max(0, Math.trunc(Number(hits)) || 0);
+  const ab = Math.max(0, Math.trunc(Number(atBats)) || 0);
+  if (ab <= 0) return '.000';
+  const avg = h / ab;
+  if (avg >= 1) return avg.toFixed(3);
+  return `.${Math.round(avg * 1000).toString().padStart(3, '0')}`;
+}
+
 export function lineupLocksAtMs(scheduledMs: number | null): number | null {
   if (scheduledMs == null || !Number.isFinite(scheduledMs)) return null;
   return scheduledMs - LINEUP_LOCK_MS;

@@ -141,8 +141,9 @@ export const WAIVER_STATUS_LABELS: Record<WaiverStatus, string> = {
 
 export interface PlayerStats {
   gamesPlayed: number;
-  checkedIn: number;
-  checkedOut: number;
+  hits: number;
+  atBats: number;
+  average: string;
 }
 
 export interface TeamWeekGame {

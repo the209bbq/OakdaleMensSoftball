@@ -45,12 +45,14 @@ import {
   type ThemeInput,
 } from './theme.js';
 import {
+  batterSide,
   boxFromParts,
   bumpInningLine,
   canEditLineup,
   clampStat,
   combineGameDateTime,
   emptyLine,
+  formatBattingAverage,
   lineForDisplay,
   lineupLocksAt,
   parseHalf,
@@ -222,6 +224,17 @@ CREATE TABLE IF NOT EXISTS game_lineups (
   updatedByUserId TEXT,
   PRIMARY KEY (gameId, teamId)
 );
+CREATE TABLE IF NOT EXISTS game_plate_appearances (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  gameId TEXT NOT NULL,
+  playerId TEXT NOT NULL,
+  teamId TEXT NOT NULL,
+  side TEXT NOT NULL,
+  result TEXT NOT NULL CHECK (result IN ('hit', 'walk', 'out')),
+  createdAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pa_player ON game_plate_appearances (playerId);
+CREATE INDEX IF NOT EXISTS idx_pa_game ON game_plate_appearances (gameId);
 `;
 
 type TeamRow = { id: string; name: string; photoUrl: string | null };
@@ -671,6 +684,7 @@ export class LeagueStore {
     this.ensureUserColumns();
     this.ensureGameLogColumns();
     this.ensureFaInvitesTable();
+    this.ensurePlateAppearancesTable();
     if (sqlitePath) this.importLegacyJsonIfNeeded(sqlitePath);
     this.seedIfEmpty();
   }
@@ -1090,6 +1104,7 @@ export class LeagueStore {
        VALUES (@id, @date, @homeTeamId, @awayTeamId, @homeScore, @awayScore, @played, @field, @time, @location, @week)`,
     );
     const tx = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM game_plate_appearances').run();
       this.db.prepare('DELETE FROM game_logs').run();
       this.db.prepare('DELETE FROM game_lineups').run();
       this.db.prepare('DELETE FROM games').run();
@@ -1352,6 +1367,18 @@ export class LeagueStore {
         if (stat === 'hits' || stat === 'walks') {
           const length = this.lineupLength(gameId, side === 'home' ? game.homeTeamId : game.awayTeamId);
           const indexCol = side === 'home' ? 'homeBatterIndex' : 'awayBatterIndex';
+          const paResult = stat === 'hits' ? 'hit' : 'walk';
+          let index = log[indexCol];
+          if (step > 0) {
+            for (let i = 0; i < step; i += 1) {
+              this.creditBatter(game, side, paResult, index);
+              index = stepBatterIndex(index, length, 1);
+            }
+          } else {
+            for (let i = 0; i < -step; i += 1) {
+              this.popLastPlateAppearance(gameId, paResult, side);
+            }
+          }
           const nextIndex = stepBatterIndex(log[indexCol], length, step);
           this.db.prepare(`UPDATE game_logs SET ${indexCol} = ? WHERE gameId = ?`).run(nextIndex, gameId);
         }
@@ -1379,6 +1406,27 @@ export class LeagueStore {
       const log = this.getGameLog(gameId)!;
       const awayLen = this.lineupLength(gameId, game.awayTeamId);
       const homeLen = this.lineupLength(gameId, game.homeTeamId);
+      if (step > 0) {
+        let awayIndex = log.awayBatterIndex;
+        let homeIndex = log.homeBatterIndex;
+        let inning = log.currentInning;
+        let half = log.currentHalf;
+        let outs = log.currentOuts;
+        for (let i = 0; i < step; i += 1) {
+          const side = batterSide(half);
+          this.creditBatter(game, side, 'out', side === 'home' ? homeIndex : awayIndex);
+          if (half === 'top') awayIndex = stepBatterIndex(awayIndex, awayLen, 1);
+          else homeIndex = stepBatterIndex(homeIndex, homeLen, 1);
+          const flipped = stepHalfInning(inning, half, outs, 1);
+          inning = flipped.inning;
+          half = flipped.half;
+          outs = flipped.outs;
+        }
+      } else {
+        for (let i = 0; i < -step; i += 1) {
+          this.popLastPlateAppearance(gameId, 'out');
+        }
+      }
       const next = this.stepOutsAndBatters(log, awayLen, homeLen, step);
       const awayLine = lineForDisplay(log.awayLine, next.inning, log.homeLine);
       const homeLine = lineForDisplay(log.homeLine, next.inning, awayLine);
@@ -1494,6 +1542,73 @@ export class LeagueStore {
         createdAt TEXT NOT NULL
       )
     `);
+  }
+
+  private ensurePlateAppearancesTable(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS game_plate_appearances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gameId TEXT NOT NULL,
+        playerId TEXT NOT NULL,
+        teamId TEXT NOT NULL,
+        side TEXT NOT NULL,
+        result TEXT NOT NULL CHECK (result IN ('hit', 'walk', 'out')),
+        createdAt TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pa_player ON game_plate_appearances (playerId);
+      CREATE INDEX IF NOT EXISTS idx_pa_game ON game_plate_appearances (gameId);
+    `);
+  }
+
+  private lineupSlots(gameId: string, teamId: string): LineupPlayer[] {
+    return this.getLineupSlots(gameId, teamId).slots;
+  }
+
+  private recordPlateAppearance(
+    gameId: string,
+    playerId: string,
+    teamId: string,
+    side: ScoreSide,
+    result: 'hit' | 'walk' | 'out',
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO game_plate_appearances (gameId, playerId, teamId, side, result, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(gameId, playerId, teamId, side, result, new Date().toISOString());
+  }
+
+  private popLastPlateAppearance(gameId: string, result: 'hit' | 'walk' | 'out', side?: ScoreSide): void {
+    const row = side
+      ? (this.db
+          .prepare(
+            `SELECT id FROM game_plate_appearances
+             WHERE gameId = ? AND result = ? AND side = ?
+             ORDER BY id DESC LIMIT 1`,
+          )
+          .get(gameId, result, side) as { id: number } | undefined)
+      : (this.db
+          .prepare(
+            `SELECT id FROM game_plate_appearances
+             WHERE gameId = ? AND result = ?
+             ORDER BY id DESC LIMIT 1`,
+          )
+          .get(gameId, result) as { id: number } | undefined);
+    if (row) this.db.prepare('DELETE FROM game_plate_appearances WHERE id = ?').run(row.id);
+  }
+
+  private creditBatter(
+    game: Game,
+    side: ScoreSide,
+    result: 'hit' | 'walk' | 'out',
+    batterIndex: number,
+  ): void {
+    const teamId = side === 'home' ? game.homeTeamId : game.awayTeamId;
+    const slots = this.lineupSlots(game.id, teamId);
+    if (slots.length === 0) return;
+    const batter = slots[wrapBatterIndex(batterIndex, slots.length)];
+    if (batter) this.recordPlateAppearance(game.id, batter.id, teamId, side, result);
   }
 
   private ensureGameLogColumns(): void {
@@ -2079,15 +2194,28 @@ export class LeagueStore {
 
   getPlayerStats(userId: string): PlayerStats {
     const rows = this.db
-      .prepare('SELECT status FROM check_ins WHERE userId = ?')
-      .all(userId) as Array<{ status: string }>;
-    let checkedIn = 0;
-    let checkedOut = 0;
+      .prepare(
+        `SELECT gameId, result FROM game_plate_appearances WHERE playerId = ?`,
+      )
+      .all(userId) as Array<{ gameId: string; result: string }>;
+    const games = new Set<string>();
+    let hits = 0;
+    let atBats = 0;
     for (const row of rows) {
-      if (row.status === 'in') checkedIn += 1;
-      else if (row.status === 'out') checkedOut += 1;
+      games.add(row.gameId);
+      if (row.result === 'hit') {
+        hits += 1;
+        atBats += 1;
+      } else if (row.result === 'out') {
+        atBats += 1;
+      }
     }
-    return { gamesPlayed: checkedIn, checkedIn, checkedOut };
+    return {
+      gamesPlayed: games.size,
+      hits,
+      atBats,
+      average: formatBattingAverage(hits, atBats),
+    };
   }
 
   getPublicPlayer(userId: string, viewer?: PublicUser | null): PublicPlayerProfile | null {
@@ -2372,6 +2500,47 @@ export class LeagueStore {
     return rows.map(userFromRow).filter((u) => u.email.endsWith(SIM_EMAIL_DOMAIN));
   }
 
+  private seedSimPlateAppearances(
+    gameId: string,
+    guests: User[],
+    homeScore: number,
+    awayScore: number,
+    rng: () => number,
+  ): void {
+    const game = this.getGame(gameId);
+    if (!game) return;
+    for (const side of ['home', 'away'] as const) {
+      const teamId = side === 'home' ? game.homeTeamId : game.awayTeamId;
+      const players = guests.filter((guest) => guest.teamId === teamId);
+      if (players.length === 0) continue;
+      this.setGameLineup(
+        gameId,
+        teamId,
+        players.map((player) => player.id),
+        players[0].id,
+      );
+      const score = side === 'home' ? homeScore : awayScore;
+      const hits = Math.max(score, 1) + Math.floor(rng() * 3);
+      const walks = Math.floor(rng() * 3);
+      const outs = 21;
+      for (let i = 0; i < hits; i += 1) {
+        this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, 'hit');
+      }
+      for (let i = 0; i < walks; i += 1) {
+        this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, 'walk');
+      }
+      for (let i = 0; i < outs; i += 1) {
+        this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, 'out');
+      }
+      const hitsCol = side === 'home' ? 'homeHits' : 'awayHits';
+      const walksCol = side === 'home' ? 'homeWalks' : 'awayWalks';
+      const outsCol = side === 'home' ? 'homeOuts' : 'awayOuts';
+      this.db
+        .prepare(`UPDATE game_logs SET ${hitsCol} = ?, ${walksCol} = ?, ${outsCol} = ? WHERE gameId = ?`)
+        .run(hits, walks, outs, gameId);
+    }
+  }
+
   /**
    * Seed a realistic full league of guest players, current-week check-ins,
    * team chat, and season scores. Idempotent: if any @sim.local guests already
@@ -2460,6 +2629,7 @@ export class LeagueStore {
           homeScore += 1;
         }
         this.recordResult(game.id, homeScore, awayScore);
+        this.seedSimPlateAppearances(game.id, guests, homeScore, awayScore, rng);
         gamesPlayed += 1;
       }
 
@@ -2495,6 +2665,7 @@ export class LeagueStore {
         messagesRemoved = this.db
           .prepare(`DELETE FROM messages WHERE userId IN (${placeholders})`)
           .run(...ids).changes;
+        this.db.prepare(`DELETE FROM game_plate_appearances WHERE playerId IN (${placeholders})`).run(...ids);
         this.db.prepare(`DELETE FROM users WHERE id IN (${placeholders})`).run(...ids);
       }
 
@@ -2502,6 +2673,7 @@ export class LeagueStore {
         this.db.prepare('SELECT COUNT(*) AS c FROM games').get() as { c: number }
       ).c;
       this.db.prepare('UPDATE games SET homeScore = NULL, awayScore = NULL, played = 0').run();
+      this.db.prepare('DELETE FROM game_plate_appearances').run();
       this.db.prepare('DELETE FROM game_logs').run();
       this.db.prepare('DELETE FROM game_lineups').run();
 
