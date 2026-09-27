@@ -952,6 +952,8 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
+  registerPlayerStatsSheetRoutes(api, store, requireAdmin);
+
   api.get('/mail', requireAdmin, (_req: Request, res: Response) => {
     res.json(
       describeMailStatus({
