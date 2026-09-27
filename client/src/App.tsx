@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, SKILL_LEVEL_LABELS, SKILL_LEVELS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
+import { api, SKILL_LEVEL_LABELS, SKILL_LEVELS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PlayerStatsSheetStatus, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl, fileToWaiverDataUrl } from './image';
 import { applyTheme } from './theme';
@@ -3497,6 +3497,8 @@ function Admin() {
   const [mailStatus, setMailStatus] = useState<MailStatus | null>(null);
   const [mailTestBusy, setMailTestBusy] = useState(false);
   const [pendingWaivers, setPendingWaivers] = useState<PublicPlayerProfile[]>([]);
+  const [sheetStatus, setSheetStatus] = useState<PlayerStatsSheetStatus | null>(null);
+  const [sheetBusy, setSheetBusy] = useState<'sync' | 'preview' | 'csv' | null>(null);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
   const managedTeamIds = useMemo(
@@ -3534,6 +3536,12 @@ function Admin() {
       })
       .catch((e) => setError(e.message));
     api.listPendingWaivers().then(setPendingWaivers).catch((e) => setError(e.message));
+    api
+      .getPlayerStatsSheetStatus()
+      .then((status) => {
+        if (status && typeof status === 'object' && 'spreadsheetId' in status) setSheetStatus(status);
+      })
+      .catch((e) => setError(e.message));
   }
   useEffect(load, []);
 
@@ -3671,6 +3679,47 @@ function Admin() {
     }
   }
 
+  async function syncPlayerStatsSheet(dryRun: boolean) {
+    setSheetBusy(dryRun ? 'preview' : 'sync');
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.syncPlayerStatsSheet(dryRun);
+      setSheetStatus(result);
+      if (result.wrote) {
+        setMessage(
+          `Updated Google Sheet — ${result.playerCount} players across ${result.teamCount} teams` +
+            (result.freeAgentCount ? ` plus ${result.freeAgentCount} free agents` : '') +
+            '.',
+        );
+      } else if (!result.configured) {
+        setMessage(
+          `Preview ready (${result.playerCount} players). Google credentials are not on this host — download the CSV to paste into the sheet.`,
+        );
+      } else {
+        setMessage(`Preview ready — ${result.playerCount} players grouped by team. Nothing written.`);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSheetBusy(null);
+    }
+  }
+
+  async function downloadPlayerStatsCsv() {
+    setSheetBusy('csv');
+    setError(null);
+    setMessage(null);
+    try {
+      await api.downloadPlayerStatsCsv();
+      setMessage('Downloaded oakdale-player-stats.csv — paste it into the Player Stats tab.');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSheetBusy(null);
+    }
+  }
+
   async function runClearTestData() {
     setTestDataBusy(true);
     setError(null);
@@ -3766,6 +3815,59 @@ function Admin() {
             <code>SIGNUP_NOTIFY_EMAIL</code> is a real inbox. Signups still work.
           </p>
         )}
+      </div>
+
+      <div className="sheets-panel">
+        <h3>Player stats Google Sheet</h3>
+        <p className="theme-help">
+          Writes batting stats (GP, Hits, AB, AVG, 1B, 2B, 3B, HR, K, Out) to the{' '}
+          <code>Player Stats</code> tab, one section per team. Other tabs stay untouched.{' '}
+          {sheetStatus?.spreadsheetUrl ? (
+            <a href={sheetStatus.spreadsheetUrl} target="_blank" rel="noreferrer">
+              Open the sheet
+            </a>
+          ) : (
+            'Spreadsheet ID is saved on the server.'
+          )}
+        </p>
+        {sheetStatus && (
+          <p className="theme-help">
+            {sheetStatus.playerCount} players across {sheetStatus.teamCount} teams
+            {sheetStatus.freeAgentCount ? ` · ${sheetStatus.freeAgentCount} free agents` : ''}.
+            {sheetStatus.configured
+              ? ' Google credentials are configured — Update writes the live sheet.'
+              : ' No Google credentials on this host — use Preview or Download CSV and paste.'}
+            {sheetStatus.lastSyncAt
+              ? ` Last ${sheetStatus.lastSyncStatus ?? 'sync'}: ${new Date(sheetStatus.lastSyncAt).toLocaleString()}.`
+              : ''}
+          </p>
+        )}
+        <div className="test-data-actions">
+          <button
+            type="button"
+            className="primary-btn"
+            disabled={sheetBusy !== null}
+            onClick={() => void syncPlayerStatsSheet(false)}
+          >
+            {sheetBusy === 'sync' ? 'Updating…' : 'Update Google Sheet'}
+          </button>
+          <button
+            type="button"
+            className="link-btn"
+            disabled={sheetBusy !== null}
+            onClick={() => void syncPlayerStatsSheet(true)}
+          >
+            {sheetBusy === 'preview' ? 'Previewing…' : 'Preview rows'}
+          </button>
+          <button
+            type="button"
+            className="link-btn"
+            disabled={sheetBusy !== null}
+            onClick={() => void downloadPlayerStatsCsv()}
+          >
+            {sheetBusy === 'csv' ? 'Downloading…' : 'Download CSV'}
+          </button>
+        </div>
       </div>
 
       <div className="test-data-panel">

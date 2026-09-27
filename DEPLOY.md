@@ -9,6 +9,7 @@ Once this site is deployed on a VM or host, it is **independent of any personal 
 - Set `SEED_DEMO_USERS=false` so the demo manager/player logins are **not** created. Demo passwords (`DEMO_MANAGER_PASSWORD` / `DEMO_PLAYER_PASSWORD`) only apply when demo seeding is left on.
 - `NODE_ENV=production` enables secure cookies (HTTPS). For local HTTP only, set `INSECURE_COOKIES=true`.
 - Signup emails (welcome to the player + a notice to the commissioner) need a mail provider. Set `SIGNUP_NOTIFY_EMAIL` to a real inbox, then either `RESEND_API_KEY` or SMTP (`SMTP_URL` / `SMTP_HOST` + `SMTP_USER` + `SMTP_PASS`). Set `MAIL_FROM` to an address your provider allows. `PUBLIC_APP_URL` is the link used in those emails. If mail is not configured, signup still works. Admins can send a test from the Admin tab.
+- Optional player-stats Google Sheet sync uses `SPREADSHEET_ID` plus `GOOGLE_SERVICE_ACCOUNT_JSON` or `GOOGLE_SHEETS_CREDENTIALS`. Share the sheet with the service account as Editor. The app boots and serves Admin CSV/preview without those secrets. On Fly: `fly secrets set GOOGLE_SERVICE_ACCOUNT_JSON='...'`.
 
 On first boot, if `league.db` is empty and a legacy `$DATA_DIR/league.json` is present, that file is imported into SQLite and renamed to `league.json.imported` (it is not deleted). Subsequent boots use only the SQLite file.
 

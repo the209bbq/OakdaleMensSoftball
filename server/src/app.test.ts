@@ -2507,3 +2507,78 @@ describe('Game lineups', () => {
   });
 });
 
+describe('Admin player stats Google Sheet export', () => {
+  it('blocks anonymous and player callers from the sheet endpoints', async () => {
+    const { app, store } = makeApp();
+    store.registerUser({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    const anon = await request(app).get('/api/admin/player-stats-sheet');
+    expect(anon.status).toBe(401);
+    const player = await loginAs(app, 'p@b.com', 'longenough');
+    const denied = await player.get('/api/admin/player-stats-sheet');
+    expect(denied.status).toBe(403);
+  });
+
+  it('groups attached players by team, keeps free agents, and dry-runs the payload', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    store.registerUser({ email: 'pat@b.com', name: 'Pat Dinger', password: 'longenough' });
+    store.registerUser({ email: 'ada@b.com', name: 'Ada Beer', password: 'longenough' });
+    store.registerUser({ email: 'fa@b.com', name: 'Free Agent Joe', password: 'longenough' });
+    store.registerUser({ email: 'mgronly@b.com', name: 'Clip Manager', password: 'longenough' });
+    const pat = store.getUserByEmail('pat@b.com')!;
+    const ada = store.getUserByEmail('ada@b.com')!;
+    store.setUserTeam(pat.id, TEAM_OWN);
+    store.setUserTeam(ada.id, TEAM_OTHER);
+    store.setUserRole(store.getUserByEmail('mgronly@b.com')!.id, 'manager', TEAM_OWN, false);
+    store.addPlayer({ teamId: TEAM_OWN, name: 'Legacy Guy', number: 44, position: 'OF' });
+    store.updateProfile(pat.id, { name: 'Pat Dinger', number: 12, position: 'SS' });
+
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2027-05-05' });
+    const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
+    const ownGame = games.find((g) => g.awayTeamId === TEAM_OWN || g.homeTeamId === TEAM_OWN)!;
+    await admin.put(`/api/games/${ownGame.id}/lineups/${TEAM_OWN}`).send({ playerIds: [pat.id] });
+    await admin.post(`/api/games/${ownGame.id}/scorelog/start`);
+    const side = ownGame.awayTeamId === TEAM_OWN ? 'away' : 'home';
+    if (side === 'home') {
+      await admin.post(`/api/games/${ownGame.id}/scorelog/outs`).send({ delta: 3 });
+    }
+    await admin.post(`/api/games/${ownGame.id}/scorelog/play`).send({ result: 'double' });
+    await admin.post(`/api/games/${ownGame.id}/scorelog/play`).send({ result: 'out' });
+
+    const status = await admin.get('/api/admin/player-stats-sheet');
+    expect(status.status).toBe(200);
+    expect(status.body.spreadsheetId).toBe('1LwMlsDCZBEqCQqb2qW0lhpTlWNNa-OpcGOPQnbqj1wc');
+    expect(status.body.tab).toBe('Player Stats');
+    expect(status.body.configured).toBe(false);
+    expect(status.body.teamCount).toBe(8);
+    expect(status.body.playerCount).toBeGreaterThanOrEqual(4);
+    expect(status.body.freeAgentCount).toBe(1);
+    expect(store.getSheetsSettings().spreadsheetId).toBe('1LwMlsDCZBEqCQqb2qW0lhpTlWNNa-OpcGOPQnbqj1wc');
+
+    const sync = await admin.post('/api/admin/player-stats-sheet/sync').send({ dryRun: true });
+    expect(sync.status).toBe(200);
+    expect(sync.body.dryRun).toBe(true);
+    expect(sync.body.wrote).toBe(false);
+    expect(sync.body.sections).toHaveLength(9);
+    const dingers = sync.body.sections.find((s: { teamId: string }) => s.teamId === TEAM_OWN);
+    const beers = sync.body.sections.find((s: { teamId: string }) => s.teamId === TEAM_OTHER);
+    const fa = sync.body.sections.find((s: { teamId: string | null }) => s.teamId === null);
+    expect(dingers.players.map((p: { player: string }) => p.player)).toEqual(
+      expect.arrayContaining(['Pat Dinger', 'Legacy Guy']),
+    );
+    expect(dingers.players.map((p: { player: string }) => p.player)).not.toContain('Clip Manager');
+    expect(dingers.players.map((p: { player: string }) => p.player)).not.toContain('Commish');
+    expect(beers.players.map((p: { player: string }) => p.player)).toContain('Ada Beer');
+    expect(fa.players.map((p: { player: string }) => p.player)).toEqual(['Free Agent Joe']);
+    const patRow = dingers.players.find((p: { player: string }) => p.player === 'Pat Dinger');
+    expect(patRow).toMatchObject({ gp: 1, hits: 1, ab: 2, avg: '.500', doubles: 1, outs: 1 });
+
+    const csv = await admin.get('/api/admin/player-stats-sheet.csv');
+    expect(csv.status).toBe(200);
+    expect(csv.headers['content-type']).toMatch(/text\/csv/);
+    expect(csv.text).toContain('Nothin but Dingers');
+    expect(csv.text).toContain('Pat Dinger,12,SS,1,1,2,.500,0,1,0,0,0,1');
+    expect(csv.text).toContain('Free Agents (unattached)');
+    expect(csv.text).toContain('Da Beers');
+  });
+});

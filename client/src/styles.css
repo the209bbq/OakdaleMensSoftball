@@ -2601,6 +2601,24 @@ body {
   padding: 0.45rem 0.95rem;
 }
 
+.sheets-panel {
+  margin: 0.2rem 0 1.4rem;
+}
+
+.sheets-panel h3 {
+  margin: 0 0 0.35rem;
+}
+
+.sheets-panel .primary-btn {
+  margin-top: 0.15rem;
+  padding: 0.45rem 0.95rem;
+}
+
+.sheets-panel .theme-help a {
+  color: var(--navy);
+  font-weight: 600;
+}
+
 .theme-panel {
   margin: 0.2rem 0 1.4rem;
 }

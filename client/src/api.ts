@@ -360,6 +360,53 @@ export interface TestDataClearResult {
   gamesReset: number;
 }
 
+export interface PlayerStatsSheetStatus {
+  spreadsheetId: string;
+  spreadsheetUrl: string;
+  tab: string;
+  configured: boolean;
+  lastSyncAt: string | null;
+  lastSyncStatus: 'ok' | 'dry-run' | 'error' | null;
+  lastSyncError: string | null;
+  lastSyncPlayerCount: number | null;
+  teamCount: number;
+  playerCount: number;
+  freeAgentCount: number;
+}
+
+export interface PlayerStatsSheetRow {
+  player: string;
+  number: string;
+  position: string;
+  gp: number;
+  hits: number;
+  ab: number;
+  avg: string;
+  singles: number;
+  doubles: number;
+  triples: number;
+  homers: number;
+  strikeouts: number;
+  outs: number;
+}
+
+export interface PlayerStatsSheetSection {
+  teamId: string | null;
+  teamName: string;
+  players: PlayerStatsSheetRow[];
+}
+
+export interface PlayerStatsSheetSyncResult extends PlayerStatsSheetStatus {
+  ok: true;
+  dryRun: boolean;
+  wrote: boolean;
+  createdTab?: boolean;
+  updatedCells?: number;
+  updatedAt: string;
+  sections: PlayerStatsSheetSection[];
+  values: Array<Array<string | number>>;
+}
+
 import type { Theme, ThemeUpdate } from './theme';
 export type { Theme, ThemeId, ThemePreset, ThemeUpdate } from './theme';
 
@@ -522,6 +569,29 @@ export const api = {
     request<TestDataGenerateResult>('/api/admin/test-data/generate', { method: 'POST' }),
   clearTestData: () =>
     request<TestDataClearResult>('/api/admin/test-data/clear', { method: 'POST' }),
+
+  getPlayerStatsSheetStatus: () => request<PlayerStatsSheetStatus>('/api/admin/player-stats-sheet'),
+  syncPlayerStatsSheet: (dryRun = false) =>
+    request<PlayerStatsSheetSyncResult>('/api/admin/player-stats-sheet/sync', {
+      method: 'POST',
+      body: JSON.stringify({ dryRun }),
+    }),
+  downloadPlayerStatsCsv: async () => {
+    const res = await fetch('/api/admin/player-stats-sheet.csv', { credentials: 'same-origin' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error ?? `Request failed: ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'oakdale-player-stats.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
 
   getMailStatus: () => request<MailStatus>('/api/mail'),
   sendTestMail: () => request<{ ok: true; to: string }>('/api/mail/test', { method: 'POST' }),

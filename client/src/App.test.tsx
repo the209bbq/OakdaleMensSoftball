@@ -1092,6 +1092,95 @@ describe('App', () => {
     });
   });
 
+  it('lets an admin preview, sync, and download team-categorized player stats', async () => {
+    const adminUser = {
+      id: 'u-admin',
+      email: 'admin@oakdale.local',
+      name: 'Commish',
+      role: 'admin' as const,
+      teamId: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const sheetStatus = {
+      spreadsheetId: '1LwMlsDCZBEqCQqb2qW0lhpTlWNNa-OpcGOPQnbqj1wc',
+      spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/1LwMlsDCZBEqCQqb2qW0lhpTlWNNa-OpcGOPQnbqj1wc/edit',
+      tab: 'Player Stats',
+      configured: false,
+      lastSyncAt: null,
+      lastSyncStatus: null,
+      lastSyncError: null,
+      lastSyncPlayerCount: null,
+      teamCount: 8,
+      playerCount: 3,
+      freeAgentCount: 1,
+    };
+    const createObjectURL = vi.fn(() => 'blob:player-stats');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: adminUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/admin/player-stats-sheet/sync') && init?.method === 'POST') {
+          const body = JSON.parse(String(init.body ?? '{}')) as { dryRun?: boolean };
+          return jsonOk({
+            ...sheetStatus,
+            ok: true,
+            dryRun: body.dryRun === true,
+            wrote: false,
+            updatedAt: '2026-09-27T04:00:00.000Z',
+            sections: [],
+            values: [],
+          });
+        }
+        if (url.includes('/api/admin/player-stats-sheet.csv')) {
+          return {
+            ok: true,
+            blob: async () => new Blob(['Player,GP\nPat,1\n'], { type: 'text/csv' }),
+          } as Response;
+        }
+        if (url.includes('/api/admin/player-stats-sheet')) return jsonOk(sheetStatus);
+        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/manager-emails')) return jsonOk([]);
+        if (url.includes('/api/users')) return jsonOk([adminUser]);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Admin' }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Player stats Google Sheet' })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('link', { name: 'Open the sheet' })).toHaveAttribute(
+      'href',
+      sheetStatus.spreadsheetUrl,
+    );
+    expect(screen.getByText(/3 players across 8 teams/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview rows' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Preview ready \(3 players\)/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update Google Sheet' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Google credentials are not on this host/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download CSV' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Downloaded oakdale-player-stats.csv/)).toBeInTheDocument();
+    });
+    expect(createObjectURL).toHaveBeenCalled();
+  });
+
   it('lets an admin switch the league color scheme from the Admin tab', async () => {
     const adminUser = {
       id: 'u-admin',

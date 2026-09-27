@@ -20,6 +20,7 @@ primary_region = "iad"
   SEED_DEMO_USERS = "false"
   PORT = "3001"
   PUBLIC_APP_URL = "https://oakdale-mens-softball.fly.dev"
+  SPREADSHEET_ID = "1LwMlsDCZBEqCQqb2qW0lhpTlWNNa-OpcGOPQnbqj1wc"
 
 [http_service]
   internal_port = 3001

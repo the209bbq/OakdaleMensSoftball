@@ -20,6 +20,7 @@ import {
   type ScoreSide,
   type ScoreStat,
 } from './gameScoring.js';
+import { queuePlayerStatsSheetSync, registerPlayerStatsSheetRoutes } from './playerStatsSheetApi.js';
 import {
   collectNotifyEmails,
   createMailer,
@@ -619,6 +620,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       const { homeScore, awayScore } = req.body ?? {};
       const updated = store.recordResult(req.params.id, Number(homeScore), Number(awayScore), req.user!.id);
       res.json(decorateGame(store, updated, req.user));
+      queuePlayerStatsSheetSync(store);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
