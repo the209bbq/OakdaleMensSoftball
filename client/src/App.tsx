@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, SKILL_LEVEL_LABELS, SKILL_LEVELS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
+import { api, SKILL_LEVEL_LABELS, SKILL_LEVELS, TEAM_ROSTER_SPOTS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PlayerStatsSheetStatus, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl, fileToWaiverDataUrl } from './image';
 import { applyTheme } from './theme';
@@ -2380,6 +2380,9 @@ function lineupBadge(row: TeamBoardRow, fullLineupSize: number) {
       <span className="lineup-count">
         {row.checkedInCount}/{fullLineupSize} in
       </span>
+      <span className="lineup-count">
+        {row.rosterFilled}/{TEAM_ROSTER_SPOTS} roster
+      </span>
     </span>
   );
 }
@@ -2627,6 +2630,9 @@ function TeamsBoard({
                   {team.manager && (
                     <span className="team-board-mgr">Manager: {team.manager.name}</span>
                   )}
+                  <span className="team-board-roster">
+                    {team.rosterFilled}/{board.rosterSpots ?? TEAM_ROSTER_SPOTS} spots
+                  </span>
                 </span>
                 {lineupBadge(team, board.fullLineupSize)}
               </button>
@@ -3143,70 +3149,102 @@ function TeamPage({
 
       {message && <p className="message">{message}</p>}
 
-      <h3 className="roster-heading">Players</h3>
-      {members.length === 0 ? (
-        <p className="member-empty">No registered members yet.</p>
-      ) : (
-        <ul className="member-list">
-          {members.map((m) => (
-            <li key={m.id} className="member-row">
-              <button type="button" className="member-open" onClick={() => onOpenPlayer(m.id)}>
-              {m.photoUrl ? (
-                <img className="avatar member-avatar" src={m.photoUrl} alt="" />
-              ) : (
-                <span className="avatar avatar-initials member-avatar" aria-hidden="true">
-                  {initials(m.name)}
-                </span>
-              )}
+      <h3 className="roster-heading">
+        Roster · {members.length + roster.length}/{TEAM_ROSTER_SPOTS}
+      </h3>
+      <ul className="member-list roster-spots">
+        {members.map((m) => (
+          <li key={m.id} className="member-row">
+            <button type="button" className="member-open" onClick={() => onOpenPlayer(m.id)}>
+            {m.photoUrl ? (
+              <img className="avatar member-avatar" src={m.photoUrl} alt="" />
+            ) : (
+              <span className="avatar avatar-initials member-avatar" aria-hidden="true">
+                {initials(m.name)}
+              </span>
+            )}
+            <div className="member-info">
+              <span className="member-name">
+                <span>{m.name}</span>
+                {m.isManager ? <span className="manager-badge">Manager</span> : null}
+              </span>
+              <span className="member-meta">
+                {[m.number != null ? `#${m.number}` : null, m.position, skillLabel(m.skillLevel)]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+            </div>
+            </button>
+            {canEdit && (
+              <span className={`waiver-chip is-${m.waiverStatus ?? 'none'}`}>{waiverLabel(m.waiverStatus)}</span>
+            )}
+            {currentWeek && (
+              <span
+                className={`checkin-marker${m.checkIn ? ` is-${m.checkIn}` : ' is-none'}`}
+                title={
+                  m.checkIn === 'in'
+                    ? `${m.name} is in`
+                    : m.checkIn === 'out'
+                      ? `${m.name} can't make it`
+                      : `${m.name} hasn't checked in`
+                }
+                aria-label={
+                  m.checkIn === 'in'
+                    ? `${m.name} is in`
+                    : m.checkIn === 'out'
+                      ? `${m.name} can't make it`
+                      : `${m.name} hasn't checked in`
+                }
+              >
+                {checkInMark(m.checkIn)}
+              </span>
+            )}
+            {canEdit && !m.isManager && (
+              <button
+                className="link-btn danger"
+                onClick={() => handleRemoveMember(m.id)}
+                aria-label={`Remove ${m.name} from team`}
+              >
+                Remove from team
+              </button>
+            )}
+          </li>
+        ))}
+        {roster.map((p) => (
+          <li key={p.id} className="member-row is-unregistered">
+            <span className="avatar avatar-initials member-avatar" aria-hidden="true">
+              {initials(p.name)}
+            </span>
+            <div className="member-info">
+              <span className="member-name">{p.name}</span>
+              <span className="member-meta">
+                {[`#${p.number}`, p.position, 'Unregistered'].filter(Boolean).join(' · ')}
+              </span>
+            </div>
+            {canEdit && (
+              <button className="link-btn danger" onClick={() => handleRemove(p.id)} aria-label={`Remove ${p.name}`}>
+                Remove
+              </button>
+            )}
+          </li>
+        ))}
+        {Array.from({ length: Math.max(0, TEAM_ROSTER_SPOTS - members.length - roster.length) }, (_, i) => {
+          const spot = members.length + roster.length + i + 1;
+          return (
+            <li key={`open-${spot}`} className="member-row is-open">
+              <span className="avatar member-avatar roster-spot-num" aria-hidden="true">
+                {spot}
+              </span>
               <div className="member-info">
-                <span className="member-name">
-                  <span>{m.name}</span>
-                  {m.isManager ? <span className="manager-badge">Manager</span> : null}
-                </span>
+                <span className="member-name">Open spot</span>
                 <span className="member-meta">
-                  {[m.number != null ? `#${m.number}` : null, m.position, skillLabel(m.skillLevel)]
-                    .filter(Boolean)
-                    .join(' · ')}
+                  Spot {spot} of {TEAM_ROSTER_SPOTS}
                 </span>
               </div>
-              </button>
-              {canEdit && (
-                <span className={`waiver-chip is-${m.waiverStatus ?? 'none'}`}>{waiverLabel(m.waiverStatus)}</span>
-              )}
-              {currentWeek && (
-                <span
-                  className={`checkin-marker${m.checkIn ? ` is-${m.checkIn}` : ' is-none'}`}
-                  title={
-                    m.checkIn === 'in'
-                      ? `${m.name} is in`
-                      : m.checkIn === 'out'
-                        ? `${m.name} can't make it`
-                        : `${m.name} hasn't checked in`
-                  }
-                  aria-label={
-                    m.checkIn === 'in'
-                      ? `${m.name} is in`
-                      : m.checkIn === 'out'
-                        ? `${m.name} can't make it`
-                        : `${m.name} hasn't checked in`
-                  }
-                >
-                  {checkInMark(m.checkIn)}
-                </span>
-              )}
-              {canEdit && !m.isManager && (
-                <button
-                  className="link-btn danger"
-                  onClick={() => handleRemoveMember(m.id)}
-                  aria-label={`Remove ${m.name} from team`}
-                >
-                  Remove from team
-                </button>
-              )}
             </li>
-          ))}
-        </ul>
-      )}
+          );
+        })}
+      </ul>
 
       {showAddRegistered && (
         <form className="add-form" onSubmit={handleAddMember}>
@@ -3238,34 +3276,6 @@ function TeamPage({
       {canEdit && !freeAgencyOpen && user?.role === 'manager' && (
         <p className="muted-copy">Free agency closed — playoffs have started.</p>
       )}
-
-      <h3 className="roster-heading">Unregistered</h3>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Player</th>
-            <th>Position</th>
-            {canEdit && <th />}
-          </tr>
-        </thead>
-        <tbody>
-          {roster.map((p) => (
-            <tr key={p.id}>
-              <td>{p.number}</td>
-              <td className="team-cell">{p.name}</td>
-              <td>{p.position}</td>
-              {canEdit && (
-                <td>
-                  <button className="link-btn danger" onClick={() => handleRemove(p.id)} aria-label={`Remove ${p.name}`}>
-                    Remove
-                  </button>
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
 
       {canEdit ? (
         <form className="add-form" onSubmit={handleAdd}>
@@ -3497,6 +3507,8 @@ function Admin() {
   const [mailStatus, setMailStatus] = useState<MailStatus | null>(null);
   const [mailTestBusy, setMailTestBusy] = useState(false);
   const [pendingWaivers, setPendingWaivers] = useState<PublicPlayerProfile[]>([]);
+  const [sheetStatus, setSheetStatus] = useState<PlayerStatsSheetStatus | null>(null);
+  const [sheetBusy, setSheetBusy] = useState<'sync' | 'preview' | 'csv' | null>(null);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
   const managedTeamIds = useMemo(
@@ -3534,6 +3546,12 @@ function Admin() {
       })
       .catch((e) => setError(e.message));
     api.listPendingWaivers().then(setPendingWaivers).catch((e) => setError(e.message));
+    api
+      .getPlayerStatsSheetStatus()
+      .then((status) => {
+        if (status && typeof status === 'object' && 'spreadsheetId' in status) setSheetStatus(status);
+      })
+      .catch((e) => setError(e.message));
   }
   useEffect(load, []);
 
@@ -3671,6 +3689,47 @@ function Admin() {
     }
   }
 
+  async function syncPlayerStatsSheet(dryRun: boolean) {
+    setSheetBusy(dryRun ? 'preview' : 'sync');
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.syncPlayerStatsSheet(dryRun);
+      setSheetStatus(result);
+      if (result.wrote) {
+        setMessage(
+          `Updated Google Sheet — ${result.playerCount} players across ${result.teamCount} teams` +
+            (result.freeAgentCount ? ` plus ${result.freeAgentCount} free agents` : '') +
+            '.',
+        );
+      } else if (!result.configured) {
+        setMessage(
+          `Preview ready (${result.playerCount} players). Google credentials are not on this host — download the CSV to paste into the sheet.`,
+        );
+      } else {
+        setMessage(`Preview ready — ${result.playerCount} players grouped by team. Nothing written.`);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSheetBusy(null);
+    }
+  }
+
+  async function downloadPlayerStatsCsv() {
+    setSheetBusy('csv');
+    setError(null);
+    setMessage(null);
+    try {
+      await api.downloadPlayerStatsCsv();
+      setMessage('Downloaded oakdale-player-stats.csv — paste it into the Player Stats tab.');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSheetBusy(null);
+    }
+  }
+
   async function runClearTestData() {
     setTestDataBusy(true);
     setError(null);
@@ -3766,6 +3825,59 @@ function Admin() {
             <code>SIGNUP_NOTIFY_EMAIL</code> is a real inbox. Signups still work.
           </p>
         )}
+      </div>
+
+      <div className="sheets-panel">
+        <h3>Player stats Google Sheet</h3>
+        <p className="theme-help">
+          Writes batting stats (GP, Hits, AB, AVG, 1B, 2B, 3B, HR, K, Out) to the{' '}
+          <code>Player Stats</code> tab. Each team gets 15 roster spots. Other tabs stay untouched.{' '}
+          {sheetStatus?.spreadsheetUrl ? (
+            <a href={sheetStatus.spreadsheetUrl} target="_blank" rel="noreferrer">
+              Open the sheet
+            </a>
+          ) : (
+            'Spreadsheet ID is saved on the server.'
+          )}
+        </p>
+        {sheetStatus && (
+          <p className="theme-help">
+            {sheetStatus.playerCount} players across {sheetStatus.teamCount} teams
+            {sheetStatus.freeAgentCount ? ` · ${sheetStatus.freeAgentCount} free agents` : ''}.
+            {sheetStatus.configured
+              ? ' Google credentials are configured — Update writes the live sheet.'
+              : ' No Google credentials on this host — use Preview or Download CSV and paste.'}
+            {sheetStatus.lastSyncAt
+              ? ` Last ${sheetStatus.lastSyncStatus ?? 'sync'}: ${new Date(sheetStatus.lastSyncAt).toLocaleString()}.`
+              : ''}
+          </p>
+        )}
+        <div className="test-data-actions">
+          <button
+            type="button"
+            className="primary-btn"
+            disabled={sheetBusy !== null}
+            onClick={() => void syncPlayerStatsSheet(false)}
+          >
+            {sheetBusy === 'sync' ? 'Updating…' : 'Update Google Sheet'}
+          </button>
+          <button
+            type="button"
+            className="link-btn"
+            disabled={sheetBusy !== null}
+            onClick={() => void syncPlayerStatsSheet(true)}
+          >
+            {sheetBusy === 'preview' ? 'Previewing…' : 'Preview rows'}
+          </button>
+          <button
+            type="button"
+            className="link-btn"
+            disabled={sheetBusy !== null}
+            onClick={() => void downloadPlayerStatsCsv()}
+          >
+            {sheetBusy === 'csv' ? 'Downloading…' : 'Download CSV'}
+          </button>
+        </div>
       </div>
 
       <div className="test-data-panel">

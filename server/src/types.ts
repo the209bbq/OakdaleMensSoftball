@@ -241,6 +241,7 @@ export interface FreeAgent {
 /** One team row on the Teams board. */
 export interface TeamBoardRow extends Team {
   memberCount: number;
+  rosterFilled: number;
   checkedInCount: number;
   lineupStatus: LineupStatus;
   manager: { name: string; onRoster: boolean } | null;
@@ -251,6 +252,7 @@ export interface TeamBoardRow extends Team {
 export interface TeamBoard {
   currentWeek: CurrentWeek | null;
   fullLineupSize: number;
+  rosterSpots: number;
   freeAgencyOpen: boolean;
   lastRegularSeasonDate: string | null;
   freeAgents: FreeAgent[];

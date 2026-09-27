@@ -44,6 +44,30 @@ Then open http://localhost:5173. The Vite dev server proxies `/api/*` to the API
 | GET | `/api/teams/:id/roster` | A team and its roster |
 | POST | `/api/players` | Add a player (`teamId`, `name`, `number`, `position`) |
 | POST | `/api/games/:id/result` | Record a game result (`homeScore`, `awayScore`) |
+| GET | `/api/admin/player-stats-sheet` | Admin: Google Sheet sync status (spreadsheet ID is persisted) |
+| POST | `/api/admin/player-stats-sheet/sync` | Admin: write player stats, or `{ "dryRun": true }` for the payload |
+| GET | `/api/admin/player-stats-sheet.csv` | Admin: team-categorized batting CSV (same layout as the sheet) |
+
+## Google Sheet (player stats)
+
+David's workbook is [Softball Stats](https://docs.google.com/spreadsheets/d/1LwMlsDCZBEqCQqb2qW0lhpTlWNNa-OpcGOPQnbqj1wc/edit). When we inspected it, it had a single empty `Sheet1` tab (cell A1 was `1`) and no team or player rows yet. The app writes a dedicated **Player Stats** tab only — schedule/standings/`Sheet1` are left alone.
+
+Layout (one section per team with **15 roster spots**, then Free Agents if anyone is unattached):
+
+`Player | # | Pos | GP | Hits | AB | AVG | 1B | 2B | 3B | HR | K | Out`
+
+On the Admin tab: **Update Google Sheet**, **Preview rows**, and **Download CSV**. After a game result is saved, the server also tries a background push when credentials exist.
+
+### Auth David still needs
+
+The site boots without Google credentials. To write the live sheet:
+
+1. In Google Cloud, enable the **Google Sheets API**.
+2. Create a **service account** and download its JSON key.
+3. Share the spreadsheet with that `client_email` as **Editor**.
+4. Set `SPREADSHEET_ID=1LwMlsDCZBEqCQqb2qW0lhpTlWNNa-OpcGOPQnbqj1wc` and either `GOOGLE_SERVICE_ACCOUNT_JSON` (the JSON string) or `GOOGLE_SHEETS_CREDENTIALS` (path to the JSON file).
+
+Do not commit the key. Until those secrets exist, use **Preview rows** or **Download CSV** and paste into the Player Stats tab.
 
 ## Data
 

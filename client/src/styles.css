@@ -381,7 +381,8 @@ body {
   color: var(--heading);
 }
 
-.team-board-mgr {
+.team-board-mgr,
+.team-board-roster {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 600;
@@ -709,6 +710,16 @@ body {
   gap: 0.7rem;
   padding: 0.55rem 0;
   border-bottom: 1px solid var(--border);
+}
+
+.member-row.is-open {
+  opacity: 0.72;
+}
+
+.roster-spot-num {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--muted);
 }
 
 .member-avatar {
@@ -2599,6 +2610,24 @@ body {
 .mail-panel .primary-btn {
   margin-top: 0.15rem;
   padding: 0.45rem 0.95rem;
+}
+
+.sheets-panel {
+  margin: 0.2rem 0 1.4rem;
+}
+
+.sheets-panel h3 {
+  margin: 0 0 0.35rem;
+}
+
+.sheets-panel .primary-btn {
+  margin-top: 0.15rem;
+  padding: 0.45rem 0.95rem;
+}
+
+.sheets-panel .theme-help a {
+  color: var(--navy);
+  font-weight: 600;
 }
 
 .theme-panel {
