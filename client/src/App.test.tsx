@@ -33,6 +33,8 @@ const scheduleGames = [
       awayWalks: 0,
       homeOuts: 0,
       awayOuts: 0,
+      homeBeers: 0,
+      awayBeers: 0,
       currentOuts: 0,
       awayLine: [0, 0, 0, 0, 0, 0, 0],
       homeLine: [0, 0, 0, 0, 0, 0, 0],
@@ -602,6 +604,9 @@ describe('App', () => {
     });
     expect(screen.getByRole('button', { name: 'Increase Oakdale Tigers R' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Increase Oakdale Tigers H' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Increase Oakdale Tigers beers' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Increase Da Beers beers' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Beers drank')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Increase Oakdale Tigers inning/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Increase Oakdale Tigers R' }));
     await waitFor(() => {

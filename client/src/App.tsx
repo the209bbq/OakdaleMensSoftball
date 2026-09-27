@@ -1418,6 +1418,8 @@ const EMPTY_BOX: GameBoxScore = {
   awayWalks: 0,
   homeOuts: 0,
   awayOuts: 0,
+  homeBeers: 0,
+  awayBeers: 0,
   currentOuts: 0,
   awayLine: EMPTY_LINE,
   homeLine: EMPTY_LINE,
@@ -2048,6 +2050,16 @@ function LiveScoreboard({
         busy={busy}
         onRun={(action) => run(action)}
       />
+      <BeerTracker
+        gameId={game.id}
+        awayName={game.awayTeamName}
+        homeName={game.homeTeamName}
+        awayBeers={box.awayBeers}
+        homeBeers={box.homeBeers}
+        canScore={canScore}
+        busy={busy}
+        onRun={(action) => run(action)}
+      />
       <div className="inning-outs">
         <div className="inning-outs-copy">
           <span className="mlb-outs-label">Outs</span>
@@ -2623,6 +2635,56 @@ function LineScore({
             />
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function BeerTracker({
+  gameId,
+  awayName,
+  homeName,
+  awayBeers,
+  homeBeers,
+  canScore,
+  busy,
+  onRun,
+}: {
+  gameId: string;
+  awayName: string;
+  homeName: string;
+  awayBeers: number;
+  homeBeers: number;
+  canScore: boolean;
+  busy: boolean;
+  onRun: (action: () => Promise<Game>) => void;
+}) {
+  return (
+    <div className="beer-tracker" aria-label="Beers drank">
+      <div className="beer-side">
+        <span className="beer-team">{teamAbbr(awayName)}</span>
+        <LineCell
+          value={awayBeers}
+          canScore={canScore}
+          busy={busy}
+          decreaseLabel={`Decrease ${awayName} beers`}
+          increaseLabel={`Increase ${awayName} beers`}
+          onMinus={() => onRun(() => api.bumpScoreStat(gameId, 'away', 'beers', -1))}
+          onPlus={() => onRun(() => api.bumpScoreStat(gameId, 'away', 'beers', 1))}
+        />
+      </div>
+      <span className="beer-label">Beers</span>
+      <div className="beer-side is-home">
+        <LineCell
+          value={homeBeers}
+          canScore={canScore}
+          busy={busy}
+          decreaseLabel={`Decrease ${homeName} beers`}
+          increaseLabel={`Increase ${homeName} beers`}
+          onMinus={() => onRun(() => api.bumpScoreStat(gameId, 'home', 'beers', -1))}
+          onPlus={() => onRun(() => api.bumpScoreStat(gameId, 'home', 'beers', 1))}
+        />
+        <span className="beer-team">{teamAbbr(homeName)}</span>
       </div>
     </div>
   );

@@ -7,7 +7,7 @@ export const MANAGER_EARLY_START_MS = 2 * 60 * 60 * 1000;
 
 export type ScoringPhase = 'upcoming' | 'live' | 'grace' | 'locked';
 export type ScoreSide = 'home' | 'away';
-export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs';
+export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs' | 'beers';
 export type InningHalf = 'top' | 'bottom';
 export const PLAY_RESULTS = ['single', 'double', 'triple', 'homer', 'out', 'strikeout'] as const;
 export type PlayResult = (typeof PLAY_RESULTS)[number];
@@ -61,6 +61,8 @@ export interface GameBoxScore {
   awayWalks: number;
   homeOuts: number;
   awayOuts: number;
+  homeBeers: number;
+  awayBeers: number;
   currentOuts: number;
   awayLine: number[];
   homeLine: number[];
@@ -267,6 +269,8 @@ export const EMPTY_BOX: GameBoxScore = {
   awayWalks: 0,
   homeOuts: 0,
   awayOuts: 0,
+  homeBeers: 0,
+  awayBeers: 0,
   currentOuts: 0,
   awayLine: emptyLine(),
   homeLine: emptyLine(),
@@ -301,6 +305,8 @@ export function boxFromParts(
     awayWalks: clampStat(log?.awayWalks ?? 0),
     homeOuts: clampStat(log?.homeOuts ?? 0),
     awayOuts: clampStat(log?.awayOuts ?? 0),
+    homeBeers: clampStat(log?.homeBeers ?? 0),
+    awayBeers: clampStat(log?.awayBeers ?? 0),
     currentOuts: wrapCurrentOuts(log?.currentOuts ?? 0),
     awayLine,
     homeLine,
