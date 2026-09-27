@@ -34,14 +34,6 @@ import type {
   WaiverStatus,
 } from './types.js';
 import { SKILL_LEVELS } from './types.js';
-import {
-  buildPlayerStatsWorkbook,
-  envSpreadsheetId,
-  parseSheetsSettings,
-  type PlayerStatsWorkbook,
-  type SheetPlayerInput,
-  type SheetsSettings,
-} from './playerStatsSheet.js';
 import { createSeedData } from './seed.js';
 import { DEFAULT_LOCATION, generateRoundRobin, type GenerateOptions } from './schedule.js';
 import { hashPassword, verifyPassword } from './auth.js';
@@ -1093,93 +1085,6 @@ export class LeagueStore {
       )
       .run(JSON.stringify(next));
     return this.getTheme();
-  }
-
-  getSheetsSettings(): SheetsSettings {
-    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'sheets'").get() as
-      | { value: string }
-      | undefined;
-    return parseSheetsSettings(row?.value, envSpreadsheetId());
-  }
-
-  setSheetsSettings(partial: Partial<SheetsSettings>): SheetsSettings {
-    const next = { ...this.getSheetsSettings(), ...partial };
-    if (partial.spreadsheetId !== undefined) {
-      const id = String(partial.spreadsheetId ?? '').trim();
-      next.spreadsheetId = id || envSpreadsheetId();
-    }
-    this.db
-      .prepare(
-        "INSERT INTO settings (key, value) VALUES ('sheets', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      )
-      .run(JSON.stringify(next));
-    return next;
-  }
-
-  /**
-   * Account members on a roster, unregistered `players` rows, and free agents.
-   * Manager-only accounts and admins are omitted.
-   */
-  collectSheetPlayers(): SheetPlayerInput[] {
-    const teams = this.getTeams();
-    const seen = new Set<string>();
-    const players: SheetPlayerInput[] = [];
-
-    for (const team of teams) {
-      for (const member of this.getTeamMembers(team.id)) {
-        if (seen.has(member.id)) continue;
-        seen.add(member.id);
-        players.push({
-          id: member.id,
-          name: member.name,
-          number: member.number,
-          position: member.position,
-          teamId: team.id,
-          teamName: team.name,
-        });
-      }
-      for (const roster of this.getRoster(team.id)) {
-        if (seen.has(roster.id)) continue;
-        seen.add(roster.id);
-        players.push({
-          id: roster.id,
-          name: roster.name,
-          number: roster.number,
-          position: roster.position,
-          teamId: team.id,
-          teamName: team.name,
-        });
-      }
-    }
-
-    for (const agent of this.getFreeAgents()) {
-      if (seen.has(agent.id)) continue;
-      seen.add(agent.id);
-      players.push({
-        id: agent.id,
-        name: agent.name,
-        number: agent.number ?? null,
-        position: agent.position,
-        teamId: null,
-        teamName: null,
-      });
-    }
-
-    const stats = this.getPlayerStatsMap(players.map((player) => player.id));
-    return players.map((player) => ({
-      ...player,
-      stats: stats.get(player.id) ?? emptyBattingLine(),
-    }));
-  }
-
-  buildPlayerStatsWorkbook(updatedAt = new Date().toISOString()): PlayerStatsWorkbook {
-    const settings = this.getSheetsSettings();
-    return buildPlayerStatsWorkbook({
-      teams: this.getTeams(),
-      players: this.collectSheetPlayers(),
-      spreadsheetId: settings.spreadsheetId,
-      updatedAt,
-    });
   }
 
   /** Earliest scheduled game as a naive local datetime, or null if none. */
