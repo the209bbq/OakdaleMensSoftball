@@ -218,6 +218,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   window.history.replaceState({}, '', '/');
+  sessionStorage.clear();
+  document.body.style.overflow = '';
 });
 
 function renderApp() {
@@ -396,6 +398,15 @@ describe('App', () => {
     expect(screen.queryByText('Kerr Park')).not.toBeInTheDocument();
 
     fireEvent.click(open);
+    await waitFor(() => {
+      expect(screen.getByLabelText('Live box score')).toBeInTheDocument();
+    });
+    expect(open).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('heading', { name: 'Season Schedule' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand scoreboard' })).toBeInTheDocument();
+    expect(screen.queryByText('Kerr Park')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Game details' }));
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Da Beers at Oakdale Tigers' })).toBeInTheDocument();
     });
@@ -598,6 +609,10 @@ describe('App', () => {
     });
     fireEvent.click(screen.getAllByRole('button', { name: /open game: da beers at oakdale tigers/i })[0]);
     await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Game details' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Game details' }));
+    await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Record Single' })).toBeInTheDocument();
     });
     expect(screen.getByText('No plays yet. Tap a result to add it to the log.')).toBeInTheDocument();
@@ -667,6 +682,10 @@ describe('App', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /open game: da beers at oakdale tigers/i }));
     await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Game details' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Game details' }));
+    await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Save Oakdale Tigers lineup' })).toBeInTheDocument();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Move David down' }));
@@ -724,8 +743,89 @@ describe('App', () => {
     expect(screen.getAllByText(/LIVE/).length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole('button', { name: /open game: da beers at oakdale tigers/i })[0]);
     await waitFor(() => {
+      expect(screen.getByLabelText('Live box score')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Game details' }));
+    await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Da Beers at Oakdale Tigers' })).toBeInTheDocument();
     });
+  });
+
+  it('expands the live game log under a schedule row', async () => {
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
+    });
+    const open = screen.getByRole('button', { name: /open game: da beers at oakdale tigers/i });
+    expect(open).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(open);
+    await waitFor(() => {
+      expect(screen.getByLabelText('Live box score')).toBeInTheDocument();
+    });
+    expect(open).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('heading', { name: 'Season Schedule' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand scoreboard' })).toBeInTheDocument();
+    fireEvent.click(open);
+    expect(open).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Live box score')).not.toBeInTheDocument();
+  });
+
+  it('opens a dugout fullscreen scoreboard for live scoring and exits it', async () => {
+    const managerUser = {
+      id: 'u-mgr',
+      email: 'manager@oakdale.local',
+      name: 'David',
+      role: 'manager' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const liveGame = {
+      ...scheduleGames[0],
+      scoring: {
+        ...scheduleGames[0].scoring!,
+        phase: 'live' as const,
+        open: true,
+        liveStartedAt: '2026-09-26T19:00:00.000Z',
+        canStart: false,
+        canScore: true,
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: managerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) return jsonOk(liveGame);
+        if (url.includes('/api/schedule')) return jsonOk([liveGame]);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/messages')) return jsonOk([]);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /open game: da beers at oakdale tigers/i })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Expand dugout scoreboard' })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Record Single' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand dugout scoreboard' }));
+    expect(screen.getByRole('dialog', { name: 'Dugout scoreboard' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Exit dugout' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Record HR' })).toBeInTheDocument();
+    expect(document.body.style.overflow).toBe('hidden');
+    fireEvent.click(screen.getByRole('button', { name: 'Exit dugout' }));
+    expect(screen.queryByRole('dialog', { name: 'Dugout scoreboard' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand dugout scoreboard' })).toBeInTheDocument();
+    expect(document.body.style.overflow).not.toBe('hidden');
   });
 
   it('lists teams with live lineup status and opens a team roster', async () => {
