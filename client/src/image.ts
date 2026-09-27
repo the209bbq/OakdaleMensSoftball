@@ -45,6 +45,18 @@ export async function fileToSquareDataUrl(file: File, maxEdge = MAX_PHOTO_EDGE):
   return canvas.toDataURL('image/jpeg', 0.8);
 }
 
+/** Signed waiver: keep a readable image, or pass a PDF through if it fits. */
+export async function fileToWaiverDataUrl(file: File): Promise<string> {
+  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    const src = await readFileAsDataUrl(file);
+    if (src.length > MAX_DATA_URL_CHARS) {
+      throw new Error('PDF is too large — try a photo of the signed page');
+    }
+    return src;
+  }
+  return fileToBannerDataUrl(file, 720);
+}
+
 /**
  * Resize a picked image to a banner JPEG data URL (max width 512px, quality 0.8).
  * Preserves aspect ratio. Shrinks quality if the result exceeds the stored-URL cap.

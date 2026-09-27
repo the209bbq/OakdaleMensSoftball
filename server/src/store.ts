@@ -4,6 +4,9 @@ import Database from 'better-sqlite3';
 import type {
   CheckInStatus,
   CurrentWeek,
+  FaInvite,
+  FaInviteStatus,
+  FreeAgent,
   Game,
   GameLineup,
   Landing,
@@ -13,8 +16,11 @@ import type {
   ManagerAuthorization,
   Player,
   PlayerAccount,
+  PlayerStats,
+  PublicPlayerProfile,
   PublicUser,
   Role,
+  SkillLevel,
   StandingRow,
   Suggestion,
   Team,
@@ -22,8 +28,11 @@ import type {
   TeamBoard,
   TeamMember,
   TeamMessage,
+  TeamWeekGame,
   User,
+  WaiverStatus,
 } from './types.js';
+import { SKILL_LEVELS } from './types.js';
 import { createSeedData } from './seed.js';
 import { DEFAULT_LOCATION, generateRoundRobin, type GenerateOptions } from './schedule.js';
 import { hashPassword, verifyPassword } from './auth.js';
@@ -137,6 +146,23 @@ CREATE TABLE IF NOT EXISTS users (
   number INTEGER,
   photoUrl TEXT,
   onRoster INTEGER NOT NULL DEFAULT 1,
+  createdAt TEXT NOT NULL,
+  skillLevel TEXT,
+  phone TEXT,
+  sharePhone INTEGER NOT NULL DEFAULT 0,
+  waiverUrl TEXT,
+  waiverStatus TEXT NOT NULL DEFAULT 'none',
+  waiverReviewedBy TEXT,
+  waiverReviewedAt TEXT
+);
+CREATE TABLE IF NOT EXISTS fa_invites (
+  id TEXT PRIMARY KEY,
+  fromUserId TEXT NOT NULL,
+  teamId TEXT NOT NULL,
+  toUserId TEXT NOT NULL,
+  gameId TEXT,
+  week INTEGER,
+  status TEXT NOT NULL,
   createdAt TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS pending_managers (
@@ -225,6 +251,23 @@ type UserRow = {
   photoUrl: string | null;
   onRoster?: number | null;
   createdAt: string;
+  skillLevel?: string | null;
+  phone?: string | null;
+  sharePhone?: number | null;
+  waiverUrl?: string | null;
+  waiverStatus?: string | null;
+  waiverReviewedBy?: string | null;
+  waiverReviewedAt?: string | null;
+};
+type FaInviteRow = {
+  id: string;
+  fromUserId: string;
+  teamId: string;
+  toUserId: string;
+  gameId: string | null;
+  week: number | null;
+  status: string;
+  createdAt: string;
 };
 type CheckInRow = { userId: string; week: number; status: string };
 type SuggestionRow = { id: string; text: string; authorName: string | null; createdAt: string };
@@ -288,7 +331,11 @@ function normalizeGame(g: Game): Game {
 
 function toPublicUser(user: User): PublicUser {
   const { passwordHash: _passwordHash, ...pub } = user;
-  return pub;
+  return {
+    ...pub,
+    sharePhone: user.sharePhone === true,
+    waiverStatus: user.waiverStatus ?? 'none',
+  };
 }
 
 const EMPTY_ATTENDANCE: TeamAttendance = { in: 0, out: 0, none: 0, total: 0 };
@@ -488,7 +535,66 @@ function userFromRow(row: UserRow): User {
   if (row.position) user.position = row.position;
   if (row.number != null) user.number = row.number;
   if (row.photoUrl) user.photoUrl = row.photoUrl;
+  user.skillLevel = normalizeSkillLevel(row.skillLevel);
+  user.phone = row.phone ?? null;
+  user.sharePhone = row.sharePhone === 1;
+  user.waiverUrl = row.waiverUrl ?? null;
+  user.waiverStatus = normalizeWaiverStatus(row.waiverStatus);
+  user.waiverReviewedBy = row.waiverReviewedBy ?? null;
+  user.waiverReviewedAt = row.waiverReviewedAt ?? null;
   return user;
+}
+
+function normalizeSkillLevel(value: unknown): SkillLevel | null {
+  if (typeof value !== 'string' || !value) return null;
+  return (SKILL_LEVELS as readonly string[]).includes(value) ? (value as SkillLevel) : null;
+}
+
+function normalizeWaiverStatus(value: unknown): WaiverStatus {
+  if (value === 'pending' || value === 'approved' || value === 'rejected') return value;
+  return 'none';
+}
+
+function normalizePhone(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') throw new Error('phone must be a string');
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > 24) throw new Error('phone is too long');
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length < 7) throw new Error('Enter a valid phone number');
+  return trimmed;
+}
+
+function canReviewWaiver(actor: PublicUser | undefined | null, target: Pick<User, 'teamId'>): boolean {
+  if (!actor) return false;
+  if (actor.role === 'admin') return true;
+  if (actor.role === 'manager' && actor.teamId) {
+    return !target.teamId || target.teamId === actor.teamId;
+  }
+  return false;
+}
+
+function canSeePhone(actor: PublicUser | undefined | null, target: Pick<User, 'id' | 'phone' | 'sharePhone'>): boolean {
+  if (!target.phone) return false;
+  if (!actor) return false;
+  if (actor.id === target.id) return true;
+  if (actor.role === 'admin') return true;
+  return actor.role === 'manager' && target.sharePhone === true;
+}
+
+function normalizeWaiverUrl(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') {
+    throw new Error('waiverUrl must be a data URL or empty');
+  }
+  if (!value.startsWith('data:image/') && !value.startsWith('data:application/pdf')) {
+    throw new Error('waiver must be an image or PDF');
+  }
+  if (value.length > MAX_PHOTO_URL_CHARS) {
+    throw new Error(`waiver must be ${MAX_PHOTO_URL_CHARS} characters or fewer`);
+  }
+  return value;
 }
 
 function suggestionFromRow(row: SuggestionRow): Suggestion {
@@ -564,6 +670,7 @@ export class LeagueStore {
     this.db.exec(SCHEMA);
     this.ensureUserColumns();
     this.ensureGameLogColumns();
+    this.ensureFaInvitesTable();
     if (sqlitePath) this.importLegacyJsonIfNeeded(sqlitePath);
     this.seedIfEmpty();
   }
@@ -712,7 +819,9 @@ export class LeagueStore {
       .prepare(
         `UPDATE users SET email = @email, name = @name, role = @role, teamId = @teamId,
          passwordHash = @passwordHash, position = @position, number = @number, photoUrl = @photoUrl,
-         onRoster = @onRoster, createdAt = @createdAt
+         onRoster = @onRoster, createdAt = @createdAt, skillLevel = @skillLevel, phone = @phone,
+         sharePhone = @sharePhone, waiverUrl = @waiverUrl, waiverStatus = @waiverStatus,
+         waiverReviewedBy = @waiverReviewedBy, waiverReviewedAt = @waiverReviewedAt
          WHERE id = @id`,
       )
       .run({
@@ -727,6 +836,13 @@ export class LeagueStore {
         photoUrl: user.photoUrl ?? null,
         onRoster: user.onRoster === false ? 0 : 1,
         createdAt: user.createdAt,
+        skillLevel: user.skillLevel ?? null,
+        phone: user.phone ?? null,
+        sharePhone: user.sharePhone ? 1 : 0,
+        waiverUrl: user.waiverUrl ?? null,
+        waiverStatus: user.waiverStatus ?? 'none',
+        waiverReviewedBy: user.waiverReviewedBy ?? null,
+        waiverReviewedAt: user.waiverReviewedAt ?? null,
       });
   }
 
@@ -762,30 +878,70 @@ export class LeagueStore {
   }
 
   /** Player-role accounts with no team (public-safe, no email). */
-  getFreeAgents(): Array<{ id: string; name: string }> {
+  getFreeAgents(viewer?: PublicUser | null): FreeAgent[] {
+    const invited = viewer?.role === 'manager' && viewer.teamId ? this.pendingInviteeIds(viewer.teamId) : new Set<string>();
     const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
     return rows
       .map(userFromRow)
       .filter((u) => u.role === 'player' && !u.teamId)
-      .map((u) => ({ id: u.id, name: u.name }))
+      .map((u): FreeAgent => ({
+        id: u.id,
+        name: u.name,
+        photoUrl: u.photoUrl,
+        number: u.number ?? null,
+        position: u.position,
+        skillLevel: u.skillLevel ?? null,
+        waiverStatus: u.waiverStatus,
+        invitedByMe: invited.has(u.id),
+      }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private weekGamesByTeam(): Map<string, TeamWeekGame> {
+    const current = this.getCurrentWeek();
+    const out = new Map<string, TeamWeekGame>();
+    if (!current) return out;
+    const names = new Map(this.getTeams().map((t) => [t.id, t.name]));
+    for (const game of this.getSchedule()) {
+      if (game.week !== current.week) continue;
+      out.set(game.homeTeamId, {
+        id: game.id,
+        date: game.date,
+        time: game.time,
+        field: game.field,
+        location: game.location,
+        opponentName: names.get(game.awayTeamId) ?? game.awayTeamId,
+        home: true,
+      });
+      out.set(game.awayTeamId, {
+        id: game.id,
+        date: game.date,
+        time: game.time,
+        field: game.field,
+        location: game.location,
+        opponentName: names.get(game.homeTeamId) ?? game.homeTeamId,
+        home: false,
+      });
+    }
+    return out;
   }
 
   /**
    * Teams list with live lineup status (checked-in "in" vs FULL_LINEUP_SIZE)
    * plus the current free-agent pool.
    */
-  getTeamBoard(): TeamBoard {
+  getTeamBoard(viewer?: PublicUser | null): TeamBoard {
     const teams = this.getTeams();
     const current = this.getCurrentWeek();
     const checkIns = current ? this.getCheckInsForWeek(current.week) : new Map<string, CheckInStatus>();
     const membersByTeam = this.accountMemberIdsByTeam();
+    const weekGames = this.weekGamesByTeam();
     return {
       currentWeek: current,
       fullLineupSize: FULL_LINEUP_SIZE,
       freeAgencyOpen: this.isFreeAgencyOpen(),
       lastRegularSeasonDate: this.getLastRegularSeasonDate(),
-      freeAgents: this.getFreeAgents(),
+      freeAgents: this.getFreeAgents(viewer),
       teams: teams.map((team) => {
         const memberIds = membersByTeam.get(team.id) ?? [];
         const checkedInCount = memberIds.filter((id) => checkIns.get(id) === 'in').length;
@@ -795,6 +951,7 @@ export class LeagueStore {
           checkedInCount,
           lineupStatus: checkedInCount >= FULL_LINEUP_SIZE ? 'full_lineup' : 'need_guys',
           manager: this.getTeamManager(team.id),
+          weekGame: weekGames.get(team.id) ?? null,
         };
       }),
     };
@@ -1302,12 +1459,41 @@ export class LeagueStore {
     if (!userCols.has('onRoster')) {
       this.db.exec('ALTER TABLE users ADD COLUMN onRoster INTEGER NOT NULL DEFAULT 1');
     }
+    const extras: Array<[string, string]> = [
+      ['skillLevel', 'TEXT'],
+      ['phone', 'TEXT'],
+      ['sharePhone', 'INTEGER NOT NULL DEFAULT 0'],
+      ['waiverUrl', 'TEXT'],
+      ['waiverStatus', "TEXT NOT NULL DEFAULT 'none'"],
+      ['waiverReviewedBy', 'TEXT'],
+      ['waiverReviewedAt', 'TEXT'],
+    ];
+    for (const [name, spec] of extras) {
+      if (!userCols.has(name)) {
+        this.db.exec(`ALTER TABLE users ADD COLUMN ${name} ${spec}`);
+      }
+    }
     const pendingCols = new Set(
       (this.db.prepare('PRAGMA table_info(pending_managers)').all() as Array<{ name: string }>).map((c) => c.name),
     );
     if (!pendingCols.has('onRoster')) {
       this.db.exec('ALTER TABLE pending_managers ADD COLUMN onRoster INTEGER NOT NULL DEFAULT 1');
     }
+  }
+
+  private ensureFaInvitesTable(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS fa_invites (
+        id TEXT PRIMARY KEY,
+        fromUserId TEXT NOT NULL,
+        teamId TEXT NOT NULL,
+        toUserId TEXT NOT NULL,
+        gameId TEXT,
+        week INTEGER,
+        status TEXT NOT NULL,
+        createdAt TEXT NOT NULL
+      )
+    `);
   }
 
   private ensureGameLogColumns(): void {
@@ -1504,6 +1690,8 @@ export class LeagueStore {
       onRoster: true,
       passwordHash: hashPassword(input.password),
       createdAt: new Date().toISOString(),
+      sharePhone: false,
+      waiverStatus: 'none',
     };
 
     this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
@@ -1719,6 +1907,8 @@ export class LeagueStore {
           photoUrl: u.photoUrl,
           isManager: u.role === 'manager',
           checkIn: checkIns.get(u.id) ?? null,
+          skillLevel: u.skillLevel ?? null,
+          waiverStatus: u.waiverStatus,
         }),
       )
       .sort((a, b) => {
@@ -1833,6 +2023,10 @@ export class LeagueStore {
       number?: number | null;
       photoUrl?: string | null;
       onRoster?: boolean;
+      skillLevel?: SkillLevel | null;
+      phone?: string | null;
+      sharePhone?: boolean;
+      waiverUrl?: string | null;
     },
   ): PublicUser {
     const user = this.getUserById(userId);
@@ -1857,8 +2051,195 @@ export class LeagueStore {
       if (photo) user.photoUrl = photo;
       else delete user.photoUrl;
     }
+    if (input.skillLevel !== undefined) {
+      user.skillLevel = normalizeSkillLevel(input.skillLevel);
+    }
+    if (input.phone !== undefined) {
+      user.phone = normalizePhone(input.phone);
+    }
+    if (input.sharePhone !== undefined) {
+      user.sharePhone = input.sharePhone === true;
+    }
+    if (input.waiverUrl !== undefined) {
+      const waiver = normalizeWaiverUrl(input.waiverUrl);
+      user.waiverUrl = waiver;
+      if (waiver) {
+        user.waiverStatus = 'pending';
+        user.waiverReviewedBy = null;
+        user.waiverReviewedAt = null;
+      } else {
+        user.waiverStatus = 'none';
+        user.waiverReviewedBy = null;
+        user.waiverReviewedAt = null;
+      }
+    }
     this.updateUserRow(user);
     return toPublicUser(user);
+  }
+
+  getPlayerStats(userId: string): PlayerStats {
+    const rows = this.db
+      .prepare('SELECT status FROM check_ins WHERE userId = ?')
+      .all(userId) as Array<{ status: string }>;
+    let checkedIn = 0;
+    let checkedOut = 0;
+    for (const row of rows) {
+      if (row.status === 'in') checkedIn += 1;
+      else if (row.status === 'out') checkedOut += 1;
+    }
+    return { gamesPlayed: checkedIn, checkedIn, checkedOut };
+  }
+
+  getPublicPlayer(userId: string, viewer?: PublicUser | null): PublicPlayerProfile | null {
+    const user = this.getUserById(userId);
+    if (!user || user.role === 'admin') return null;
+    const team = user.teamId ? this.getTeam(user.teamId) : undefined;
+    const review = canReviewWaiver(viewer, user);
+    const seePhone = canSeePhone(viewer, user);
+    return {
+      id: user.id,
+      name: user.name,
+      number: user.number ?? null,
+      position: user.position,
+      photoUrl: user.photoUrl,
+      skillLevel: user.skillLevel ?? null,
+      teamId: user.teamId,
+      teamName: team?.name ?? null,
+      isManager: user.role === 'manager',
+      waiverStatus: user.waiverStatus,
+      waiverUrl: review || viewer?.id === user.id ? user.waiverUrl ?? null : null,
+      canReviewWaiver: review,
+      phone: seePhone ? user.phone ?? null : null,
+      sharePhone: user.sharePhone === true,
+      canSeePhone: seePhone,
+      stats: this.getPlayerStats(user.id),
+    };
+  }
+
+  reviewWaiver(actor: PublicUser, targetId: string, status: 'approved' | 'rejected'): PublicPlayerProfile {
+    const target = this.getUserById(targetId);
+    if (!target || target.role === 'admin') throw new Error('Unknown player');
+    if (!canReviewWaiver(actor, target)) {
+      throw new Error('You can only review waivers for your team or free agents');
+    }
+    if (!target.waiverUrl) throw new Error('This player has not uploaded a waiver');
+    target.waiverStatus = status;
+    target.waiverReviewedBy = actor.id;
+    target.waiverReviewedAt = new Date().toISOString();
+    this.updateUserRow(target);
+    const profile = this.getPublicPlayer(target.id, actor);
+    if (!profile) throw new Error('Unknown player');
+    return profile;
+  }
+
+  listPendingWaivers(viewer: PublicUser): PublicPlayerProfile[] {
+    const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
+    return rows
+      .map(userFromRow)
+      .filter((u) => u.role !== 'admin' && u.waiverStatus === 'pending' && canReviewWaiver(viewer, u))
+      .map((u) => this.getPublicPlayer(u.id, viewer)!)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private pendingInviteeIds(teamId: string): Set<string> {
+    const rows = this.db
+      .prepare("SELECT toUserId FROM fa_invites WHERE teamId = ? AND status = 'pending'")
+      .all(teamId) as Array<{ toUserId: string }>;
+    return new Set(rows.map((r) => r.toUserId));
+  }
+
+  private faInviteFromRow(row: FaInviteRow): FaInvite {
+    const from = this.getUserById(row.fromUserId);
+    const to = this.getUserById(row.toUserId);
+    const team = this.getTeam(row.teamId);
+    const game = row.gameId ? this.getGame(row.gameId) : undefined;
+    return {
+      id: row.id,
+      fromUserId: row.fromUserId,
+      fromName: from?.name ?? 'Manager',
+      teamId: row.teamId,
+      teamName: team?.name ?? row.teamId,
+      toUserId: row.toUserId,
+      toName: to?.name ?? 'Player',
+      gameId: row.gameId,
+      week: row.week,
+      field: game?.field ?? null,
+      time: game?.time ?? null,
+      status: row.status as FaInviteStatus,
+      createdAt: row.createdAt,
+    };
+  }
+
+  listFaInvites(viewer: PublicUser): FaInvite[] {
+    const rows =
+      viewer.role === 'admin'
+        ? (this.db.prepare('SELECT * FROM fa_invites ORDER BY createdAt DESC').all() as FaInviteRow[])
+        : viewer.role === 'manager' && viewer.teamId
+          ? (this.db
+              .prepare('SELECT * FROM fa_invites WHERE teamId = ? OR toUserId = ? ORDER BY createdAt DESC')
+              .all(viewer.teamId, viewer.id) as FaInviteRow[])
+          : (this.db
+              .prepare('SELECT * FROM fa_invites WHERE toUserId = ? ORDER BY createdAt DESC')
+              .all(viewer.id) as FaInviteRow[]);
+    return rows.map((row) => this.faInviteFromRow(row));
+  }
+
+  createFaInvite(actor: PublicUser, toUserId: string): FaInvite {
+    if (actor.role !== 'manager' || !actor.teamId) {
+      throw new Error('Only team managers can invite free agents');
+    }
+    const target = this.getUserById(toUserId);
+    if (!target || target.role !== 'player') throw new Error('Unknown free agent');
+    if (target.teamId) throw new Error('That player is already on a team');
+    const existing = this.db
+      .prepare("SELECT id FROM fa_invites WHERE teamId = ? AND toUserId = ? AND status = 'pending'")
+      .get(actor.teamId, toUserId) as { id: string } | undefined;
+    if (existing) throw new Error('You already invited this player');
+    const weekGame = this.weekGamesByTeam().get(actor.teamId) ?? null;
+    const id = `inv${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const createdAt = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO fa_invites (id, fromUserId, teamId, toUserId, gameId, week, status, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      )
+      .run(id, actor.id, actor.teamId, toUserId, weekGame?.id ?? null, weekGame ? this.getCurrentWeek()?.week ?? null : null, createdAt);
+    return this.faInviteFromRow(
+      this.db.prepare('SELECT * FROM fa_invites WHERE id = ?').get(id) as FaInviteRow,
+    );
+  }
+
+  respondFaInvite(actor: PublicUser, inviteId: string, accept: boolean): FaInvite {
+    const row = this.db.prepare('SELECT * FROM fa_invites WHERE id = ?').get(inviteId) as FaInviteRow | undefined;
+    if (!row) throw new Error('Invite not found');
+    if (row.toUserId !== actor.id) throw new Error('This invite is not for you');
+    if (row.status !== 'pending') throw new Error('This invite is no longer open');
+    const target = this.getUserById(actor.id);
+    if (!target) throw new Error('Unknown user');
+    if (accept) {
+      if (target.teamId && target.teamId !== row.teamId) {
+        throw new Error('Leave your current team before accepting');
+      }
+      this.setUserTeam(actor.id, row.teamId);
+      this.db.prepare("UPDATE fa_invites SET status = 'accepted' WHERE id = ?").run(inviteId);
+    } else {
+      this.db.prepare("UPDATE fa_invites SET status = 'declined' WHERE id = ?").run(inviteId);
+    }
+    return this.faInviteFromRow(
+      this.db.prepare('SELECT * FROM fa_invites WHERE id = ?').get(inviteId) as FaInviteRow,
+    );
+  }
+
+  cancelFaInvite(actor: PublicUser, inviteId: string): FaInvite {
+    const row = this.db.prepare('SELECT * FROM fa_invites WHERE id = ?').get(inviteId) as FaInviteRow | undefined;
+    if (!row) throw new Error('Invite not found');
+    const owns = actor.role === 'admin' || (actor.role === 'manager' && actor.teamId === row.teamId);
+    if (!owns) throw new Error('You can only cancel your team invites');
+    if (row.status !== 'pending') throw new Error('This invite is no longer open');
+    this.db.prepare("UPDATE fa_invites SET status = 'cancelled' WHERE id = ?").run(inviteId);
+    return this.faInviteFromRow(
+      this.db.prepare('SELECT * FROM fa_invites WHERE id = ?').get(inviteId) as FaInviteRow,
+    );
   }
 
   /** Ensure an admin account exists (bootstrapped from env at startup). */

@@ -72,6 +72,64 @@ export interface StandingRow {
 
 export type Role = 'admin' | 'manager' | 'player';
 
+export const SKILL_LEVELS = ['rec', 'regular', 'competitive'] as const;
+export type SkillLevel = (typeof SKILL_LEVELS)[number];
+
+export type WaiverStatus = 'none' | 'pending' | 'approved' | 'rejected';
+
+export interface PlayerStats {
+  gamesPlayed: number;
+  checkedIn: number;
+  checkedOut: number;
+}
+
+export interface TeamWeekGame {
+  id: string;
+  date: string;
+  time: string;
+  field: string;
+  location: string;
+  opponentName: string;
+  home: boolean;
+}
+
+export interface PublicPlayerProfile {
+  id: string;
+  name: string;
+  number: number | null;
+  position?: string;
+  photoUrl?: string;
+  skillLevel: SkillLevel | null;
+  teamId: string | null;
+  teamName: string | null;
+  isManager: boolean;
+  waiverStatus: WaiverStatus;
+  waiverUrl?: string | null;
+  canReviewWaiver: boolean;
+  phone?: string | null;
+  sharePhone: boolean;
+  canSeePhone: boolean;
+  stats: PlayerStats;
+}
+
+export type FaInviteStatus = 'pending' | 'accepted' | 'declined' | 'cancelled';
+
+export interface FaInvite {
+  id: string;
+  fromUserId: string;
+  fromName: string;
+  teamId: string;
+  teamName: string;
+  toUserId: string;
+  toName: string;
+  gameId: string | null;
+  week: number | null;
+  field: string | null;
+  time: string | null;
+  status: FaInviteStatus;
+  createdAt: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -91,6 +149,14 @@ export interface User {
   position?: string;
   number?: number | null;
   photoUrl?: string;
+  skillLevel?: SkillLevel | null;
+  phone?: string | null;
+  /** When true, managers (and admin) can see this player's phone. */
+  sharePhone: boolean;
+  waiverUrl?: string | null;
+  waiverStatus: WaiverStatus;
+  waiverReviewedBy?: string | null;
+  waiverReviewedAt?: string | null;
 }
 
 /** User shape safe to return over the API (no password hash). */
@@ -122,6 +188,8 @@ export interface TeamMember {
   isManager: boolean;
   /** Current-week RSVP; null means no response. */
   checkIn: CheckInStatus | null;
+  skillLevel?: SkillLevel | null;
+  waiverStatus?: WaiverStatus;
 }
 
 /** Legacy import-only row. New signups are always players. */
@@ -154,6 +222,12 @@ export type LineupStatus = 'need_guys' | 'full_lineup';
 export interface FreeAgent {
   id: string;
   name: string;
+  photoUrl?: string;
+  number?: number | null;
+  position?: string;
+  skillLevel?: SkillLevel | null;
+  waiverStatus: WaiverStatus;
+  invitedByMe?: boolean;
 }
 
 /** One team row on the Teams board. */
@@ -162,6 +236,7 @@ export interface TeamBoardRow extends Team {
   checkedInCount: number;
   lineupStatus: LineupStatus;
   manager: { name: string; onRoster: boolean } | null;
+  weekGame: TeamWeekGame | null;
 }
 
 /** Live Teams tab payload: lineup holes + free agents until playoffs. */

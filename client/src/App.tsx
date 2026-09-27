@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, type CurrentWeek, type Game, type GameBoxScore, type GameLineup, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
+import { api, SKILL_LEVEL_LABELS, SKILL_LEVELS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
 import { useAuth } from './auth';
-import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
+import { fileToBannerDataUrl, fileToSquareDataUrl, fileToWaiverDataUrl } from './image';
 import { applyTheme } from './theme';
 
 type Tab = 'home' | 'standings' | 'schedule' | 'teams' | 'rules' | 'admin';
@@ -17,19 +17,22 @@ const TAB_TITLES: Record<Tab, string> = {
 
 const TABS = new Set<Tab>(['home', 'standings', 'schedule', 'teams', 'rules', 'admin']);
 
-type AppRoute = { tab: Tab; gameId: string | null; teamId: string | null };
+type AppRoute = { tab: Tab; gameId: string | null; teamId: string | null; playerId: string | null };
 
 function parseRoute(pathname: string): AppRoute {
   const parts = pathname.split('/').filter(Boolean);
   if (parts[0] === 'games' && parts[1]) {
-    return { tab: 'schedule', gameId: decodeURIComponent(parts[1]), teamId: null };
+    return { tab: 'schedule', gameId: decodeURIComponent(parts[1]), teamId: null, playerId: null };
+  }
+  if (parts[0] === 'players' && parts[1]) {
+    return { tab: 'teams', gameId: null, teamId: null, playerId: decodeURIComponent(parts[1]) };
   }
   const first = parts[0] === 'rosters' ? 'teams' : parts[0];
   if (first === 'teams' && parts[1]) {
-    return { tab: 'teams', gameId: null, teamId: decodeURIComponent(parts[1]) };
+    return { tab: 'teams', gameId: null, teamId: decodeURIComponent(parts[1]), playerId: null };
   }
-  if (first && TABS.has(first as Tab)) return { tab: first as Tab, gameId: null, teamId: null };
-  return { tab: 'home', gameId: null, teamId: null };
+  if (first && TABS.has(first as Tab)) return { tab: first as Tab, gameId: null, teamId: null, playerId: null };
+  return { tab: 'home', gameId: null, teamId: null, playerId: null };
 }
 
 function pathForTab(tab: Tab): string {
@@ -42,6 +45,19 @@ function pathForGame(gameId: string): string {
 
 function pathForTeam(teamId: string): string {
   return `/teams/${teamId}`;
+}
+
+function pathForPlayer(playerId: string): string {
+  return `/players/${playerId}`;
+}
+
+function skillLabel(level?: SkillLevel | null): string | null {
+  if (!level) return null;
+  return SKILL_LEVEL_LABELS[level];
+}
+
+function waiverLabel(status?: WaiverStatus | null): string {
+  return WAIVER_STATUS_LABELS[status ?? 'none'];
 }
 
 function useRoute() {
@@ -127,7 +143,7 @@ export default function App() {
           <img className="app-logo" src="/app-icon.svg" alt="" width="28" height="28" />
           <div className="app-bar-text">
             <span className="app-bar-title">Oakdale Mens Softball League</span>
-            <span className="app-bar-sub">{route.gameId ? 'Game' : TAB_TITLES[tab]}</span>
+            <span className="app-bar-sub">{route.gameId ? 'Game' : route.playerId ? 'Player' : TAB_TITLES[tab]}</span>
           </div>
           <div className="app-bar-actions">
             {canOpenTeamChat(user) && (
@@ -154,11 +170,26 @@ export default function App() {
         {tab === 'schedule' && !route.gameId && (
           <Schedule onOpenGame={(id) => navigate(pathForGame(id))} />
         )}
-        {tab === 'teams' && !route.teamId && (
-          <TeamsBoard onOpenTeam={(id) => navigate(pathForTeam(id))} onSignUp={() => openAuth('register')} />
+        {tab === 'teams' && route.playerId && (
+          <PlayerProfilePage
+            playerId={route.playerId}
+            onBack={() => navigate(pathForTab('teams'))}
+            onOpenTeam={(id) => navigate(pathForTeam(id))}
+          />
         )}
-        {tab === 'teams' && route.teamId && (
-          <TeamPage teamId={route.teamId} onBack={() => navigate(pathForTab('teams'))} />
+        {tab === 'teams' && !route.teamId && !route.playerId && (
+          <TeamsBoard
+            onOpenTeam={(id) => navigate(pathForTeam(id))}
+            onOpenPlayer={(id) => navigate(pathForPlayer(id))}
+            onSignUp={() => openAuth('register')}
+          />
+        )}
+        {tab === 'teams' && route.teamId && !route.playerId && (
+          <TeamPage
+            teamId={route.teamId}
+            onBack={() => navigate(pathForTab('teams'))}
+            onOpenPlayer={(id) => navigate(pathForPlayer(id))}
+          />
         )}
         {tab === 'rules' && <Rules />}
         {tab === 'admin' && user?.role === 'admin' && <Admin />}
@@ -290,12 +321,25 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
   const [number, setNumber] = useState(user?.number != null ? String(user.number) : '');
   const [photoUrl, setPhotoUrl] = useState<string | null>(user?.photoUrl ?? null);
   const [onRoster, setOnRoster] = useState(user?.onRoster !== false);
+  const [skillLevel, setSkillLevel] = useState<SkillLevel | ''>(user?.skillLevel ?? '');
+  const [phone, setPhone] = useState(user?.phone ?? '');
+  const [sharePhone, setSharePhone] = useState(user?.sharePhone === true);
+  const [waiverUrl, setWaiverUrl] = useState<string | null>(user?.waiverUrl ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function onPickPhoto(file: File) {
     try {
       setPhotoUrl(await fileToSquareDataUrl(file));
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function onPickWaiver(file: File) {
+    try {
+      setWaiverUrl(await fileToWaiverDataUrl(file));
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -313,6 +357,10 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
         position,
         number: parsedNumber,
         photoUrl,
+        skillLevel: skillLevel || null,
+        phone: phone.trim() || null,
+        sharePhone,
+        waiverUrl,
         ...(user?.role === 'manager' ? { onRoster } : {}),
       });
       await refresh();
@@ -365,6 +413,62 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setNumber(e.target.value)}
             />
           </label>
+          <label className="field">
+            Skill level
+            <select
+              aria-label="Skill level"
+              value={skillLevel}
+              onChange={(e) => setSkillLevel(e.target.value as SkillLevel | '')}
+            >
+              <option value="">Not set</option>
+              {SKILL_LEVELS.map((level) => (
+                <option key={level} value={level}>
+                  {SKILL_LEVEL_LABELS[level]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="phone-share">
+            <label className="field">
+              Phone
+              <input
+                aria-label="Phone number"
+                type="tel"
+                placeholder="(209) 555-0100"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={sharePhone}
+                onChange={(e) => setSharePhone(e.target.checked)}
+              />
+              Let managers see my number
+            </label>
+            <p className="muted-copy field-hint">
+              Off by default. Managers use this to reach you about a game.
+            </p>
+          </div>
+          <div className="waiver-upload">
+            <p className="waiver-status">
+              {waiverLabel(user?.waiverStatus)}
+              {waiverUrl ? ' · file attached' : ''}
+            </p>
+            <label className="field">
+              Signed waiver
+              <input
+                aria-label="Upload signed waiver"
+                type="file"
+                accept="image/*,.pdf,application/pdf"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void onPickWaiver(file);
+                }}
+              />
+            </label>
+          </div>
           {user?.role === 'manager' && (
             <label className="field">
               I play for the team I manage
@@ -2156,13 +2260,16 @@ function lineupBadge(row: TeamBoardRow, fullLineupSize: number) {
 
 function TeamsBoard({
   onOpenTeam,
+  onOpenPlayer,
   onSignUp,
 }: {
   onOpenTeam: (teamId: string) => void;
+  onOpenPlayer: (playerId: string) => void;
   onSignUp: () => void;
 }) {
   const { user, refresh } = useAuth();
   const [board, setBoard] = useState<TeamBoard | null>(null);
+  const [invites, setInvites] = useState<FaInvite[]>([]);
   const [joinPick, setJoinPick] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -2172,7 +2279,12 @@ function TeamsBoard({
       setBoard(next);
       setJoinPick((prev) => prev || user?.teamId || next.teams[0]?.id || '');
     });
-  }, [user?.teamId]);
+    if (user) {
+      api.listFaInvites().then(setInvites).catch(() => setInvites([]));
+    } else {
+      setInvites([]);
+    }
+  }, [user?.teamId, user]);
 
   useEffect(() => {
     loadBoard();
@@ -2212,8 +2324,39 @@ function TeamsBoard({
     }
   }
 
+  async function handleInvite(agentId: string) {
+    setMessage(null);
+    setBusy(true);
+    try {
+      await api.inviteFreeAgent(agentId);
+      loadBoard();
+      setMessage('Invite sent.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleInviteRespond(id: string, accept: boolean) {
+    setMessage(null);
+    setBusy(true);
+    try {
+      await api.respondFaInvite(id, accept);
+      await refresh();
+      loadBoard();
+      setMessage(accept ? 'You joined the team.' : 'Invite declined.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const playerTeam = board?.teams.find((t) => t.id === user?.teamId) ?? null;
   const canUseFreeAgency = Boolean(board?.freeAgencyOpen && user?.role === 'player');
+  const incoming = invites.filter((inv) => inv.status === 'pending' && inv.toUserId === user?.id);
+  const canInvite = user?.role === 'manager' && Boolean(user.teamId);
 
   return (
     <section className="card">
@@ -2225,7 +2368,7 @@ function TeamsBoard({
       <div className="free-agency">
         <h3>Free agency</h3>
         {board && !board.freeAgencyOpen ? (
-          <p className="muted-copy">Free agency closed — playoffs have started.</p>
+          <p className="muted-copy">Free agency closed — playoffs have started. Managers can still invite a guy for a game.</p>
         ) : (
           <>
             <p className="muted-copy">
@@ -2265,17 +2408,63 @@ function TeamsBoard({
                 </button>
               </div>
             )}
-            {board && board.freeAgents.length === 0 ? (
-              <p className="member-empty">No free agents right now.</p>
-            ) : (
-              <ul className="free-agent-list">
-                {(board?.freeAgents ?? []).map((agent) => (
-                  <li key={agent.id}>{agent.name}</li>
+          </>
+        )}
+            {incoming.length > 0 && (
+              <ul className="invite-list">
+                {incoming.map((inv) => (
+                  <li key={inv.id} className="invite-row">
+                    <span>
+                      {inv.teamName} wants you this week
+                      {inv.time || inv.field ? ` · ${[inv.field, inv.time].filter(Boolean).join(' · ')}` : ''}
+                    </span>
+                    <span className="invite-actions">
+                      <button type="button" disabled={busy} onClick={() => handleInviteRespond(inv.id, true)}>
+                        Accept
+                      </button>
+                      <button type="button" className="link-btn" disabled={busy} onClick={() => handleInviteRespond(inv.id, false)}>
+                        Decline
+                      </button>
+                    </span>
+                  </li>
                 ))}
               </ul>
             )}
-          </>
-        )}
+            {board && board.freeAgents.length === 0 ? (
+              <p className="member-empty">No free agents right now.</p>
+            ) : (
+              <ul className="free-agent-cards">
+                {(board?.freeAgents ?? []).map((agent) => (
+                  <li key={agent.id} className="fa-card">
+                    <button type="button" className="fa-card-main" onClick={() => onOpenPlayer(agent.id)}>
+                      {agent.photoUrl ? (
+                        <img className="avatar member-avatar" src={agent.photoUrl} alt="" />
+                      ) : (
+                        <span className="avatar avatar-initials member-avatar">{initials(agent.name)}</span>
+                      )}
+                      <span className="member-info">
+                        <span className="member-name">{agent.name}</span>
+                        <span className="member-meta">
+                          {[agent.number != null ? `#${agent.number}` : null, agent.position, skillLabel(agent.skillLevel)]
+                            .filter(Boolean)
+                            .join(' · ') || 'Free agent'}
+                        </span>
+                      </span>
+                    </button>
+                    {canInvite && (
+                      <button
+                        type="button"
+                        className="link-btn"
+                        disabled={busy || agent.invitedByMe}
+                        onClick={() => handleInvite(agent.id)}
+                      >
+                        {agent.invitedByMe ? 'Invited' : 'Invite for this week'}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
         {message && <p className="message">{message}</p>}
       </div>
 
@@ -2300,6 +2489,15 @@ function TeamsBoard({
                 )}
                 <span className="team-board-info">
                   <span className="team-board-name">{team.name}</span>
+                  {team.weekGame && (
+                    <span className="team-board-game">
+                      {team.weekGame.home ? 'vs' : 'at'} {team.weekGame.opponentName}
+                      {' · '}
+                      {team.weekGame.field || 'Field TBD'}
+                      {' · '}
+                      {team.weekGame.time || 'Time TBD'}
+                    </span>
+                  )}
                   {team.manager && (
                     <span className="team-board-mgr">Manager: {team.manager.name}</span>
                   )}
@@ -2314,7 +2512,183 @@ function TeamsBoard({
   );
 }
 
-function TeamPage({ teamId, onBack }: { teamId: string; onBack: () => void }) {
+function PlayerProfilePage({
+  playerId,
+  onBack,
+  onOpenTeam,
+}: {
+  playerId: string;
+  onBack: () => void;
+  onOpenTeam: (teamId: string) => void;
+}) {
+  const { user } = useAuth();
+  const [profile, setProfile] = useState<PublicPlayerProfile | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    api
+      .getPlayer(playerId)
+      .then((next) => {
+        setProfile(next);
+        setError(null);
+      })
+      .catch((err) => setError((err as Error).message));
+  }, [playerId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function review(status: 'approved' | 'rejected') {
+    setBusy(true);
+    setMessage(null);
+    try {
+      setProfile(await api.reviewWaiver(playerId, status));
+      setMessage(status === 'approved' ? 'Waiver approved.' : 'Waiver sent back.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function invite() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.inviteFreeAgent(playerId);
+      setMessage('Invite sent for this week.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error) {
+    return (
+      <section className="card">
+        <button type="button" className="link-btn back-link" onClick={onBack}>
+          ← Teams
+        </button>
+        <p className="error">{error}</p>
+      </section>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <section className="card">
+        <p className="muted-copy">Loading player…</p>
+      </section>
+    );
+  }
+
+  const canInvite = Boolean(user?.role === 'manager' && user.teamId && !profile.teamId);
+  const stats = profile.stats;
+
+  return (
+    <section className="card player-profile">
+      <button type="button" className="link-btn back-link" onClick={onBack}>
+        ← Teams
+      </button>
+      <div className="player-hero">
+        {profile.photoUrl ? (
+          <img className="player-hero-photo" src={profile.photoUrl} alt="" />
+        ) : (
+          <span className="player-hero-photo player-hero-fallback">{initials(profile.name)}</span>
+        )}
+        <div className="player-hero-text">
+          <p className="player-hero-number">{profile.number != null ? `#${profile.number}` : 'FA'}</p>
+          <h2>{profile.name}</h2>
+          <p className="player-hero-meta">
+            {[profile.position, skillLabel(profile.skillLevel), profile.isManager ? 'Manager' : null]
+              .filter(Boolean)
+              .join(' · ') || 'Player'}
+          </p>
+          {profile.teamName && profile.teamId ? (
+            <button type="button" className="link-btn" onClick={() => onOpenTeam(profile.teamId!)}>
+              {profile.teamName}
+            </button>
+          ) : (
+            <p className="muted-copy">Free agent</p>
+          )}
+        </div>
+      </div>
+
+      <dl className="stat-line">
+        <div>
+          <dt>GP</dt>
+          <dd>{stats.gamesPlayed}</dd>
+        </div>
+        <div>
+          <dt>In</dt>
+          <dd>{stats.checkedIn}</dd>
+        </div>
+        <div>
+          <dt>Out</dt>
+          <dd>{stats.checkedOut}</dd>
+        </div>
+      </dl>
+
+      <div className={`waiver-panel is-${profile.waiverStatus}`}>
+        <h3>Waiver</h3>
+        <p>{waiverLabel(profile.waiverStatus)}</p>
+        {profile.waiverUrl && (profile.canReviewWaiver || user?.id === profile.id) && (
+          <a className="link-btn" href={profile.waiverUrl} target="_blank" rel="noreferrer">
+            View uploaded waiver
+          </a>
+        )}
+        {profile.canReviewWaiver && profile.waiverStatus === 'pending' && (
+          <div className="add-row">
+            <button type="button" disabled={busy} onClick={() => review('approved')}>
+              Approve
+            </button>
+            <button type="button" className="link-btn danger" disabled={busy} onClick={() => review('rejected')}>
+              Send back
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="phone-panel">
+        <h3>Contact</h3>
+        {profile.canSeePhone && profile.phone ? (
+          <p>
+            <a href={`tel:${profile.phone}`}>{profile.phone}</a>
+          </p>
+        ) : user?.id === profile.id ? (
+          <p className="muted-copy">
+            {profile.sharePhone
+              ? 'Managers can see the number in your profile.'
+              : 'Turn on “Let managers see my number” in your profile if you want a call about a game.'}
+          </p>
+        ) : (
+          <p className="muted-copy">Phone is hidden unless this player shares it with managers.</p>
+        )}
+      </div>
+
+      {canInvite && (
+        <button type="button" className="primary-btn" disabled={busy} onClick={invite}>
+          Invite for this week
+        </button>
+      )}
+      {message && <p className="message">{message}</p>}
+    </section>
+  );
+}
+
+function TeamPage({
+  teamId,
+  onBack,
+  onOpenPlayer,
+}: {
+  teamId: string;
+  onBack: () => void;
+  onOpenPlayer: (playerId: string) => void;
+}) {
   const { user, refresh } = useAuth();
   const [team, setTeam] = useState<Team | null>(null);
   const [roster, setRoster] = useState<Player[]>([]);
@@ -2620,6 +2994,7 @@ function TeamPage({ teamId, onBack }: { teamId: string; onBack: () => void }) {
         <ul className="member-list">
           {members.map((m) => (
             <li key={m.id} className="member-row">
+              <button type="button" className="member-open" onClick={() => onOpenPlayer(m.id)}>
               {m.photoUrl ? (
                 <img className="avatar member-avatar" src={m.photoUrl} alt="" />
               ) : (
@@ -2633,11 +3008,15 @@ function TeamPage({ teamId, onBack }: { teamId: string; onBack: () => void }) {
                   {m.isManager ? <span className="manager-badge">Manager</span> : null}
                 </span>
                 <span className="member-meta">
-                  {m.number != null ? `#${m.number}` : ''}
-                  {m.number != null && m.position ? ' · ' : ''}
-                  {m.position ?? ''}
+                  {[m.number != null ? `#${m.number}` : null, m.position, skillLabel(m.skillLevel)]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </span>
               </div>
+              </button>
+              {canEdit && (
+                <span className={`waiver-chip is-${m.waiverStatus ?? 'none'}`}>{waiverLabel(m.waiverStatus)}</span>
+              )}
               {currentWeek && (
                 <span
                   className={`checkin-marker${m.checkIn ? ` is-${m.checkIn}` : ' is-none'}`}
@@ -2961,6 +3340,7 @@ function Admin() {
   const [testDataSummary, setTestDataSummary] = useState<string | null>(null);
   const [mailStatus, setMailStatus] = useState<MailStatus | null>(null);
   const [mailTestBusy, setMailTestBusy] = useState(false);
+  const [pendingWaivers, setPendingWaivers] = useState<PublicPlayerProfile[]>([]);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
   const managedTeamIds = useMemo(
@@ -2997,6 +3377,7 @@ function Admin() {
         if (status && typeof status === 'object' && 'configured' in status) setMailStatus(status);
       })
       .catch((e) => setError(e.message));
+    api.listPendingWaivers().then(setPendingWaivers).catch((e) => setError(e.message));
   }
   useEffect(load, []);
 
@@ -3156,6 +3537,46 @@ function Admin() {
       <h2>League Admin</h2>
       {error && <p className="error inline-error">{error}</p>}
       {message && <p className="message">{message}</p>}
+
+      <div className="waiver-admin">
+        <h3>Waivers to approve</h3>
+        {pendingWaivers.length === 0 ? (
+          <p className="muted-copy">No pending waivers.</p>
+        ) : (
+          <ul className="member-list">
+            {pendingWaivers.map((row) => (
+              <li key={row.id} className="member-row">
+                <div className="member-info">
+                  <span className="member-name">{row.name}</span>
+                  <span className="member-meta">{row.teamName ?? 'Free agent'}</span>
+                </div>
+                {row.waiverUrl && (
+                  <a className="link-btn" href={row.waiverUrl} target="_blank" rel="noreferrer">
+                    View
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    void api.reviewWaiver(row.id, 'approved').then(() => load());
+                  }}
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  className="link-btn danger"
+                  onClick={() => {
+                    void api.reviewWaiver(row.id, 'rejected').then(() => load());
+                  }}
+                >
+                  Send back
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       <ColorSchemeAdmin
         onError={setError}
