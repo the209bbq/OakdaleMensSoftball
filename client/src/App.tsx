@@ -2222,38 +2222,6 @@ function TeamsBoard({
         Live lineup for this week. Click a team to see who&apos;s checked in.
       </p>
 
-      {!board ? (
-        <p className="muted-copy">Loading teams…</p>
-      ) : (
-        <ul className="team-board-list">
-          {board.teams.map((team) => (
-            <li key={team.id}>
-              <button
-                type="button"
-                className="team-board-row"
-                onClick={() => onOpenTeam(team.id)}
-                aria-label={`Open ${team.name}`}
-              >
-                {team.photoUrl ? (
-                  <img className="team-logo" src={team.photoUrl} alt="" />
-                ) : (
-                  <span className="team-logo team-logo-placeholder" aria-hidden="true">
-                    {initials(team.name)}
-                  </span>
-                )}
-                <span className="team-board-info">
-                  <span className="team-board-name">{team.name}</span>
-                  {team.manager && (
-                    <span className="team-board-mgr">Manager: {team.manager.name}</span>
-                  )}
-                </span>
-                {lineupBadge(team, board.fullLineupSize)}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
       <div className="free-agency">
         <h3>Free agency</h3>
         {board && !board.freeAgencyOpen ? (
@@ -2310,6 +2278,38 @@ function TeamsBoard({
         )}
         {message && <p className="message">{message}</p>}
       </div>
+
+      {!board ? (
+        <p className="muted-copy">Loading teams…</p>
+      ) : (
+        <ul className="team-board-list">
+          {board.teams.map((team) => (
+            <li key={team.id}>
+              <button
+                type="button"
+                className="team-board-row"
+                onClick={() => onOpenTeam(team.id)}
+                aria-label={`Open ${team.name}`}
+              >
+                {team.photoUrl ? (
+                  <img className="team-logo" src={team.photoUrl} alt="" />
+                ) : (
+                  <span className="team-logo team-logo-placeholder" aria-hidden="true">
+                    {initials(team.name)}
+                  </span>
+                )}
+                <span className="team-board-info">
+                  <span className="team-board-name">{team.name}</span>
+                  {team.manager && (
+                    <span className="team-board-mgr">Manager: {team.manager.name}</span>
+                  )}
+                </span>
+                {lineupBadge(team, board.fullLineupSize)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
