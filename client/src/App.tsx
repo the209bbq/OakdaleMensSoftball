@@ -491,6 +491,7 @@ function PlayerHome({ onOpenGame }: { onOpenGame: (id: string) => void }) {
   const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
   const [checkingIn, setCheckingIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
 
   const teamId = user?.teamId ?? null;
   const team = teams.find((t) => t.id === teamId) ?? null;
@@ -522,8 +523,13 @@ function PlayerHome({ onOpenGame }: { onOpenGame: (id: string) => void }) {
   }
 
   useEffect(() => {
-    api.getTeams().then(setTeams).catch((e) => setError((e as Error).message));
-    api.getSchedule().then(setGames).catch((e) => setError((e as Error).message));
+    Promise.all([api.getTeams(), api.getSchedule()])
+      .then(([nextTeams, nextGames]) => {
+        setTeams(nextTeams);
+        setGames(nextGames);
+      })
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setReady(true));
   }, []);
 
   useEffect(() => {
@@ -565,13 +571,13 @@ function PlayerHome({ onOpenGame }: { onOpenGame: (id: string) => void }) {
     <div className="landing player-home">
       <section className="card player-home-card">
         <p className="player-home-hello">Hey {user?.name?.split(' ')[0] || 'there'}</p>
-        <h1 className="player-home-team">{team?.name ?? 'No team yet'}</h1>
-        {!teamId && (
+        <h1 className="player-home-team">{team?.name ?? (teamId ? (ready ? 'Your team' : 'Loading…') : 'No team yet')}</h1>
+        {!teamId && ready && (
           <p className="muted-copy player-home-empty">
             Join a team from Rosters to see your next game and check in.
           </p>
         )}
-        {teamId && !nextGame && (
+        {teamId && ready && !nextGame && (
           <p className="muted-copy player-home-empty">No upcoming games on the schedule.</p>
         )}
         {nextGame && (
