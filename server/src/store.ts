@@ -3032,12 +3032,10 @@ export class LeagueStore {
         null;
 
       const guests: User[] = [];
-      const rosteredCount = teams.length * SIM_GUESTS_PER_TEAM;
-      const totalGuests = rosteredCount + SIM_FREE_AGENT_COUNT;
-      for (let i = 1; i <= totalGuests; i += 1) {
-        const rostered = i <= rosteredCount;
-        const teamIndex = rostered ? Math.floor((i - 1) / SIM_GUESTS_PER_TEAM) : -1;
-        const slotOnTeam = rostered ? (i - 1) % SIM_GUESTS_PER_TEAM : i - rosteredCount - 1;
+      let nextGuest = 1;
+      const addGuest = (teamId: string | null, slotOnTeam: number): User => {
+        const i = nextGuest;
+        nextGuest += 1;
         const waiver = simWaiver(i);
         const phone = simPhone(i);
         const reviewed = waiver.waiverStatus === 'approved' || waiver.waiverStatus === 'rejected';
@@ -3046,7 +3044,7 @@ export class LeagueStore {
           email: `guest${i}${SIM_EMAIL_DOMAIN}`,
           name: simGuestName(i - 1),
           role: 'player',
-          teamId: rostered ? teams[teamIndex].id : null,
+          teamId,
           onRoster: true,
           passwordHash,
           createdAt,
@@ -3063,7 +3061,21 @@ export class LeagueStore {
         };
         this.insertUserRow(user);
         guests.push(user);
+        return user;
+      };
+
+      const alreadyOnRoster = this.accountMemberIdsByTeam();
+      for (const team of teams) {
+        const already = (alreadyOnRoster.get(team.id) ?? []).length;
+        const need = Math.max(0, SIM_GUESTS_PER_TEAM - already);
+        for (let slot = 0; slot < need; slot += 1) {
+          addGuest(team.id, already + slot);
+        }
       }
+      for (let slot = 0; slot < SIM_FREE_AGENT_COUNT; slot += 1) {
+        addGuest(null, slot);
+      }
+      const rosteredCount = guests.filter((guest) => guest.teamId).length;
 
       const guestsByTeam = new Map<string, User[]>();
       for (const team of teams) {
