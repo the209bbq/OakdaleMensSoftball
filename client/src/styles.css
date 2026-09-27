@@ -616,6 +616,64 @@ body {
   font-size: 1rem;
 }
 
+.free-agency-card {
+  padding: 0;
+}
+
+.free-agency-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.free-agency-toggle:hover,
+.free-agency-toggle:focus-visible {
+  background: var(--bg);
+  outline: none;
+}
+
+.free-agency-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.free-agency-title {
+  color: var(--heading);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.free-agency-summary {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.free-agency-body {
+  padding: 0 1rem 1rem;
+}
+
+.free-agency-body .muted-copy {
+  padding: 0;
+  margin: 0 0 0.65rem;
+}
+
+.free-agency-body .primary-btn {
+  margin-bottom: 0.55rem;
+}
+
 .free-agent-list {
   list-style: none;
   margin: 0.65rem 0 0;
