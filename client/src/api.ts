@@ -172,6 +172,30 @@ export interface RosterResponse {
   members: TeamMember[];
   manager: TeamManagerSummary | null;
   currentWeek: CurrentWeek | null;
+  freeAgencyOpen?: boolean;
+}
+
+export type LineupStatus = 'need_guys' | 'full_lineup';
+
+export interface FreeAgent {
+  id: string;
+  name: string;
+}
+
+export interface TeamBoardRow extends Team {
+  memberCount: number;
+  checkedInCount: number;
+  lineupStatus: LineupStatus;
+  manager: TeamManagerSummary | null;
+}
+
+export interface TeamBoard {
+  currentWeek: CurrentWeek | null;
+  fullLineupSize: number;
+  freeAgencyOpen: boolean;
+  lastRegularSeasonDate: string | null;
+  freeAgents: FreeAgent[];
+  teams: TeamBoardRow[];
 }
 
 export interface ProfileUpdate {
@@ -270,6 +294,7 @@ export const api = {
       body: JSON.stringify({ playerIds }),
     }),
   getTeams: () => request<Team[]>('/api/teams'),
+  getTeamBoard: () => request<TeamBoard>('/api/team-board'),
   getRoster: (teamId: string) => request<RosterResponse>(`/api/teams/${teamId}/roster`),
   getRules: () => request<{ rules: string }>('/api/rules'),
   getLanding: () => request<Landing>('/api/landing'),

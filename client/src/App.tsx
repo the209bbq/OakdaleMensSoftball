@@ -1,32 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, type CurrentWeek, type Game, type GameBoxScore, type GameLineup, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
+import { api, type CurrentWeek, type Game, type GameBoxScore, type GameLineup, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
 import { applyTheme } from './theme';
 
-type Tab = 'home' | 'standings' | 'schedule' | 'rosters' | 'rules' | 'admin';
+type Tab = 'home' | 'standings' | 'schedule' | 'teams' | 'rules' | 'admin';
 
 const TAB_TITLES: Record<Tab, string> = {
   home: 'Home',
   standings: 'Standings',
   schedule: 'Schedule',
-  rosters: 'Rosters',
+  teams: 'Teams',
   rules: 'Rules',
   admin: 'Admin',
 };
 
-const TABS = new Set<Tab>(['home', 'standings', 'schedule', 'rosters', 'rules', 'admin']);
+const TABS = new Set<Tab>(['home', 'standings', 'schedule', 'teams', 'rules', 'admin']);
 
-type AppRoute = { tab: Tab; gameId: string | null };
+type AppRoute = { tab: Tab; gameId: string | null; teamId: string | null };
 
 function parseRoute(pathname: string): AppRoute {
   const parts = pathname.split('/').filter(Boolean);
   if (parts[0] === 'games' && parts[1]) {
-    return { tab: 'schedule', gameId: decodeURIComponent(parts[1]) };
+    return { tab: 'schedule', gameId: decodeURIComponent(parts[1]), teamId: null };
   }
-  const tab = parts[0];
-  if (tab && TABS.has(tab as Tab)) return { tab: tab as Tab, gameId: null };
-  return { tab: 'home', gameId: null };
+  const first = parts[0] === 'rosters' ? 'teams' : parts[0];
+  if (first === 'teams' && parts[1]) {
+    return { tab: 'teams', gameId: null, teamId: decodeURIComponent(parts[1]) };
+  }
+  if (first && TABS.has(first as Tab)) return { tab: first as Tab, gameId: null, teamId: null };
+  return { tab: 'home', gameId: null, teamId: null };
 }
 
 function pathForTab(tab: Tab): string {
@@ -35,6 +38,10 @@ function pathForTab(tab: Tab): string {
 
 function pathForGame(gameId: string): string {
   return `/games/${gameId}`;
+}
+
+function pathForTeam(teamId: string): string {
+  return `/teams/${teamId}`;
 }
 
 function useRoute() {
@@ -77,8 +84,14 @@ export default function App() {
   const { route, navigate } = useRoute();
   const tab = route.tab;
   const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [profileOpen, setProfileOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+
+  function openAuth(mode: 'login' | 'register' = 'login') {
+    setAuthMode(mode);
+    setAuthOpen(true);
+  }
 
   // If a non-admin lands on the admin tab (e.g. after logout), bounce them out.
   useEffect(() => {
@@ -127,7 +140,7 @@ export default function App() {
                 <ChatIcon />
               </button>
             )}
-            <AuthControl onSignIn={() => setAuthOpen(true)} onEditProfile={() => setProfileOpen(true)} />
+            <AuthControl onSignIn={() => openAuth('login')} onEditProfile={() => setProfileOpen(true)} />
           </div>
         </div>
       </header>
@@ -141,7 +154,12 @@ export default function App() {
         {tab === 'schedule' && !route.gameId && (
           <Schedule onOpenGame={(id) => navigate(pathForGame(id))} />
         )}
-        {tab === 'rosters' && <Rosters />}
+        {tab === 'teams' && !route.teamId && (
+          <TeamsBoard onOpenTeam={(id) => navigate(pathForTeam(id))} onSignUp={() => openAuth('register')} />
+        )}
+        {tab === 'teams' && route.teamId && (
+          <TeamPage teamId={route.teamId} onBack={() => navigate(pathForTab('teams'))} />
+        )}
         {tab === 'rules' && <Rules />}
         {tab === 'admin' && user?.role === 'admin' && <Admin />}
       </main>
@@ -150,14 +168,14 @@ export default function App() {
         <TabButton tab="home" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Home" icon={HomeIcon} />
         <TabButton tab="standings" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Standings" icon={TrophyIcon} />
         <TabButton tab="schedule" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Schedule" icon={CalendarIcon} />
-        <TabButton tab="rosters" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Rosters" icon={RosterIcon} />
+        <TabButton tab="teams" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Teams" icon={RosterIcon} />
         <TabButton tab="rules" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Rules" icon={RulesIcon} />
         {user?.role === 'admin' && (
           <TabButton tab="admin" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Admin" icon={GearIcon} />
         )}
       </nav>
 
-      {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
+      {authOpen && <AuthModal onClose={() => setAuthOpen(false)} initialMode={authMode} />}
       {profileOpen && user && <ProfileModal onClose={() => setProfileOpen(false)} />}
       {chatOpen && user && canOpenTeamChat(user) && <TeamChatModal onClose={() => setChatOpen(false)} />}
     </div>
@@ -185,9 +203,15 @@ function AuthControl({ onSignIn, onEditProfile }: { onSignIn: () => void; onEdit
   );
 }
 
-function AuthModal({ onClose }: { onClose: () => void }) {
+function AuthModal({
+  onClose,
+  initialMode = 'login',
+}: {
+  onClose: () => void;
+  initialMode?: 'login' | 'register';
+}) {
   const { login, register } = useAuth();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -567,7 +591,7 @@ function PlayerHome({ onOpenGame }: { onOpenGame: (id: string) => void }) {
         <h1 className="player-home-team">{team?.name ?? (teamId ? (ready ? 'Your team' : 'Loading…') : 'No team yet')}</h1>
         {!teamId && ready && (
           <p className="muted-copy player-home-empty">
-            Join a team from Rosters to see your next game and check in.
+            Join a team from Teams to see your next game and check in.
           </p>
         )}
         {teamId && ready && !nextGame && (
@@ -2118,19 +2142,190 @@ function LineScore({
   );
 }
 
-function Rosters() {
+function lineupBadge(row: TeamBoardRow, fullLineupSize: number) {
+  const full = row.lineupStatus === 'full_lineup';
+  return (
+    <span className={`lineup-badge${full ? ' is-full' : ' is-need'}`}>
+      {full ? 'Full lineup' : 'Need guys'}
+      <span className="lineup-count">
+        {row.checkedInCount}/{fullLineupSize} in
+      </span>
+    </span>
+  );
+}
+
+function TeamsBoard({
+  onOpenTeam,
+  onSignUp,
+}: {
+  onOpenTeam: (teamId: string) => void;
+  onSignUp: () => void;
+}) {
   const { user, refresh } = useAuth();
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [selected, setSelected] = useState<string>('');
+  const [board, setBoard] = useState<TeamBoard | null>(null);
+  const [joinPick, setJoinPick] = useState('');
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const loadBoard = useCallback(() => {
+    api.getTeamBoard().then((next) => {
+      setBoard(next);
+      setJoinPick((prev) => prev || user?.teamId || next.teams[0]?.id || '');
+    });
+  }, [user?.teamId]);
+
+  useEffect(() => {
+    loadBoard();
+    const timer = window.setInterval(loadBoard, 8000);
+    return () => window.clearInterval(timer);
+  }, [loadBoard]);
+
+  async function handleJoin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!joinPick) return;
+    setMessage(null);
+    setBusy(true);
+    try {
+      await api.joinTeam(joinPick);
+      await refresh();
+      loadBoard();
+      setMessage('Joined the team.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleLeave() {
+    setMessage(null);
+    setBusy(true);
+    try {
+      await api.joinTeam(null);
+      await refresh();
+      loadBoard();
+      setMessage('You are a free agent.');
+    } catch (err) {
+      setMessage((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const playerTeam = board?.teams.find((t) => t.id === user?.teamId) ?? null;
+  const canUseFreeAgency = Boolean(board?.freeAgencyOpen && user?.role === 'player');
+
+  return (
+    <section className="card">
+      <h2>Teams</h2>
+      <p className="muted-copy">
+        Live lineup for this week. Click a team to see who&apos;s checked in.
+      </p>
+
+      {!board ? (
+        <p className="muted-copy">Loading teams…</p>
+      ) : (
+        <ul className="team-board-list">
+          {board.teams.map((team) => (
+            <li key={team.id}>
+              <button
+                type="button"
+                className="team-board-row"
+                onClick={() => onOpenTeam(team.id)}
+                aria-label={`Open ${team.name}`}
+              >
+                {team.photoUrl ? (
+                  <img className="team-logo" src={team.photoUrl} alt="" />
+                ) : (
+                  <span className="team-logo team-logo-placeholder" aria-hidden="true">
+                    {initials(team.name)}
+                  </span>
+                )}
+                <span className="team-board-info">
+                  <span className="team-board-name">{team.name}</span>
+                  {team.manager && (
+                    <span className="team-board-mgr">Manager: {team.manager.name}</span>
+                  )}
+                </span>
+                {lineupBadge(team, board.fullLineupSize)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="free-agency">
+        <h3>Free agency</h3>
+        {board && !board.freeAgencyOpen ? (
+          <p className="muted-copy">Free agency closed — playoffs have started.</p>
+        ) : (
+          <>
+            <p className="muted-copy">
+              Sign up as a free agent and join a team until the regular season ends.
+            </p>
+            {!user && (
+              <button type="button" className="primary-btn" onClick={onSignUp}>
+                Sign up as a free agent
+              </button>
+            )}
+            {user && canUseFreeAgency && !user.teamId && board && (
+              <form className="add-row" onSubmit={handleJoin}>
+                <label className="field inline">
+                  Join a team:{' '}
+                  <select
+                    aria-label="Join a team"
+                    value={joinPick}
+                    onChange={(e) => setJoinPick(e.target.value)}
+                  >
+                    {board.teams.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button type="submit" disabled={busy || !joinPick}>
+                  Join
+                </button>
+              </form>
+            )}
+            {user && canUseFreeAgency && user.teamId && playerTeam && (
+              <div className="join-bar">
+                <p className="join-status">You&apos;re on {playerTeam.name}</p>
+                <button type="button" className="link-btn danger" onClick={handleLeave} disabled={busy}>
+                  Leave and become a free agent
+                </button>
+              </div>
+            )}
+            {board && board.freeAgents.length === 0 ? (
+              <p className="member-empty">No free agents right now.</p>
+            ) : (
+              <ul className="free-agent-list">
+                {(board?.freeAgents ?? []).map((agent) => (
+                  <li key={agent.id}>{agent.name}</li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+        {message && <p className="message">{message}</p>}
+      </div>
+    </section>
+  );
+}
+
+function TeamPage({ teamId, onBack }: { teamId: string; onBack: () => void }) {
+  const { user, refresh } = useAuth();
+  const [team, setTeam] = useState<Team | null>(null);
   const [roster, setRoster] = useState<Player[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
+  const [freeAgencyOpen, setFreeAgencyOpen] = useState(true);
   const [managerName, setManagerName] = useState<string | null>(null);
   const [managerOnRoster, setManagerOnRoster] = useState(true);
   const [checkingIn, setCheckingIn] = useState(false);
   const [accounts, setAccounts] = useState<PlayerAccount[]>([]);
   const [pickMember, setPickMember] = useState('');
-  const [joinPick, setJoinPick] = useState('');
   const [name, setName] = useState('');
   const [number, setNumber] = useState('');
   const [position, setPosition] = useState('');
@@ -2138,59 +2333,52 @@ function Rosters() {
   const [teamNameDraft, setTeamNameDraft] = useState('');
   const [teamPhotoPreview, setTeamPhotoPreview] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.getTeams().then((t) => {
-      setTeams(t);
-      const pinned =
-        user?.teamId && (user.role === 'manager' || user.role === 'player') ? user.teamId : '';
-      const initial = pinned || t[0]?.id || '';
-      setSelected(initial);
-      setJoinPick(pinned || t[0]?.id || '');
-    });
-  }, [user]);
+  const canEdit = canManageTeam(user, teamId);
+  const canManage = user?.role === 'admin' || (user?.role === 'manager' && user.teamId === teamId);
 
-  const canManage = user?.role === 'admin' || user?.role === 'manager';
+  const loadRoster = useCallback(() => {
+    if (!teamId) return;
+    api.getRoster(teamId).then((r) => {
+      setTeam(r.team);
+      setRoster(r.roster);
+      setMembers(r.members ?? []);
+      setCurrentWeek(r.currentWeek ?? null);
+      setFreeAgencyOpen(r.freeAgencyOpen !== false);
+      setManagerName(r.manager?.name ?? null);
+      setManagerOnRoster(r.manager?.onRoster !== false);
+    });
+  }, [teamId]);
+
+  useEffect(() => {
+    loadRoster();
+    const timer = window.setInterval(loadRoster, 8000);
+    return () => window.clearInterval(timer);
+  }, [loadRoster]);
 
   useEffect(() => {
     if (!canManage) return;
     api.listMembers().then(setAccounts).catch(() => setAccounts([]));
-  }, [canManage, selected]);
-
-  function loadRoster(teamId: string) {
-    if (!teamId) return;
-    api.getRoster(teamId).then((r) => {
-      setRoster(r.roster);
-      setMembers(r.members ?? []);
-      setCurrentWeek(r.currentWeek ?? null);
-      setManagerName(r.manager?.name ?? null);
-      setManagerOnRoster(r.manager?.onRoster !== false);
-      setTeams((prev) => prev.map((t) => (t.id === r.team.id ? r.team : t)));
-    });
-  }
-  useEffect(() => loadRoster(selected), [selected]);
-
-  const selectedTeam = teams.find((t) => t.id === selected);
-  const canEdit = canManageTeam(user, selected);
-  const availableAccounts = accounts.filter((a) => a.teamId !== selected);
-  const pickValue = availableAccounts.some((a) => a.id === pickMember)
-    ? pickMember
-    : availableAccounts[0]?.id ?? '';
+  }, [canManage, teamId]);
 
   useEffect(() => {
-    setTeamNameDraft(selectedTeam?.name ?? '');
-    setTeamPhotoPreview(selectedTeam?.photoUrl ?? null);
-  }, [selectedTeam?.id, selectedTeam?.name, selectedTeam?.photoUrl]);
+    setTeamNameDraft(team?.name ?? '');
+    setTeamPhotoPreview(team?.photoUrl ?? null);
+  }, [team?.id, team?.name, team?.photoUrl]);
 
-  function patchTeam(updated: Team) {
-    setTeams((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-  }
+  const addableAccounts =
+    user?.role === 'admin'
+      ? accounts.filter((a) => a.teamId !== teamId)
+      : accounts.filter((a) => a.teamId == null);
+  const pickValue = addableAccounts.some((a) => a.id === pickMember)
+    ? pickMember
+    : addableAccounts[0]?.id ?? '';
 
   async function handleRename(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
     try {
-      const updated = await api.renameTeam(selected, teamNameDraft);
-      patchTeam(updated);
+      const updated = await api.renameTeam(teamId, teamNameDraft);
+      setTeam(updated);
       setMessage(`Renamed to ${updated.name}.`);
     } catch (err) {
       setMessage((err as Error).message);
@@ -2202,8 +2390,8 @@ function Rosters() {
     try {
       const dataUrl = await fileToSquareDataUrl(file);
       setTeamPhotoPreview(dataUrl);
-      const updated = await api.setTeamPhoto(selected, dataUrl);
-      patchTeam(updated);
+      const updated = await api.setTeamPhoto(teamId, dataUrl);
+      setTeam(updated);
       setMessage('Team photo saved.');
     } catch (err) {
       setMessage((err as Error).message);
@@ -2214,8 +2402,8 @@ function Rosters() {
     e.preventDefault();
     setMessage(null);
     try {
-      await api.addPlayer({ teamId: selected, name, number: Number(number), position });
-      loadRoster(selected);
+      await api.addPlayer({ teamId, name, number: Number(number), position });
+      loadRoster();
       setName('');
       setNumber('');
       setPosition('');
@@ -2229,35 +2417,19 @@ function Rosters() {
     setMessage(null);
     try {
       await api.removePlayer(playerId);
-      loadRoster(selected);
+      loadRoster();
     } catch (err) {
       setMessage((err as Error).message);
     }
   }
 
-  async function handleJoin(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleJoin() {
     setMessage(null);
     try {
-      await api.joinTeam(joinPick || null);
+      await api.joinTeam(teamId);
       await refresh();
-      if (joinPick) setSelected(joinPick);
-      loadRoster(joinPick);
+      loadRoster();
       setMessage('Joined the team.');
-    } catch (err) {
-      setMessage((err as Error).message);
-    }
-  }
-
-  async function handleChangeTeam(e: React.FormEvent) {
-    e.preventDefault();
-    setMessage(null);
-    try {
-      await api.joinTeam(joinPick || null);
-      await refresh();
-      if (joinPick) setSelected(joinPick);
-      loadRoster(joinPick);
-      setMessage('Team updated.');
     } catch (err) {
       setMessage((err as Error).message);
     }
@@ -2268,7 +2440,7 @@ function Rosters() {
     try {
       await api.joinTeam(null);
       await refresh();
-      loadRoster(selected);
+      loadRoster();
       setMessage('You left the team.');
     } catch (err) {
       setMessage((err as Error).message);
@@ -2280,8 +2452,8 @@ function Rosters() {
     if (!pickValue) return;
     setMessage(null);
     try {
-      await api.setUserTeam(pickValue, selected);
-      loadRoster(selected);
+      await api.setUserTeam(pickValue, teamId);
+      loadRoster();
       const next = await api.listMembers();
       setAccounts(next);
       setMessage('Player added to the team.');
@@ -2294,7 +2466,7 @@ function Rosters() {
     setMessage(null);
     try {
       await api.setUserTeam(memberId, null);
-      loadRoster(selected);
+      loadRoster();
       const next = await api.listMembers();
       setAccounts(next);
     } catch (err) {
@@ -2310,7 +2482,7 @@ function Rosters() {
     setCheckingIn(true);
     try {
       await api.checkIn(currentWeek.week, next);
-      loadRoster(selected);
+      loadRoster();
     } catch (err) {
       setMessage((err as Error).message);
     } finally {
@@ -2318,97 +2490,54 @@ function Rosters() {
     }
   }
 
-  const playerTeamName = user?.teamId
-    ? teams.find((t) => t.id === user.teamId)?.name ?? user.teamId
-    : null;
-
   const playsOnTeam = Boolean(
     user?.teamId && (user.role === 'player' || (user.role === 'manager' && user.onRoster !== false)),
   );
-  const canCheckIn = Boolean(playsOnTeam && user && user.teamId === selected && currentWeek);
+  const canCheckIn = Boolean(playsOnTeam && user && user.teamId === teamId && currentWeek);
   const myCheckIn = members.find((m) => m.id === user?.id)?.checkIn ?? null;
   const checkInCounts = {
     in: members.filter((m) => m.checkIn === 'in').length,
     out: members.filter((m) => m.checkIn === 'out').length,
     none: members.filter((m) => m.checkIn !== 'in' && m.checkIn !== 'out').length,
   };
+  const playerCanJoin = Boolean(freeAgencyOpen && user?.role === 'player' && !user.teamId);
+  const playerCanLeave = Boolean(freeAgencyOpen && user?.role === 'player' && user.teamId === teamId);
+  const showAddRegistered = canEdit && (user?.role === 'admin' || freeAgencyOpen);
 
   return (
     <section className="card">
-      <h2>Team Rosters</h2>
+      <button type="button" className="link-btn back-link" onClick={onBack}>
+        ← Teams
+      </button>
+      <h2>{team?.name ?? 'Team'}</h2>
 
-      {user?.role === 'player' && (
+      {playerCanJoin && (
         <div className="join-bar">
-          {user.teamId && playerTeamName ? (
-            <>
-              <p className="join-status">
-                You&apos;re on {playerTeamName} — Change / Leave
-              </p>
-              <form className="add-row" onSubmit={handleChangeTeam}>
-                <label className="field inline">
-                  Change team:{' '}
-                  <select
-                    aria-label="Change team"
-                    value={joinPick}
-                    onChange={(e) => setJoinPick(e.target.value)}
-                  >
-                    {teams.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button type="submit">Change</button>
-                <button type="button" className="link-btn danger" onClick={handleLeave}>
-                  Leave
-                </button>
-              </form>
-            </>
-          ) : (
-            <form className="add-row" onSubmit={handleJoin}>
-              <label className="field inline">
-                Join a team:{' '}
-                <select
-                  aria-label="Join a team"
-                  value={joinPick}
-                  onChange={(e) => setJoinPick(e.target.value)}
-                >
-                  {teams.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button type="submit">Join</button>
-            </form>
-          )}
+          <button type="button" className="primary-btn" onClick={handleJoin}>
+            Join this team
+          </button>
+        </div>
+      )}
+      {playerCanLeave && (
+        <div className="join-bar">
+          <p className="join-status">You&apos;re on this team</p>
+          <button type="button" className="link-btn danger" onClick={handleLeave}>
+            Leave
+          </button>
         </div>
       )}
 
-      <label className="field">
-        Team:{' '}
-        <select value={selected} onChange={(e) => setSelected(e.target.value)}>
-          {teams.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {selectedTeam && (
+      {team && (
         <div className="roster-team-header">
-          {selectedTeam.photoUrl ? (
-            <img className="team-logo" src={selectedTeam.photoUrl} alt="" />
+          {team.photoUrl ? (
+            <img className="team-logo" src={team.photoUrl} alt="" />
           ) : (
             <span className="team-logo team-logo-placeholder" aria-hidden="true">
-              {initials(selectedTeam.name)}
+              {initials(team.name)}
             </span>
           )}
           <div>
-            <h3 className="roster-team-name">{selectedTeam.name}</h3>
+            <h3 className="roster-team-name">{team.name}</h3>
             {managerName && (
               <p className="roster-manager">
                 Manager: {managerName}
@@ -2476,7 +2605,7 @@ function Rosters() {
           <PhotoPicker
             id="team-photo"
             label="Team photo"
-            value={teamPhotoPreview ?? selectedTeam?.photoUrl}
+            value={teamPhotoPreview ?? team?.photoUrl}
             onFile={handleTeamPhoto}
           />
         </div>
@@ -2484,7 +2613,7 @@ function Rosters() {
 
       {message && <p className="message">{message}</p>}
 
-      <h3 className="roster-heading">Members</h3>
+      <h3 className="roster-heading">Players</h3>
       {members.length === 0 ? (
         <p className="member-empty">No registered members yet.</p>
       ) : (
@@ -2544,11 +2673,15 @@ function Rosters() {
         </ul>
       )}
 
-      {canEdit && (
+      {showAddRegistered && (
         <form className="add-form" onSubmit={handleAddMember}>
-          <h3>Add a registered player</h3>
-          {availableAccounts.length === 0 ? (
-            <p className="member-empty">Every registered player is already on this team.</p>
+          <h3>{user?.role === 'admin' ? 'Add a registered player' : 'Pick up a free agent'}</h3>
+          {addableAccounts.length === 0 ? (
+            <p className="member-empty">
+              {user?.role === 'admin'
+                ? 'Every registered player is already on this team.'
+                : 'No free agents available.'}
+            </p>
           ) : (
             <div className="add-row">
               <select
@@ -2556,7 +2689,7 @@ function Rosters() {
                 value={pickValue}
                 onChange={(e) => setPickMember(e.target.value)}
               >
-                {availableAccounts.map((a) => (
+                {addableAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
                   </option>
@@ -2566,6 +2699,9 @@ function Rosters() {
             </div>
           )}
         </form>
+      )}
+      {canEdit && !freeAgencyOpen && user?.role === 'manager' && (
+        <p className="muted-copy">Free agency closed — playoffs have started.</p>
       )}
 
       <h3 className="roster-heading">Unregistered</h3>

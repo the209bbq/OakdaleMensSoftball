@@ -148,6 +148,32 @@ export interface PlayerAccount {
   teamId: string | null;
 }
 
+export type LineupStatus = 'need_guys' | 'full_lineup';
+
+/** Public-safe free agent (player-role, no team). */
+export interface FreeAgent {
+  id: string;
+  name: string;
+}
+
+/** One team row on the Teams board. */
+export interface TeamBoardRow extends Team {
+  memberCount: number;
+  checkedInCount: number;
+  lineupStatus: LineupStatus;
+  manager: { name: string; onRoster: boolean } | null;
+}
+
+/** Live Teams tab payload: lineup holes + free agents until playoffs. */
+export interface TeamBoard {
+  currentWeek: CurrentWeek | null;
+  fullLineupSize: number;
+  freeAgencyOpen: boolean;
+  lastRegularSeasonDate: string | null;
+  freeAgents: FreeAgent[];
+  teams: TeamBoardRow[];
+}
+
 export interface LeagueData {
   teams: Team[];
   players: Player[];

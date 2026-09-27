@@ -19,6 +19,7 @@ import type {
   Suggestion,
   Team,
   TeamAttendance,
+  TeamBoard,
   TeamMember,
   TeamMessage,
   User,
@@ -65,6 +66,9 @@ export const MAX_LANDING_BODY_CHARS = 5000;
 export const MAX_LANDING_LABEL_CHARS = 80;
 export const MAX_SUGGESTION_CHARS = 2000;
 export const MAX_MESSAGE_CHARS = 2000;
+
+/** Checked-in "in" count that counts as a full weekly lineup. */
+export const FULL_LINEUP_SIZE = 10;
 
 /** Guest accounts created by the admin Test Data simulator. Easy to find/remove. */
 export const SIM_EMAIL_DOMAIN = '@sim.local';
@@ -736,6 +740,64 @@ export class LeagueStore {
       .prepare('SELECT id, name, photoUrl FROM teams WHERE id = ?')
       .get(teamId) as TeamRow | undefined;
     return row ? teamFromRow(row) : undefined;
+  }
+
+  /** Last regular-season game date (YYYY-MM-DD), or null before a schedule exists. */
+  getLastRegularSeasonDate(): string | null {
+    const row = this.db.prepare('SELECT MAX(date) AS lastDate FROM games').get() as {
+      lastDate: string | null;
+    };
+    return row.lastDate ?? null;
+  }
+
+  /**
+   * Free agency stays open through the last regular-season game day.
+   * The day after that (when playoffs would start) it closes.
+   * No schedule yet → still open so people can sign up.
+   */
+  isFreeAgencyOpen(now = new Date()): boolean {
+    const last = this.getLastRegularSeasonDate();
+    if (!last) return true;
+    return now.toISOString().slice(0, 10) <= last;
+  }
+
+  /** Player-role accounts with no team (public-safe, no email). */
+  getFreeAgents(): Array<{ id: string; name: string }> {
+    const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
+    return rows
+      .map(userFromRow)
+      .filter((u) => u.role === 'player' && !u.teamId)
+      .map((u) => ({ id: u.id, name: u.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Teams list with live lineup status (checked-in "in" vs FULL_LINEUP_SIZE)
+   * plus the current free-agent pool.
+   */
+  getTeamBoard(): TeamBoard {
+    const teams = this.getTeams();
+    const current = this.getCurrentWeek();
+    const checkIns = current ? this.getCheckInsForWeek(current.week) : new Map<string, CheckInStatus>();
+    const membersByTeam = this.accountMemberIdsByTeam();
+    return {
+      currentWeek: current,
+      fullLineupSize: FULL_LINEUP_SIZE,
+      freeAgencyOpen: this.isFreeAgencyOpen(),
+      lastRegularSeasonDate: this.getLastRegularSeasonDate(),
+      freeAgents: this.getFreeAgents(),
+      teams: teams.map((team) => {
+        const memberIds = membersByTeam.get(team.id) ?? [];
+        const checkedInCount = memberIds.filter((id) => checkIns.get(id) === 'in').length;
+        return {
+          ...team,
+          memberCount: memberIds.length,
+          checkedInCount,
+          lineupStatus: checkedInCount >= FULL_LINEUP_SIZE ? 'full_lineup' : 'need_guys',
+          manager: this.getTeamManager(team.id),
+        };
+      }),
+    };
   }
 
   getRoster(teamId: string): Player[] {
