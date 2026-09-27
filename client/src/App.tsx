@@ -1296,8 +1296,8 @@ function Standings() {
             <th>L</th>
             <th>T</th>
             <th>GP</th>
-            <th>RF</th>
-            <th>RA</th>
+            <th title="Runs scored">Runs</th>
+            <th title="Runs allowed">RA</th>
             <th>Diff</th>
           </tr>
         </thead>
