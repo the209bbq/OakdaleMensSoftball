@@ -120,6 +120,25 @@ const rosterPayload = {
   ],
   manager: { name: 'Coach' },
   currentWeek: { week: 1, date: '2026-05-06' },
+  freeAgencyOpen: true,
+};
+
+const teamBoard = {
+  currentWeek: { week: 1, date: '2026-05-06' },
+  fullLineupSize: 10,
+  freeAgencyOpen: true,
+  lastRegularSeasonDate: '2026-05-06',
+  freeAgents: [{ id: 'u-fa', name: 'Free Agent Joe' }],
+  teams: [
+    {
+      id: 'tigers',
+      name: 'Oakdale Tigers',
+      memberCount: 2,
+      checkedInCount: 1,
+      lineupStatus: 'need_guys' as const,
+      manager: { name: 'Coach' },
+    },
+  ],
 };
 
 function jsonOk(data: unknown) {
@@ -151,6 +170,7 @@ beforeEach(() => {
         }
         return jsonOk([]);
       }
+      if (url.includes('/api/team-board')) return jsonOk(teamBoard);
       if (url.includes('/roster')) return jsonOk(rosterPayload);
       if (url.includes('/api/teams')) return jsonOk(teams);
       return jsonOk([]);
@@ -192,7 +212,7 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Home' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Standings' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Schedule' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Rosters' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Teams' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Admin' })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText('Welcome to the Oakdale Mens Softball League')).toBeInTheDocument();
@@ -575,23 +595,76 @@ describe('App', () => {
     });
   });
 
-  it('shows registered members with profiles and unregistered placeholders on Rosters', async () => {
+  it('lists teams with live lineup status and opens a team roster', async () => {
     renderApp();
-    fireEvent.click(screen.getByRole('tab', { name: 'Rosters' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Teams' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Open Oakdale Tigers' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('Need guys')).toBeInTheDocument();
+    expect(screen.getByText('1/10 in')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Free agency' })).toBeInTheDocument();
+    expect(screen.getByText('Free Agent Joe')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign up as a free agent/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /sign up as a free agent/i }));
+    expect(screen.getByLabelText('Full name')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Oakdale Tigers' }));
     await waitFor(() => {
       expect(screen.getByText('Pat Shortstop')).toBeInTheDocument();
     });
-    expect(screen.getByText('Members')).toBeInTheDocument();
+    expect(screen.getByText('Players')).toBeInTheDocument();
     expect(screen.getByText('Unregistered')).toBeInTheDocument();
     expect(screen.getByText('Placeholder Guy')).toBeInTheDocument();
     expect(screen.getByText('#12 · SS')).toBeInTheDocument();
-    expect(screen.getByText('Manager: Coach')).toBeInTheDocument();
+    expect(screen.getAllByText('Manager: Coach').length).toBeGreaterThan(0);
     expect(screen.getByText('Manager')).toBeInTheDocument();
     expect(screen.getByText(/Check-in — Week 1 · Wed May 6/)).toBeInTheDocument();
     expect(screen.getByText(/🥎 1 · 🚫 0 · — 1/)).toBeInTheDocument();
     expect(screen.getByLabelText('Coach is in')).toHaveTextContent('🥎');
     expect(screen.getByLabelText("Pat Shortstop hasn't checked in")).toHaveTextContent('—');
     expect(screen.queryByRole('button', { name: /i'm there/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save name/i })).not.toBeInTheDocument();
+  });
+
+  it('hides free-agent signup after playoffs begin and opens register from the CTA', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: null });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/team-board')) {
+          return jsonOk({
+            ...teamBoard,
+            freeAgencyOpen: false,
+            freeAgents: [],
+            teams: [
+              {
+                ...teamBoard.teams[0],
+                checkedInCount: 10,
+                lineupStatus: 'full_lineup' as const,
+              },
+            ],
+          });
+        }
+        if (url.includes('/roster')) return jsonOk({ ...rosterPayload, freeAgencyOpen: false });
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Teams' }));
+    await waitFor(() => {
+      expect(screen.getByText('Full lineup')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Free agency closed — playoffs have started.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sign up as a free agent/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Free Agent Joe')).not.toBeInTheDocument();
   });
 
   it('shows a public suggestions box and hides the team-chat button when logged out', async () => {
@@ -655,6 +728,7 @@ describe('App', () => {
           return jsonOk([...chat]);
         }
         if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/team-board')) return jsonOk(teamBoard);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
         if (url.includes('/api/teams')) return jsonOk(teams);
         return jsonOk([]);
@@ -709,6 +783,7 @@ describe('App', () => {
           patCheckIn = body.status;
           return { ok: true, json: async () => ({ ok: true, week: body.week, status: body.status }) } as Response;
         }
+        if (url.includes('/api/team-board')) return jsonOk(teamBoard);
         if (url.includes('/roster')) {
           return {
             ok: true,
@@ -728,7 +803,11 @@ describe('App', () => {
     );
 
     renderApp();
-    fireEvent.click(screen.getByRole('tab', { name: 'Rosters' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Teams' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Open Oakdale Tigers' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Oakdale Tigers' }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /i'm there/i })).toBeInTheDocument();
     });
@@ -1061,6 +1140,7 @@ describe('App', () => {
         if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
         if (url.includes('/messages')) return jsonOk([]);
         if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/team-board')) return jsonOk(teamBoard);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
         if (url.includes('/api/teams')) return jsonOk(teams);
         if (url.includes('/api/members')) return jsonOk([]);
@@ -1082,10 +1162,15 @@ describe('App', () => {
     expect(screen.queryByLabelText('Change team')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    fireEvent.click(screen.getByRole('tab', { name: 'Rosters' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Teams' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Open Oakdale Tigers' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Oakdale Tigers' }));
     await waitFor(() => {
       expect(screen.getByText('Pat Shortstop')).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: 'Save name' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Join a team')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Change team')).not.toBeInTheDocument();
   });

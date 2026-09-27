@@ -106,6 +106,27 @@ describe('Public read endpoints', () => {
     const numbers = res.body.roster.map((p: { number: number }) => p.number);
     expect(numbers).toEqual([...numbers].sort((a: number, b: number) => a - b));
     expect(Array.isArray(res.body.members)).toBe(true);
+    expect(res.body.freeAgencyOpen).toBe(true);
+  });
+
+  it('lists the team board with lineup status and free agents', async () => {
+    const { app, store } = makeApp();
+    store.generateSchedule({ startDate: utcToday(), weeks: 1 });
+    const free = store.registerUser({ email: 'fa@b.com', name: 'Free Agent Joe', password: 'longenough' });
+    const player = store.registerUser({ email: 'p@b.com', name: 'Pat In', password: 'longenough' });
+    store.setUserTeam(player.id, TEAM_OWN);
+    const week = store.getCurrentWeek()!.week;
+    store.setCheckIn(player.id, week, 'in');
+
+    const res = await request(app).get('/api/team-board');
+    expect(res.status).toBe(200);
+    expect(res.body.fullLineupSize).toBe(10);
+    expect(res.body.freeAgencyOpen).toBe(true);
+    expect(res.body.freeAgents).toEqual([{ id: free.id, name: 'Free Agent Joe' }]);
+    const own = res.body.teams.find((t: { id: string }) => t.id === TEAM_OWN);
+    expect(own.lineupStatus).toBe('need_guys');
+    expect(own.checkedInCount).toBe(1);
+    expect(own.memberCount).toBe(1);
   });
 });
 
@@ -1332,6 +1353,63 @@ describe('Player team membership', () => {
 
     const removeOther = await manager.post(`/api/users/${ben.id}/team`).send({ teamId: null });
     expect(removeOther.status).toBe(403);
+
+    const poach = await manager.post(`/api/users/${ben.id}/team`).send({ teamId: TEAM_OWN });
+    expect(poach.status).toBe(403);
+    expect(poach.body.error).toMatch(/free agents/i);
+  });
+
+  it('closes player join and manager free-agent pickup when playoffs begin', async () => {
+    const { app, store } = makeApp();
+    store.generateSchedule({ startDate: addUtcDays(utcToday(), -1), weeks: 1 });
+    expect(store.isFreeAgencyOpen()).toBe(false);
+
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'p@b.com', name: 'Pat', password: 'longenough' });
+    const join = await player.put('/api/auth/team').send({ teamId: TEAM_OWN });
+    expect(join.status).toBe(400);
+    expect(join.body.error).toMatch(/playoffs/i);
+
+    store.registerUser({ email: 'fa@b.com', name: 'Free', password: 'longenough' });
+    const faId = store.getUserByEmail('fa@b.com')!.id;
+    store.registerUser({ email: 'mgr@b.com', name: 'Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr@b.com')!.id, 'manager', TEAM_OWN);
+    const manager = await loginAs(app, 'mgr@b.com', 'longenough');
+    const pickup = await manager.post(`/api/users/${faId}/team`).send({ teamId: TEAM_OWN });
+    expect(pickup.status).toBe(400);
+    expect(pickup.body.error).toMatch(/playoffs/i);
+
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const assign = await admin.post(`/api/users/${faId}/team`).send({ teamId: TEAM_OWN });
+    expect(assign.status).toBe(200);
+    expect(assign.body.teamId).toBe(TEAM_OWN);
+
+    const patId = store.getUserByEmail('p@b.com')!.id;
+    await admin.post(`/api/users/${patId}/team`).send({ teamId: TEAM_OWN });
+    const leave = await player.put('/api/auth/team').send({ teamId: null });
+    expect(leave.status).toBe(400);
+
+    const remove = await manager.post(`/api/users/${faId}/team`).send({ teamId: null });
+    expect(remove.status).toBe(200);
+    expect(remove.body.teamId).toBeNull();
+  });
+
+  it('marks a team full lineup after 10 check-ins', () => {
+    const { store } = makeApp();
+    store.generateSchedule({ startDate: utcToday(), weeks: 1 });
+    const week = store.getCurrentWeek()!.week;
+    for (let i = 0; i < 10; i += 1) {
+      const user = store.registerUser({
+        email: `full${i}@b.com`,
+        name: `Full ${i}`,
+        password: 'longenough',
+      });
+      store.setUserTeam(user.id, TEAM_OWN);
+      store.setCheckIn(user.id, week, 'in');
+    }
+    const row = store.getTeamBoard().teams.find((t) => t.id === TEAM_OWN);
+    expect(row?.lineupStatus).toBe('full_lineup');
+    expect(row?.checkedInCount).toBe(10);
   });
 
   it('rejects assigning a non-player and anonymous assignment', async () => {

@@ -199,6 +199,10 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       res.status(400).json({ error: 'teamId must be a string or null' });
       return;
     }
+    if (!store.isFreeAgencyOpen()) {
+      res.status(400).json({ error: 'Free agency closed when playoffs begin' });
+      return;
+    }
     try {
       const updated = store.setUserTeam(req.user!.id, teamId);
       res.json(updated);
@@ -211,6 +215,10 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
   api.get('/teams', (_req: Request, res: Response) => {
     res.json(store.getTeams());
+  });
+
+  api.get('/team-board', (_req: Request, res: Response) => {
+    res.json(store.getTeamBoard());
   });
 
   api.get('/standings', (_req: Request, res: Response) => {
@@ -246,6 +254,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       members: store.getTeamMembers(team.id),
       manager: store.getTeamManager(team.id),
       currentWeek: store.getCurrentWeek(),
+      freeAgencyOpen: store.isFreeAgencyOpen(),
     });
   });
 
@@ -699,6 +708,14 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       const removingFromOwn = teamId === null && target.teamId === ownTeam;
       if (!addingToOwn && !removingFromOwn) {
         res.status(403).json({ error: 'You can only add or remove players on your own team' });
+        return;
+      }
+      if (addingToOwn && target.teamId && target.teamId !== ownTeam) {
+        res.status(403).json({ error: 'You can only pick up free agents' });
+        return;
+      }
+      if (addingToOwn && !target.teamId && !store.isFreeAgencyOpen()) {
+        res.status(400).json({ error: 'Free agency closed when playoffs begin' });
         return;
       }
     } else {
