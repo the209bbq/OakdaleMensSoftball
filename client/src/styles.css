@@ -998,10 +998,16 @@ body {
   color: var(--heading);
 }
 
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-top: 0.5rem;
+}
+
 .table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
-  margin-top: 0.5rem;
 }
 
 .table th,
@@ -1013,11 +1019,17 @@ body {
 
 .table th {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.02em;
   white-space: nowrap;
 }
+
+.standings-col-rank { width: 1.35rem; }
+.standings-col-team { width: auto; }
+.standings-col-n { width: 1.55rem; }
+.standings-col-runs { width: 2.35rem; }
+.standings-col-diff { width: 2.15rem; }
 
 .table tbody tr:first-child td {
   font-weight: 600;
@@ -1026,6 +1038,9 @@ body {
 .team-cell {
   text-align: left !important;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .generate-bar {

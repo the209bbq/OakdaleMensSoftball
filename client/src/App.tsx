@@ -1287,7 +1287,19 @@ function Standings() {
   return (
     <section className="card">
       <h2>League Standings</h2>
-      <table className="table">
+      <div className="table-scroll">
+      <table className="table standings-table">
+        <colgroup>
+          <col className="standings-col-rank" />
+          <col className="standings-col-team" />
+          <col className="standings-col-n" />
+          <col className="standings-col-n" />
+          <col className="standings-col-n" />
+          <col className="standings-col-n" />
+          <col className="standings-col-runs" />
+          <col className="standings-col-n" />
+          <col className="standings-col-diff" />
+        </colgroup>
         <thead>
           <tr>
             <th>#</th>
@@ -1317,6 +1329,7 @@ function Standings() {
           ))}
         </tbody>
       </table>
+      </div>
     </section>
   );
 }
