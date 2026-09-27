@@ -385,6 +385,9 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('Oakdale Tigers')).toBeInTheDocument();
     });
+    expect(screen.getByRole('columnheader', { name: 'Runs' })).toHaveAttribute('title', 'Runs scored');
+    expect(screen.getByRole('columnheader', { name: 'RA' })).toHaveAttribute('title', 'Runs allowed');
+    expect(screen.queryByRole('columnheader', { name: 'RF' })).not.toBeInTheDocument();
   });
 
   it('opens a schedule game on its own page', async () => {
