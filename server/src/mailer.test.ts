@@ -163,6 +163,26 @@ describe('sendSignupNotifications', () => {
     expect(mailer.sent).toHaveLength(1);
   });
 
+  it('still notifies the commissioner if the welcome send fails', async () => {
+    const mailer = recordingMailer();
+    mailer.send = async function send(message: MailMessage) {
+      if (message.to === 'pat@example.com' || message.to === 'blocked@example.com') {
+        throw new Error('testing-only recipient');
+      }
+      this.sent.push(message);
+    };
+    const result = await sendSignupNotifications({
+      mailer,
+      user: { name: 'Pat', email: 'pat@example.com' },
+      notifyEmails: ['blocked@example.com', 'david@example.com'],
+      publicAppUrl: 'https://oakdale-mens-softball.fly.dev',
+    });
+    expect(result.welcome).toBe(false);
+    expect(result.notified).toEqual(['david@example.com']);
+    expect(mailer.sent).toHaveLength(1);
+    expect(mailer.sent[0].to).toBe('david@example.com');
+  });
+
   it('does nothing when mail is not configured', async () => {
     const mailer = createMailer({});
     const result = await sendSignupNotifications({

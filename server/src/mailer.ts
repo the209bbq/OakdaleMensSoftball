@@ -154,6 +154,16 @@ export function buildTestEmail(to: string, publicAppUrl: string): MailMessage {
   };
 }
 
+async function trySend(mailer: Mailer, message: MailMessage, label: string): Promise<boolean> {
+  try {
+    await mailer.send(message);
+    return true;
+  } catch (err) {
+    console.error(`[oakdale-softball] ${label} failed`, err);
+    return false;
+  }
+}
+
 export async function sendSignupNotifications(options: {
   mailer: Mailer;
   user: { name: string; email: string };
@@ -167,16 +177,15 @@ export async function sendSignupNotifications(options: {
   if (isDeliverableEmail(options.user.email)) {
     const welcome = buildWelcomeEmail(options.user, options.publicAppUrl);
     if (replyTo) welcome.replyTo = replyTo;
-    await options.mailer.send(welcome);
-    result.welcome = true;
+    result.welcome = await trySend(options.mailer, welcome, `welcome email to ${welcome.to}`);
   }
 
   const notify = buildSignupNotifyEmail(options.user, options.publicAppUrl);
   if (replyTo) notify.replyTo = replyTo;
   for (const to of options.notifyEmails) {
     if (to === options.user.email.toLowerCase()) continue;
-    await options.mailer.send({ ...notify, to });
-    result.notified.push(to);
+    const ok = await trySend(options.mailer, { ...notify, to }, `signup notice to ${to}`);
+    if (ok) result.notified.push(to);
   }
   return result;
 }
