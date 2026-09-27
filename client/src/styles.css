@@ -121,22 +121,39 @@ body {
   cursor: pointer;
 }
 
-.user-chip {
-  display: flex;
+.user-initials-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  display: inline-flex;
   align-items: center;
-  gap: 0.6rem;
-}
-
-.user-chip-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: none;
-  border: none;
+  justify-content: center;
   padding: 0;
   cursor: pointer;
-  color: inherit;
-  text-align: right;
+}
+
+.user-initials-btn:hover,
+.user-initials-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.24);
+  outline: none;
+}
+
+.user-initials-btn.has-photo {
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.user-initials-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .avatar {
@@ -158,36 +175,9 @@ body {
   letter-spacing: 0.02em;
 }
 
-.user-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  line-height: 1.1;
-}
-
-.user-name {
-  color: #fff;
-  font-weight: 600;
-  font-size: 0.85rem;
-}
-
-.user-role {
-  color: var(--accent);
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.signout-btn {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  padding: 0.35rem 0.7rem;
-  border-radius: 8px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
+.profile-signout {
+  align-self: center;
+  margin-top: 0.15rem;
 }
 
 .app-content {

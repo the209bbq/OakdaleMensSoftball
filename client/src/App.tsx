@@ -65,12 +65,6 @@ function canOpenTeamChat(user: User | null): boolean {
   return user.role === 'admin' || Boolean(user.teamId);
 }
 
-function roleLabel(role: Role): string {
-  if (role === 'admin') return 'Admin';
-  if (role === 'manager') return 'Team Manager';
-  return 'Player';
-}
-
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
@@ -171,7 +165,7 @@ export default function App() {
 }
 
 function AuthControl({ onSignIn, onEditProfile }: { onSignIn: () => void; onEditProfile: () => void }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   if (!user) {
     return (
       <button className="signin-btn" onClick={onSignIn}>
@@ -180,24 +174,14 @@ function AuthControl({ onSignIn, onEditProfile }: { onSignIn: () => void; onEdit
     );
   }
   return (
-    <div className="user-chip">
-      <button className="user-chip-btn" type="button" onClick={onEditProfile} aria-label="Edit profile">
-        {user.photoUrl ? (
-          <img className="avatar" src={user.photoUrl} alt="" />
-        ) : (
-          <span className="avatar avatar-initials" aria-hidden="true">
-            {initials(user.name)}
-          </span>
-        )}
-        <div className="user-meta">
-          <span className="user-name">{user.name}</span>
-          <span className="user-role">{roleLabel(user.role)}</span>
-        </div>
-      </button>
-      <button className="signout-btn" onClick={() => logout()} aria-label="Sign out">
-        Sign out
-      </button>
-    </div>
+    <button
+      className={`user-initials-btn${user.photoUrl ? ' has-photo' : ''}`}
+      type="button"
+      onClick={onEditProfile}
+      aria-label="Edit profile"
+    >
+      {user.photoUrl ? <img src={user.photoUrl} alt="" /> : initials(user.name)}
+    </button>
   );
 }
 
@@ -276,7 +260,7 @@ function AuthModal({ onClose }: { onClose: () => void }) {
 }
 
 function ProfileModal({ onClose }: { onClose: () => void }) {
-  const { user, refresh } = useAuth();
+  const { user, refresh, logout } = useAuth();
   const [name, setName] = useState(user?.name ?? '');
   const [position, setPosition] = useState(user?.position ?? '');
   const [number, setNumber] = useState(user?.number != null ? String(user.number) : '');
@@ -373,6 +357,15 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
           {error && <p className="error inline-error">{error}</p>}
           <button className="primary-btn" type="submit" disabled={busy}>
             {busy ? 'Saving…' : 'Save profile'}
+          </button>
+          <button
+            type="button"
+            className="link-btn profile-signout"
+            onClick={() => {
+              void logout().then(onClose);
+            }}
+          >
+            Sign out
           </button>
         </form>
         <button className="modal-close" onClick={onClose} aria-label="Close">

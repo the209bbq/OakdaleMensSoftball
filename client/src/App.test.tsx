@@ -253,6 +253,10 @@ describe('App', () => {
       expect(screen.getByRole('heading', { name: 'Oakdale Tigers' })).toBeInTheDocument();
     });
     expect(screen.getByText('Hey Pat')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit profile' })).toHaveTextContent('PS');
+    expect(screen.queryByText('Pat Shortstop')).not.toBeInTheDocument();
+    expect(screen.queryByText('Player')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
     expect(screen.getByText('Next game')).toBeInTheDocument();
     expect(screen.getByText('vs Da Beers')).toBeInTheDocument();
     expect(screen.getByText('Field 1')).toBeInTheDocument();
@@ -1068,8 +1072,11 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Edit profile' })).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: 'Edit profile' })).toHaveTextContent('DA');
+    expect(screen.queryByText('Team Manager')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }));
     expect(screen.getByText('I play for the team I manage')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
     expect(screen.getByLabelText('Manager roster option')).toHaveDisplayValue("Yes — on my team's roster");
     expect(screen.queryByLabelText('Join a team')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Change team')).not.toBeInTheDocument();
@@ -1081,6 +1088,42 @@ describe('App', () => {
     });
     expect(screen.queryByLabelText('Join a team')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Change team')).not.toBeInTheDocument();
+  });
+
+  it('shows a profile photo thumbnail in the header when one is uploaded', async () => {
+    const photoUrl = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+    const playerUser = {
+      id: 'u1',
+      email: 'pat@example.com',
+      name: 'Pat Shortstop',
+      role: 'player' as const,
+      teamId: 'tigers',
+      photoUrl,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: playerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Edit profile' })).toBeInTheDocument();
+    });
+    const header = screen.getByRole('button', { name: 'Edit profile' });
+    expect(header.querySelector('img')).toHaveAttribute('src', photoUrl);
+    expect(header).not.toHaveTextContent('PS');
+    fireEvent.click(header);
+    expect(screen.getByRole('heading', { name: 'Your profile' })).toBeInTheDocument();
   });
 
   it('lets an admin send a signup-email test when mail is configured', async () => {
