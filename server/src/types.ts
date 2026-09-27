@@ -80,6 +80,7 @@ export interface StandingRow {
   runsFor: number;
   runsAgainst: number;
   gamesPlayed: number;
+  beers: number;
 }
 
 export type Role = 'admin' | 'manager' | 'player';

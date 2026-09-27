@@ -13,16 +13,19 @@ export function createSeedData(): LeagueData {
   ];
 
   const rules = [
-    'OAKDALE MEN\'S SOFTBALL — OFFICIAL LEAGUE RULES (PLACEHOLDER)',
+    "OAKDALE MEN'S SOFTBALL — BEER LEAGUE RULES",
     '',
-    '1. Placeholder: All disputes are settled by a best-of-three thumb war at home plate.',
-    '2. Placeholder: The home team must provide at least one (1) cooler of orange slices.',
-    '3. Placeholder: A home run earns 1 run and 1 high-five (the high-five is mandatory).',
-    '4. Placeholder: If it rains, everyone agrees it was going to be a tie anyway.',
-    '5. Placeholder: The team with the coolest jerseys gets to bat first. Umpire decides.',
-    '6. Placeholder: Heckling is permitted only in the form of encouraging haiku.',
-    '7. Placeholder: Any dog that runs onto the field is automatically named MVP.',
-    '8. TODO: Replace this entire section with the real league rules before opening day.',
+    'We play rec softball. The record counts. So does the cooler.',
+    '',
+    '1. Ten in the field. Fifteen on the roster. Check in from Home if you are coming.',
+    '2. First pitch is the listed time. Managers set the batting order the day before.',
+    '3. Checked-in players and managers keep the live book. One game, one scoreboard.',
+    '4. Tap beers for the dugout that drank them. The tally is public and updates live.',
+    '5. Home team brings a cooler. Visitors bring bats and a better excuse.',
+    '6. Disputes stay at the field. If it is still unclear, the next batter hits.',
+    '7. Rain, darkness, or an empty keg can end it after five if both managers agree.',
+    '8. Free agency stays open until playoffs. Join a team from Home.',
+    '9. Have fun, do not be a hero in the infield, and get your guy home.',
   ].join('\n');
 
   return { teams, players: [], games: [], users: [], rules, pendingManagers: [] };
