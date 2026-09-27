@@ -1,8 +1,10 @@
 # Fly.io config for Oakdale Men's Softball.
 # Build uses the repo-root Dockerfile (fly deploy / fly launch pick it up;
 # [build] names it explicitly). Secrets such as ADMIN_EMAIL, ADMIN_PASSWORD,
-# ADMIN_NAME, and SESSION_SECRET are NOT in this file — set them with:
+# ADMIN_NAME, SESSION_SECRET, SIGNUP_NOTIFY_EMAIL, and RESEND_API_KEY
+# (or SMTP_*) are NOT in this file — set them with:
 #   fly secrets set ADMIN_EMAIL=... ADMIN_PASSWORD=... ADMIN_NAME=... SESSION_SECRET=...
+#   fly secrets set SIGNUP_NOTIFY_EMAIL=you@example.com RESEND_API_KEY=re_...
 #
 # Replace the placeholder app name (or let `fly launch` assign one).
 
@@ -17,6 +19,7 @@ primary_region = "iad"
   DATA_DIR = "/data"
   SEED_DEMO_USERS = "false"
   PORT = "3001"
+  PUBLIC_APP_URL = "https://oakdale-mens-softball.fly.dev"
 
 [http_service]
   internal_port = 3001

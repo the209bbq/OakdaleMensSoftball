@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { createApp } from './app.js';
 import { LeagueStore } from './store.js';
 import { seedDemoUsers } from './demoUsers.js';
+import { collectNotifyEmails, createMailer, publicAppUrlFrom } from './mailer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3001;
@@ -45,6 +46,22 @@ if (process.env.SEED_DEMO_USERS !== 'false') {
   );
 }
 
+const mailer = createMailer();
+const notifyEmails = collectNotifyEmails({
+  envNotify: process.env.SIGNUP_NOTIFY_EMAIL,
+  adminEmail,
+  adminUsers: store.listUsers(),
+});
+if (mailer.configured) {
+  console.log(
+    `[oakdale-softball] Signup emails: ${mailer.transport} from ${mailer.from}; notify ${notifyEmails.join(', ') || '(none)'}`,
+  );
+} else {
+  console.warn(
+    '[oakdale-softball] Signup emails are off — set RESEND_API_KEY or SMTP settings to notify on new accounts.',
+  );
+}
+
 const sessionSecret = process.env.SESSION_SECRET;
 if (!sessionSecret) {
   console.warn(
@@ -56,6 +73,10 @@ const app = createApp(store, {
   clientDist,
   sessionSecret: sessionSecret || randomBytes(32).toString('hex'),
   secureCookies: process.env.NODE_ENV === 'production' && process.env.INSECURE_COOKIES !== 'true',
+  mailer,
+  adminEmail,
+  notifyEmail: process.env.SIGNUP_NOTIFY_EMAIL,
+  publicAppUrl: process.env.PUBLIC_APP_URL || publicAppUrlFrom(),
 });
 
 app.listen(PORT, () => {

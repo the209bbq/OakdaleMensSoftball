@@ -20,11 +20,25 @@ import {
   type ScoreSide,
   type ScoreStat,
 } from './gameScoring.js';
+import {
+  collectNotifyEmails,
+  createMailer,
+  describeMailStatus,
+  isDeliverableEmail,
+  publicAppUrlFrom,
+  sendSignupNotifications,
+  buildTestEmail,
+  type Mailer,
+} from './mailer.js';
 
 export interface AppOptions {
   clientDist?: string;
   sessionSecret?: string;
   secureCookies?: boolean;
+  mailer?: Mailer;
+  notifyEmail?: string;
+  adminEmail?: string;
+  publicAppUrl?: string;
 }
 
 // Augment Express Request with the authenticated user.
@@ -40,6 +54,14 @@ declare global {
 export function createApp(store: LeagueStore, options: AppOptions = {}): Express {
   const sessionSecret = options.sessionSecret ?? 'dev-insecure-secret-change-me';
   const secureCookies = options.secureCookies ?? false;
+  const mailer = options.mailer ?? createMailer();
+  const publicAppUrl = options.publicAppUrl ?? publicAppUrlFrom();
+  const notifyEmails = () =>
+    collectNotifyEmails({
+      envNotify: options.notifyEmail ?? process.env.SIGNUP_NOTIFY_EMAIL,
+      adminEmail: options.adminEmail ?? process.env.ADMIN_EMAIL,
+      adminUsers: store.listUsers(),
+    });
 
   const app = express();
   app.use(cors({ origin: true, credentials: true }));
@@ -112,10 +134,20 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
   // ---- Auth --------------------------------------------------------------
 
-  api.post('/auth/register', (req: Request, res: Response) => {
+  api.post('/auth/register', async (req: Request, res: Response) => {
     try {
       const { email, name, password } = req.body ?? {};
       const user = store.registerUser({ email, name, password });
+      try {
+        await sendSignupNotifications({
+          mailer,
+          user,
+          notifyEmails: notifyEmails(),
+          publicAppUrl,
+        });
+      } catch (mailErr) {
+        console.error('[oakdale-softball] signup email failed', mailErr);
+      }
       setSessionCookie(res, user.id);
       res.status(201).json(user);
     } catch (err) {
@@ -767,6 +799,37 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       res.json(store.clearTestData());
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.get('/mail', requireAdmin, (_req: Request, res: Response) => {
+    res.json(
+      describeMailStatus({
+        mailer,
+        notifyEmails: notifyEmails(),
+        publicAppUrl,
+      }),
+    );
+  });
+
+  api.post('/mail/test', requireAdmin, async (req: Request, res: Response) => {
+    if (!mailer.configured) {
+      res.status(503).json({ error: 'Email is not configured. Set RESEND_API_KEY or SMTP settings.' });
+      return;
+    }
+    const recipients = notifyEmails();
+    const to = isDeliverableEmail(req.user?.email) ? req.user!.email.toLowerCase() : recipients[0];
+    if (!to) {
+      res.status(400).json({
+        error: 'No deliverable address to send a test to. Set SIGNUP_NOTIFY_EMAIL to a real inbox.',
+      });
+      return;
+    }
+    try {
+      await mailer.send(buildTestEmail(to, publicAppUrl));
+      res.json({ ok: true, to });
+    } catch (err) {
+      res.status(502).json({ error: (err as Error).message });
     }
   });
 

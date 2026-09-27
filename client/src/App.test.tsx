@@ -1082,4 +1082,56 @@ describe('App', () => {
     expect(screen.queryByLabelText('Join a team')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Change team')).not.toBeInTheDocument();
   });
+
+  it('lets an admin send a signup-email test when mail is configured', async () => {
+    const adminUser = {
+      id: 'u-admin',
+      email: 'admin@oakdale.local',
+      name: 'Commish',
+      role: 'admin' as const,
+      teamId: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/api/auth/me')) return jsonOk({ user: adminUser });
+      if (url.includes('/api/theme')) return jsonOk(theme);
+      if (url.includes('/api/landing')) return jsonOk(landing);
+      if (url.includes('/api/standings')) return jsonOk(standings);
+      if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+      if (url.includes('/api/suggestions')) return jsonOk([]);
+      if (url.includes('/api/manager-emails')) return jsonOk([]);
+      if (url.includes('/api/users')) return jsonOk([adminUser]);
+      if (url.includes('/roster')) return jsonOk(rosterPayload);
+      if (url.includes('/api/teams')) return jsonOk(teams);
+      if (url.includes('/api/mail/test') && init?.method === 'POST') {
+        return jsonOk({ ok: true, to: 'david@example.com' });
+      }
+      if (url.includes('/api/mail')) {
+        return jsonOk({
+          configured: true,
+          transport: 'resend',
+          from: 'League <noreply@test.dev>',
+          notifyEmails: ['david@example.com'],
+          publicAppUrl: 'https://oakdale-mens-softball.fly.dev',
+        });
+      }
+      return jsonOk([]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Admin' }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Signup emails' })).toBeInTheDocument();
+    });
+    expect(screen.getByText(/on via resend/i)).toBeInTheDocument();
+    expect(screen.getByText(/david@example.com/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Send test email' }));
+    await waitFor(() => {
+      expect(screen.getByText('Test email sent to david@example.com.')).toBeInTheDocument();
+    });
+  });
 });
