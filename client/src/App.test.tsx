@@ -312,6 +312,7 @@ describe('App', () => {
       expect(screen.getByRole('heading', { name: 'Oakdale Tigers' })).toBeInTheDocument();
     });
     expect(screen.getByText('Hey Pat')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Oakdale Tigers' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit profile' })).toHaveTextContent('PS');
     expect(screen.queryByText('Pat Shortstop')).not.toBeInTheDocument();
     expect(screen.queryByText('Player')).not.toBeInTheDocument();
@@ -333,6 +334,81 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Da Beers at Oakdale Tigers' })).toBeInTheDocument();
     });
+  });
+
+  it('opens a team profile from the player home team name', async () => {
+    const playerUser = {
+      id: 'u1',
+      email: 'pat@example.com',
+      name: 'Pat Shortstop',
+      role: 'player' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: playerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) {
+          return jsonOk(scheduleGames[0]);
+        }
+        if (url.includes('/api/team-board')) return jsonOk(teamBoard);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Open Oakdale Tigers' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Oakdale Tigers' }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Team record')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('heading', { name: 'Oakdale Tigers' })).toBeInTheDocument();
+    expect(screen.getByText('This week')).toBeInTheDocument();
+    expect(screen.getByText('vs Da Beers')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back' })).toHaveTextContent('← Home');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Open Oakdale Tigers' })).toBeInTheDocument();
+    });
+  });
+
+  it('shows No team on home when a player is not attached', async () => {
+    const freeAgent = {
+      id: 'u-fa',
+      email: 'fa@example.com',
+      name: 'Free Agent Joe',
+      role: 'player' as const,
+      teamId: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: freeAgent });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'No team' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /open /i })).not.toBeInTheDocument();
+    expect(screen.getByText(/join a team from teams/i)).toBeInTheDocument();
   });
 
   it('lets an admin open the landing editor', async () => {
@@ -853,6 +929,14 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('Pat Shortstop')).toBeInTheDocument();
     });
+    await waitFor(() => {
+      expect(screen.getByLabelText('Team record')).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Team record')).toHaveTextContent('W');
+    expect(screen.getByLabelText('Team record')).toHaveTextContent('2');
+    expect(screen.getByLabelText('Team run totals')).toHaveTextContent('Runs');
+    expect(screen.getByText('This week')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open this week's game vs da beers/i })).toBeInTheDocument();
     expect(screen.getByText('Roster · 3/15')).toBeInTheDocument();
     expect(screen.getByText('Placeholder Guy')).toBeInTheDocument();
     expect(screen.getByText(/#9 · OF · Unregistered/)).toBeInTheDocument();
