@@ -120,6 +120,8 @@ const rosterPayload = {
     { id: 'u1', name: 'Pat Shortstop', number: 12, position: 'SS', isManager: false, checkIn: null },
   ],
   manager: { name: 'Coach' },
+  managers: [{ name: 'Coach', onRoster: true }],
+  managerSpots: 2,
   currentWeek: { week: 1, date: '2026-05-06' },
   freeAgencyOpen: true,
 };
@@ -128,6 +130,7 @@ const teamBoard = {
   currentWeek: { week: 1, date: '2026-05-06' },
   fullLineupSize: 10,
   rosterSpots: 15,
+  managerSpots: 2,
   freeAgencyOpen: true,
   lastRegularSeasonDate: '2026-05-06',
   freeAgents: [{ id: 'u-fa', name: 'Free Agent Joe' }],
@@ -140,6 +143,7 @@ const teamBoard = {
       checkedInCount: 1,
       lineupStatus: 'need_guys' as const,
       manager: { name: 'Coach' },
+      managers: [{ name: 'Coach', onRoster: true }],
       weekGame: {
         id: 'g1',
         date: '2026-05-06',
@@ -751,8 +755,9 @@ describe('App', () => {
     expect(screen.getByText(/#9 · OF · Unregistered/)).toBeInTheDocument();
     expect(screen.getAllByText('Open spot').length).toBe(12);
     expect(screen.getByText('#12 · SS')).toBeInTheDocument();
-    expect(screen.getAllByText('Manager: Coach').length).toBeGreaterThan(0);
-    expect(screen.getByText('Manager')).toBeInTheDocument();
+    expect(screen.getAllByText(/Managers · 1\/2/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Open manager spot')).toBeInTheDocument();
+    expect(screen.getAllByText('Manager').length).toBeGreaterThan(0);
     expect(screen.getByText(/Check-in — Week 1 · Wed May 6/)).toBeInTheDocument();
     expect(screen.getByText(/🥎 1 · 🚫 0 · — 1/)).toBeInTheDocument();
     expect(screen.getByLabelText('Coach is in')).toHaveTextContent('🥎');
@@ -1309,13 +1314,13 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Promote players to manager' })).toBeInTheDocument();
     });
-    const teamSelect = screen.getByLabelText('Team without a manager');
-    expect(teamSelect).toHaveDisplayValue('Cold Beers');
-    expect(teamSelect).not.toHaveTextContent('Oakdale Tigers');
+    const teamSelect = screen.getByLabelText('Team with an open manager spot');
+    expect(teamSelect).toHaveTextContent(/Cold Beers/);
+    expect(teamSelect).toHaveTextContent(/Oakdale Tigers/);
     expect(screen.getByLabelText('Player to promote')).toHaveDisplayValue(/Pat/);
     expect(screen.getByLabelText('Manager roster option')).toHaveDisplayValue('Yes — for this team');
     expect(
-      screen.getByText(/only teams that still need a manager are listed/i),
+      screen.getByText(/each team has 2 manager spots/i),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Manager type for David')).toHaveDisplayValue('Plays for this team');
     expect(screen.getByLabelText('Role for Pat')).not.toHaveTextContent('Admin');
@@ -1325,7 +1330,7 @@ describe('App', () => {
     expect(screen.getByText(/there is one league admin/i)).toBeInTheDocument();
   });
 
-  it('hides the promote form when every team already has a manager', async () => {
+  it('hides the promote form when every team already has two managers', async () => {
     const adminUser = {
       id: 'u-admin',
       email: 'admin@oakdale.local',
@@ -1343,6 +1348,15 @@ describe('App', () => {
       onRoster: true,
       createdAt: '2026-04-01T00:00:00.000Z',
     };
+    const backupUser = {
+      id: 'u-mgr-2',
+      email: 'backup@oakdale.local',
+      name: 'Backup',
+      role: 'manager' as const,
+      teamId: 'tigers',
+      onRoster: true,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
@@ -1353,7 +1367,7 @@ describe('App', () => {
         if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
         if (url.includes('/api/suggestions')) return jsonOk([]);
         if (url.includes('/api/manager-emails')) return jsonOk([]);
-        if (url.includes('/api/users')) return jsonOk([adminUser, managerUser]);
+        if (url.includes('/api/users')) return jsonOk([adminUser, managerUser, backupUser]);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
         if (url.includes('/api/teams')) return jsonOk(teams);
         return jsonOk([]);
@@ -1366,9 +1380,9 @@ describe('App', () => {
     });
     fireEvent.click(screen.getByRole('tab', { name: 'Admin' }));
     await waitFor(() => {
-      expect(screen.getByText('Every team already has a manager.')).toBeInTheDocument();
+      expect(screen.getByText('Every team already has 2 managers.')).toBeInTheDocument();
     });
-    expect(screen.queryByLabelText('Team without a manager')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Team with an open manager spot')).not.toBeInTheDocument();
   });
 
   it('lets a manager choose whether they play for their own team, without a second team picker', async () => {

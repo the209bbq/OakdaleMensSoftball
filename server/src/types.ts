@@ -207,6 +207,12 @@ export interface PendingManager {
   onRoster: boolean;
 }
 
+/** Public-safe manager slot on a team (name only). */
+export interface TeamManagerSummary {
+  name: string;
+  onRoster: boolean;
+}
+
 /** Active manager row for the admin list. */
 export interface ManagerAuthorization {
   email: string;
@@ -244,7 +250,8 @@ export interface TeamBoardRow extends Team {
   rosterFilled: number;
   checkedInCount: number;
   lineupStatus: LineupStatus;
-  manager: { name: string; onRoster: boolean } | null;
+  manager: TeamManagerSummary | null;
+  managers: TeamManagerSummary[];
   weekGame: TeamWeekGame | null;
 }
 
@@ -253,6 +260,7 @@ export interface TeamBoard {
   currentWeek: CurrentWeek | null;
   fullLineupSize: number;
   rosterSpots: number;
+  managerSpots: number;
   freeAgencyOpen: boolean;
   lastRegularSeasonDate: string | null;
   freeAgents: FreeAgent[];

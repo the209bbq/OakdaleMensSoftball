@@ -29,6 +29,7 @@ import type {
   TeamBoard,
   TeamMember,
   TeamMessage,
+  TeamManagerSummary,
   TeamWeekGame,
   User,
   WaiverStatus,
@@ -112,6 +113,9 @@ export const MAX_MESSAGE_CHARS = 2000;
 
 /** Checked-in "in" count that counts as a full weekly lineup. */
 export const FULL_LINEUP_SIZE = 10;
+
+/** Each team can have two managers so a backup can keep score. */
+export const MANAGERS_PER_TEAM = 2;
 
 /** Guest accounts created by the admin Test Data simulator. Easy to find/remove. */
 export const SIM_EMAIL_DOMAIN = '@sim.local';
@@ -999,19 +1003,22 @@ export class LeagueStore {
       currentWeek: current,
       fullLineupSize: FULL_LINEUP_SIZE,
       rosterSpots: TEAM_ROSTER_SPOTS,
+      managerSpots: MANAGERS_PER_TEAM,
       freeAgencyOpen: this.isFreeAgencyOpen(),
       lastRegularSeasonDate: this.getLastRegularSeasonDate(),
       freeAgents: this.getFreeAgents(viewer),
       teams: teams.map((team) => {
         const memberIds = membersByTeam.get(team.id) ?? [];
         const checkedInCount = memberIds.filter((id) => checkIns.get(id) === 'in').length;
+        const managers = this.getTeamManagers(team.id);
         return {
           ...team,
           memberCount: memberIds.length,
           rosterFilled: memberIds.length + this.getRoster(team.id).length,
           checkedInCount,
           lineupStatus: checkedInCount >= FULL_LINEUP_SIZE ? 'full_lineup' : 'need_guys',
-          manager: this.getTeamManager(team.id),
+          manager: managers[0] ?? null,
+          managers,
           weekGame: weekGames.get(team.id) ?? null,
         };
       }),
@@ -2204,6 +2211,10 @@ export class LeagueStore {
         throw new Error('Managers can only be promoted from a player account');
       }
       if (!teamId || !this.getTeam(teamId)) throw new Error('A valid team is required for managers');
+      const alreadyHere = user.role === 'manager' && user.teamId === teamId;
+      if (!alreadyHere && this.getTeamManagers(teamId).length >= MANAGERS_PER_TEAM) {
+        throw new Error(`This team already has ${MANAGERS_PER_TEAM} managers`);
+      }
       user.teamId = teamId;
       user.onRoster = onRoster === undefined ? (user.role === 'manager' ? user.onRoster !== false : true) : onRoster;
     } else {
@@ -2411,11 +2422,18 @@ export class LeagueStore {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** Manager-role user assigned to this team, or null. Name only — never email. */
-  getTeamManager(teamId: string): { name: string; onRoster: boolean } | null {
+  /** Manager-role users assigned to this team. Name only — never email. */
+  getTeamManagers(teamId: string): TeamManagerSummary[] {
     const rows = this.db.prepare('SELECT * FROM users ORDER BY rowid').all() as UserRow[];
-    const manager = rows.map(userFromRow).find((u) => u.role === 'manager' && u.teamId === teamId);
-    return manager ? { name: manager.name, onRoster: manager.onRoster !== false } : null;
+    return rows
+      .map(userFromRow)
+      .filter((u) => u.role === 'manager' && u.teamId === teamId)
+      .map((u) => ({ name: u.name, onRoster: u.onRoster !== false }));
+  }
+
+  /** First manager on this team, or null. Name only — never email. */
+  getTeamManager(teamId: string): TeamManagerSummary | null {
+    return this.getTeamManagers(teamId)[0] ?? null;
   }
 
   /**
@@ -2443,6 +2461,11 @@ export class LeagueStore {
 
         const existing = this.getUserByEmail(email);
         if (!existing || (existing.role !== 'player' && existing.role !== 'manager')) {
+          skipped.push(email);
+          continue;
+        }
+        const alreadyHere = existing.role === 'manager' && existing.teamId === teamId;
+        if (!alreadyHere && this.getTeamManagers(teamId).length >= MANAGERS_PER_TEAM) {
           skipped.push(email);
           continue;
         }

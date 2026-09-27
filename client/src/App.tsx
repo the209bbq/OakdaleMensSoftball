@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, SKILL_LEVEL_LABELS, SKILL_LEVELS, TEAM_ROSTER_SPOTS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PlayerStatsSheetStatus, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
+import { api, MANAGERS_PER_TEAM, SKILL_LEVEL_LABELS, SKILL_LEVELS, TEAM_ROSTER_SPOTS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PlayerStatsSheetStatus, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TeamManagerSummary, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl, fileToWaiverDataUrl } from './image';
 import { applyTheme } from './theme';
@@ -49,6 +49,12 @@ function pathForTeam(teamId: string): string {
 
 function pathForPlayer(playerId: string): string {
   return `/players/${playerId}`;
+}
+
+function teamManagersOf(row?: { manager?: TeamManagerSummary | null; managers?: TeamManagerSummary[] } | null): TeamManagerSummary[] {
+  if (!row) return [];
+  if (row.managers && row.managers.length > 0) return row.managers;
+  return row.manager ? [row.manager] : [];
 }
 
 function skillLabel(level?: SkillLevel | null): string | null {
@@ -2627,9 +2633,17 @@ function TeamsBoard({
                       {team.weekGame.time || 'Time TBD'}
                     </span>
                   )}
-                  {team.manager && (
-                    <span className="team-board-mgr">Manager: {team.manager.name}</span>
-                  )}
+                  {(() => {
+                    const mgrs = teamManagersOf(team);
+                    const spots = board.managerSpots ?? MANAGERS_PER_TEAM;
+                    const names = mgrs.map((m) => m.name).join(' · ');
+                    return (
+                      <span className="team-board-mgr">
+                        Managers · {mgrs.length}/{spots}
+                        {names ? ` · ${names}` : ' · open spot to keep score'}
+                      </span>
+                    );
+                  })()}
                   <span className="team-board-roster">
                     {team.rosterFilled}/{board.rosterSpots ?? TEAM_ROSTER_SPOTS} spots
                   </span>
@@ -2857,8 +2871,8 @@ function TeamPage({
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
   const [freeAgencyOpen, setFreeAgencyOpen] = useState(true);
-  const [managerName, setManagerName] = useState<string | null>(null);
-  const [managerOnRoster, setManagerOnRoster] = useState(true);
+  const [managers, setManagers] = useState<TeamManagerSummary[]>([]);
+  const [managerSpots, setManagerSpots] = useState(MANAGERS_PER_TEAM);
   const [checkingIn, setCheckingIn] = useState(false);
   const [accounts, setAccounts] = useState<PlayerAccount[]>([]);
   const [pickMember, setPickMember] = useState('');
@@ -2880,8 +2894,8 @@ function TeamPage({
       setMembers(r.members ?? []);
       setCurrentWeek(r.currentWeek ?? null);
       setFreeAgencyOpen(r.freeAgencyOpen !== false);
-      setManagerName(r.manager?.name ?? null);
-      setManagerOnRoster(r.manager?.onRoster !== false);
+      setManagers(teamManagersOf(r));
+      setManagerSpots(r.managerSpots ?? MANAGERS_PER_TEAM);
     });
   }, [teamId]);
 
@@ -3074,12 +3088,12 @@ function TeamPage({
           )}
           <div>
             <h3 className="roster-team-name">{team.name}</h3>
-            {managerName && (
-              <p className="roster-manager">
-                Manager: {managerName}
-                {managerOnRoster ? '' : ' · does not play'}
-              </p>
-            )}
+            <p className="roster-manager">
+              Managers · {managers.length}/{managerSpots}
+              {managers.length > 0
+                ? ` · ${managers.map((m) => (m.onRoster === false ? `${m.name} (score only)` : m.name)).join(' · ')}`
+                : ' · open spots so someone can keep score'}
+            </p>
           </div>
         </div>
       )}
@@ -3148,6 +3162,39 @@ function TeamPage({
       )}
 
       {message && <p className="message">{message}</p>}
+
+      <h3 className="roster-heading">
+        Managers · {managers.length}/{managerSpots}
+      </h3>
+      <ul className="member-list roster-spots">
+        {managers.map((m, index) => (
+          <li key={`mgr-${m.name}-${index}`} className="member-row">
+            <span className="avatar avatar-initials member-avatar" aria-hidden="true">
+              {initials(m.name)}
+            </span>
+            <div className="member-info">
+              <span className="member-name">
+                <span>{m.name}</span>
+                <span className="manager-badge">Manager</span>
+              </span>
+              <span className="member-meta">
+                {m.onRoster === false ? 'Keeps score · does not play' : 'Keeps score · on the roster'}
+              </span>
+            </div>
+          </li>
+        ))}
+        {Array.from({ length: Math.max(0, managerSpots - managers.length) }, (_, i) => (
+          <li key={`mgr-open-${i}`} className="member-row is-open">
+            <span className="avatar member-avatar roster-spot-num" aria-hidden="true">
+              {managers.length + i + 1}
+            </span>
+            <div className="member-info">
+              <span className="member-name">Open manager spot</span>
+              <span className="member-meta">Can keep score if the other manager is out</span>
+            </div>
+          </li>
+        ))}
+      </ul>
 
       <h3 className="roster-heading">
         Roster · {members.length + roster.length}/{TEAM_ROSTER_SPOTS}
@@ -3511,11 +3558,18 @@ function Admin() {
   const [sheetBusy, setSheetBusy] = useState<'sync' | 'preview' | 'csv' | null>(null);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
-  const managedTeamIds = useMemo(
-    () => new Set(users.filter((u) => u.role === 'manager' && u.teamId).map((u) => u.teamId as string)),
-    [users],
+  const managerCountByTeam = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const u of users) {
+      if (u.role !== 'manager' || !u.teamId) continue;
+      counts.set(u.teamId, (counts.get(u.teamId) ?? 0) + 1);
+    }
+    return counts;
+  }, [users]);
+  const openTeams = useMemo(
+    () => teams.filter((t) => (managerCountByTeam.get(t.id) ?? 0) < MANAGERS_PER_TEAM),
+    [teams, managerCountByTeam],
   );
-  const openTeams = useMemo(() => teams.filter((t) => !managedTeamIds.has(t.id)), [teams, managedTeamIds]);
   const playerAccounts = useMemo(() => users.filter((u) => u.role === 'player'), [users]);
 
   useEffect(() => {
@@ -4014,24 +4068,27 @@ function Admin() {
 
       <h3 className="admin-users-heading">Promote players to manager</h3>
       {openTeams.length === 0 ? (
-        <p className="member-empty">Every team already has a manager.</p>
+        <p className="member-empty">Every team already has 2 managers.</p>
       ) : playerAccounts.length === 0 ? (
         <p className="member-empty">No player accounts to promote yet.</p>
       ) : (
         <form className="mgr-auth-form" onSubmit={authorizeManagers}>
           <label className="field">
-            Team without a manager:{' '}
+            Team with an open manager spot:{' '}
             <select
-              aria-label="Team without a manager"
+              aria-label="Team with an open manager spot"
               value={mgrTeamId}
               onChange={(e) => setMgrTeamId(e.target.value)}
               required
             >
-              {openTeams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
+              {openTeams.map((t) => {
+                const filled = managerCountByTeam.get(t.id) ?? 0;
+                return (
+                  <option key={t.id} value={t.id}>
+                    {t.name} · {filled}/{MANAGERS_PER_TEAM} managers
+                  </option>
+                );
+              })}
             </select>
           </label>
           <label className="field">
@@ -4061,8 +4118,9 @@ function Admin() {
             </select>
           </label>
           <p className="theme-help">
-            Only teams that still need a manager are listed. Pick an existing player to
-            promote. Playing managers stay on the team they manage.
+            Each team has 2 manager spots so a backup can keep score if the other is out.
+            Only teams with an open spot are listed. Playing managers stay on the team they
+            manage.
           </p>
           <button className="primary-btn" type="submit" disabled={authorizing || !mgrTeamId || !mgrPlayerId}>
             {authorizing ? 'Promoting…' : 'Promote to manager'}
@@ -4136,7 +4194,9 @@ function Admin() {
                   value={u.teamId ?? ''}
                   onChange={(e) => changeRole(u, 'manager', e.target.value, u.onRoster !== false)}
                 >
-                  {teams.map((t) => (
+                  {teams
+                    .filter((t) => t.id === u.teamId || (managerCountByTeam.get(t.id) ?? 0) < MANAGERS_PER_TEAM)
+                    .map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
                     </option>

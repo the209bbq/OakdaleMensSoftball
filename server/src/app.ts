@@ -3,7 +3,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { LeagueStore } from './store.js';
+import { LeagueStore, MANAGERS_PER_TEAM } from './store.js';
 import type { Game, LandingContent, PublicUser, TeamAttendance } from './types.js';
 import {
   SESSION_COOKIE,
@@ -334,11 +334,14 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       res.status(404).json({ error: 'Team not found' });
       return;
     }
+    const managers = store.getTeamManagers(team.id);
     res.json({
       team,
       roster: store.getRoster(team.id),
       members: store.getTeamMembers(team.id),
-      manager: store.getTeamManager(team.id),
+      manager: managers[0] ?? null,
+      managers,
+      managerSpots: MANAGERS_PER_TEAM,
       currentWeek: store.getCurrentWeek(),
       freeAgencyOpen: store.isFreeAgencyOpen(),
     });
