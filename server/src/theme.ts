@@ -1,4 +1,4 @@
-export type ThemeId = 'classic' | 'night' | 'grass' | 'clay' | 'custom';
+export type ThemeId = 'classic' | 'night' | 'grass' | 'clay' | 'liberty' | 'custom';
 
 export interface ThemeColors {
   navy: string;
@@ -37,6 +37,24 @@ export interface Theme extends ThemeColors {
 const HEX = /^#([0-9a-f]{6})$/i;
 
 export const THEME_PRESETS: ThemePreset[] = [
+  {
+    id: 'liberty',
+    label: 'Navy and gold',
+    blurb: 'Navy, clean white, and a quiet gold',
+    colors: {
+      navy: '#1d3557',
+      navyLight: '#27436b',
+      accent: '#f2a900',
+      accentDark: '#d99400',
+      bg: '#f7f8fb',
+      card: '#ffffff',
+      text: '#1d2a3a',
+      muted: '#5d6d7e',
+      border: '#d8e0ea',
+      heading: '#1d3557',
+      onAccent: '#1d3557',
+    },
+  },
   {
     id: 'classic',
     label: 'Classic navy',
@@ -111,7 +129,7 @@ export const THEME_PRESETS: ThemePreset[] = [
   },
 ];
 
-export const DEFAULT_THEME_INPUT: ThemeInput = { id: 'grass' };
+export const DEFAULT_THEME_INPUT: ThemeInput = { id: 'liberty' };
 
 function clampByte(n: number): number {
   return Math.max(0, Math.min(255, Math.round(n)));
@@ -145,7 +163,14 @@ export function normalizeHex(value: unknown, fallback: string): string {
 }
 
 export function isThemeId(value: unknown): value is ThemeId {
-  return value === 'classic' || value === 'night' || value === 'grass' || value === 'clay' || value === 'custom';
+  return (
+    value === 'classic' ||
+    value === 'night' ||
+    value === 'grass' ||
+    value === 'clay' ||
+    value === 'liberty' ||
+    value === 'custom'
+  );
 }
 
 function customColors(primary: string, accent: string): ThemeColors {
@@ -215,7 +240,7 @@ export function resolveTheme(input: ThemeInput): Theme {
 export function normalizeThemeInput(body: unknown): ThemeInput {
   const raw = (body ?? {}) as Partial<ThemeInput>;
   if (!isThemeId(raw.id)) {
-    throw new Error('id must be classic, night, grass, clay, or custom');
+    throw new Error('id must be classic, night, grass, clay, liberty, or custom');
   }
   if (raw.id !== 'custom') return { id: raw.id };
   const fallback = THEME_PRESETS[0].colors;

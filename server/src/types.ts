@@ -31,6 +31,26 @@ export interface Game {
   week: number;
 }
 
+export type { GameBoxScore, ScoreSide, ScoreStat, ScoringPhase, ScoringWindow } from './gameScoring.js';
+
+/** One batter in a game lineup (account member or unregistered roster row). */
+export interface LineupPlayer {
+  id: string;
+  name: string;
+  number: number | null;
+  position?: string;
+}
+
+export interface GameLineup {
+  teamId: string;
+  slots: LineupPlayer[];
+  atBat: LineupPlayer | null;
+  onDeck: LineupPlayer | null;
+  canEdit: boolean;
+  locksAt: string | null;
+  saved: boolean;
+}
+
 /** Account-member check-in counts for one team in one scheduled week. */
 export interface TeamAttendance {
   in: number;
@@ -57,8 +77,14 @@ export interface User {
   email: string;
   name: string;
   role: Role;
-  /** For managers: the team they manage. For players: the team they belong to. Null for admins. */
+  /** For managers: the team they manage (and play for, unless onRoster is false). For players: the team they belong to. Null for admins. */
   teamId: string | null;
+  /**
+   * Managers default to playing for the team they manage.
+   * `false` is manager-only: they still manage, but they are not on the roster.
+   * Players and admins ignore this (players are always on their team).
+   */
+  onRoster: boolean;
   passwordHash: string;
   createdAt: string;
   /** Self-editable profile fields. */
@@ -92,24 +118,27 @@ export interface TeamMember {
   number: number | null;
   position?: string;
   photoUrl?: string;
-  /** True when this member is the team's manager (managers also play). */
+  /** True when this member is the team's manager and also plays. */
   isManager: boolean;
   /** Current-week RSVP; null means no response. */
   checkIn: CheckInStatus | null;
 }
 
-/** Pre-authorization allowlist entry: email is granted manager of teamId on signup. */
+/** Legacy import-only row. New signups are always players. */
 export interface PendingManager {
   email: string;
   teamId: string;
+  onRoster: boolean;
 }
 
-/** Combined active-manager + pending-authorization row for the admin UI. */
+/** Active manager row for the admin list. */
 export interface ManagerAuthorization {
   email: string;
   teamId: string;
   teamName: string;
-  status: 'active' | 'pending';
+  status: 'active';
+  /** Playing managers are on this team's roster; manager-only is not. */
+  onRoster: boolean;
 }
 
 /** Player-account picker row (no email). */

@@ -20,6 +20,56 @@ export interface TeamAttendance {
   total: number;
 }
 
+export type ScoringPhase = 'upcoming' | 'live' | 'grace' | 'locked';
+export type ScoreSide = 'home' | 'away';
+export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs';
+export type InningHalf = 'top' | 'bottom';
+
+export interface LineupPlayer {
+  id: string;
+  name: string;
+  number: number | null;
+  position?: string;
+}
+
+export interface GameLineup {
+  teamId: string;
+  slots: LineupPlayer[];
+  atBat: LineupPlayer | null;
+  onDeck: LineupPlayer | null;
+  canEdit: boolean;
+  locksAt: string | null;
+  saved: boolean;
+}
+
+export interface GameBoxScore {
+  homeRuns: number;
+  awayRuns: number;
+  homeHits: number;
+  awayHits: number;
+  homeWalks: number;
+  awayWalks: number;
+  homeOuts: number;
+  awayOuts: number;
+  currentOuts: number;
+  awayLine?: number[];
+  homeLine?: number[];
+  currentInning?: number;
+  currentHalf?: InningHalf;
+  batterUp?: ScoreSide;
+}
+
+export interface GameScoring {
+  phase: ScoringPhase;
+  open: boolean;
+  opensAt: string | null;
+  liveEndsAt: string | null;
+  closesAt: string | null;
+  liveStartedAt: string | null;
+  canStart: boolean;
+  canScore: boolean;
+}
+
 export interface Game {
   id: string;
   date: string;
@@ -36,6 +86,9 @@ export interface Game {
   week: number;
   homeAttendance?: TeamAttendance;
   awayAttendance?: TeamAttendance;
+  box?: GameBoxScore;
+  scoring?: GameScoring;
+  lineups?: { away: GameLineup; home: GameLineup };
 }
 
 export interface StandingRow {
@@ -57,6 +110,8 @@ export interface User {
   name: string;
   role: Role;
   teamId: string | null;
+  /** Managers play for their team unless this is false (manager-only). */
+  onRoster?: boolean;
   createdAt: string;
   position?: string;
   number?: number | null;
@@ -85,7 +140,8 @@ export interface ManagerAuthorization {
   email: string;
   teamId: string;
   teamName: string;
-  status: 'active' | 'pending';
+  status: 'active';
+  onRoster?: boolean;
 }
 
 /** Player-account picker row (no email). */
@@ -97,6 +153,7 @@ export interface PlayerAccount {
 
 export interface TeamManagerSummary {
   name: string;
+  onRoster?: boolean;
 }
 
 export interface RosterResponse {
@@ -112,6 +169,7 @@ export interface ProfileUpdate {
   position?: string;
   number?: number | null;
   photoUrl?: string | null;
+  onRoster?: boolean;
 }
 
 export interface Landing {
@@ -178,6 +236,29 @@ export const api = {
   // Public reads
   getStandings: () => request<StandingRow[]>('/api/standings'),
   getSchedule: () => request<Game[]>('/api/schedule'),
+  getGame: (gameId: string) => request<Game>(`/api/games/${gameId}`),
+  startLiveGame: (gameId: string) =>
+    request<Game>(`/api/games/${gameId}/scorelog/start`, { method: 'POST' }),
+  bumpScoreStat: (gameId: string, side: ScoreSide, stat: ScoreStat, delta: number) =>
+    request<Game>(`/api/games/${gameId}/scorelog/stat`, {
+      method: 'POST',
+      body: JSON.stringify({ side, stat, delta }),
+    }),
+  bumpCurrentOuts: (gameId: string, delta: number) =>
+    request<Game>(`/api/games/${gameId}/scorelog/outs`, {
+      method: 'POST',
+      body: JSON.stringify({ delta }),
+    }),
+  bumpInningRun: (gameId: string, side: ScoreSide, inning: number, delta: number) =>
+    request<Game>(`/api/games/${gameId}/scorelog/inning`, {
+      method: 'POST',
+      body: JSON.stringify({ side, inning, delta }),
+    }),
+  saveLineup: (gameId: string, teamId: string, playerIds: string[]) =>
+    request<Game>(`/api/games/${gameId}/lineups/${teamId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ playerIds }),
+    }),
   getTeams: () => request<Team[]>('/api/teams'),
   getRoster: (teamId: string) => request<RosterResponse>(`/api/teams/${teamId}/roster`),
   getRules: () => request<{ rules: string }>('/api/rules'),
@@ -223,10 +304,10 @@ export const api = {
 
   // Admin
   listUsers: () => request<User[]>('/api/users'),
-  setUserRole: (userId: string, role: Role, teamId: string | null) =>
+  setUserRole: (userId: string, role: Role, teamId: string | null, onRoster?: boolean) =>
     request<User>(`/api/users/${userId}/role`, {
       method: 'POST',
-      body: JSON.stringify({ role, teamId }),
+      body: JSON.stringify({ role, teamId, ...(onRoster === undefined ? {} : { onRoster }) }),
     }),
   createTeam: (name: string) =>
     request<Team>('/api/teams', { method: 'POST', body: JSON.stringify({ name }) }),
@@ -244,10 +325,10 @@ export const api = {
   updateRules: (rules: string) =>
     request<{ rules: string }>('/api/rules', { method: 'PUT', body: JSON.stringify({ rules }) }),
   listManagerEmails: () => request<ManagerAuthorization[]>('/api/manager-emails'),
-  authorizeManagers: (emails: string | string[], teamId: string) =>
-    request<{ promoted: string[]; pending: string[] }>('/api/manager-emails', {
+  authorizeManagers: (emails: string | string[], teamId: string, onRoster = true) =>
+    request<{ promoted: string[]; skipped: string[] }>('/api/manager-emails', {
       method: 'POST',
-      body: JSON.stringify({ emails, teamId }),
+      body: JSON.stringify({ emails, teamId, onRoster }),
     }),
   revokeManagerEmail: (email: string) =>
     request<{ ok: boolean }>(`/api/manager-emails/${encodeURIComponent(email)}`, { method: 'DELETE' }),

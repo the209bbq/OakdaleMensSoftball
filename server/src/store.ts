@@ -5,9 +5,11 @@ import type {
   CheckInStatus,
   CurrentWeek,
   Game,
+  GameLineup,
   Landing,
   LandingContent,
   LeagueData,
+  LineupPlayer,
   ManagerAuthorization,
   Player,
   PlayerAccount,
@@ -32,6 +34,30 @@ import {
   type Theme,
   type ThemeInput,
 } from './theme.js';
+import {
+  boxFromParts,
+  bumpInningLine,
+  canEditLineup,
+  clampStat,
+  combineGameDateTime,
+  emptyLine,
+  lineForDisplay,
+  lineupLocksAt,
+  parseHalf,
+  parseLine,
+  parsePlayerIds,
+  scheduledStartMs,
+  stepBatterIndex,
+  stepHalfInning,
+  sumLine,
+  wrapBatterIndex,
+  type GameBoxScore,
+  type InningHalf,
+  type ScoreSide,
+  type ScoreStat,
+} from './gameScoring.js';
+
+export { combineGameDateTime };
 
 export const MAX_PHOTO_URL_CHARS = 800000;
 export const MAX_LANDING_HEADLINE_CHARS = 200;
@@ -106,11 +132,13 @@ CREATE TABLE IF NOT EXISTS users (
   position TEXT,
   number INTEGER,
   photoUrl TEXT,
+  onRoster INTEGER NOT NULL DEFAULT 1,
   createdAt TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS pending_managers (
   email TEXT PRIMARY KEY,
-  teamId TEXT NOT NULL
+  teamId TEXT NOT NULL,
+  onRoster INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -137,6 +165,33 @@ CREATE TABLE IF NOT EXISTS messages (
   createdAt TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_team_created ON messages (teamId, createdAt);
+CREATE TABLE IF NOT EXISTS game_logs (
+  gameId TEXT PRIMARY KEY,
+  homeHits INTEGER NOT NULL DEFAULT 0,
+  awayHits INTEGER NOT NULL DEFAULT 0,
+  homeWalks INTEGER NOT NULL DEFAULT 0,
+  awayWalks INTEGER NOT NULL DEFAULT 0,
+  homeOuts INTEGER NOT NULL DEFAULT 0,
+  awayOuts INTEGER NOT NULL DEFAULT 0,
+  currentOuts INTEGER NOT NULL DEFAULT 0,
+  awayLine TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]',
+  homeLine TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]',
+  currentInning INTEGER NOT NULL DEFAULT 1,
+  currentHalf TEXT NOT NULL DEFAULT 'top',
+  awayBatterIndex INTEGER NOT NULL DEFAULT 0,
+  homeBatterIndex INTEGER NOT NULL DEFAULT 0,
+  liveStartedAt TEXT,
+  updatedAt TEXT NOT NULL,
+  updatedByUserId TEXT
+);
+CREATE TABLE IF NOT EXISTS game_lineups (
+  gameId TEXT NOT NULL,
+  teamId TEXT NOT NULL,
+  playerIds TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  updatedByUserId TEXT,
+  PRIMARY KEY (gameId, teamId)
+);
 `;
 
 type TeamRow = { id: string; name: string; photoUrl: string | null };
@@ -164,9 +219,9 @@ type UserRow = {
   position: string | null;
   number: number | null;
   photoUrl: string | null;
+  onRoster?: number | null;
   createdAt: string;
 };
-type PendingRow = { email: string; teamId: string };
 type CheckInRow = { userId: string; week: number; status: string };
 type SuggestionRow = { id: string; text: string; authorName: string | null; createdAt: string };
 type MessageRow = {
@@ -177,6 +232,45 @@ type MessageRow = {
   text: string;
   createdAt: string;
 };
+type GameLogRow = {
+  gameId: string;
+  homeHits: number;
+  awayHits: number;
+  homeWalks: number;
+  awayWalks: number;
+  homeOuts: number;
+  awayOuts: number;
+  currentOuts: number;
+  awayLine?: string | null;
+  homeLine?: string | null;
+  currentInning?: number | null;
+  currentHalf?: string | null;
+  awayBatterIndex?: number | null;
+  homeBatterIndex?: number | null;
+  liveStartedAt: string | null;
+  updatedAt: string;
+  updatedByUserId: string | null;
+};
+
+export interface GameLog {
+  gameId: string;
+  homeHits: number;
+  awayHits: number;
+  homeWalks: number;
+  awayWalks: number;
+  homeOuts: number;
+  awayOuts: number;
+  currentOuts: number;
+  awayLine: number[];
+  homeLine: number[];
+  currentInning: number;
+  currentHalf: InningHalf;
+  awayBatterIndex: number;
+  homeBatterIndex: number;
+  liveStartedAt: string | null;
+  updatedAt: string;
+  updatedByUserId: string | null;
+}
 
 function normalizeGame(g: Game): Game {
   return {
@@ -221,31 +315,6 @@ function normalizePhotoUrl(value: unknown): string | null {
     throw new Error(`photoUrl must be ${MAX_PHOTO_URL_CHARS} characters or fewer`);
   }
   return value;
-}
-
-/** Parse "6:00 PM" → 18:00, "7:30 PM" → 19:30, "18:00" → 18:00. */
-function parseGameClock(time: string): { hours: number; minutes: number } | null {
-  const match = String(time ?? '')
-    .trim()
-    .match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
-  if (!match) return null;
-  let hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  const ampm = match[3]?.toUpperCase();
-  if (ampm === 'PM' && hours < 12) hours += 12;
-  if (ampm === 'AM' && hours === 12) hours = 0;
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return { hours, minutes };
-}
-
-/** Combine a YYYY-MM-DD date with a "6:00 PM"-style time into a naive local datetime. */
-export function combineGameDateTime(date: string, time: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const clock = parseGameClock(time) ?? { hours: 0, minutes: 0 };
-  const hh = String(clock.hours).padStart(2, '0');
-  const mm = String(clock.minutes).padStart(2, '0');
-  return `${date}T${hh}:${mm}:00`;
 }
 
 function parseStoredLanding(raw: string | undefined): LandingContent {
@@ -368,6 +437,39 @@ function gameFromRow(row: GameRow): Game {
   });
 }
 
+function gameLogFromRow(row: GameLogRow): GameLog {
+  const currentInning = Math.max(1, Number(row.currentInning) || 1);
+  const currentHalf = parseHalf(row.currentHalf);
+  const awayLine = lineForDisplay(parseLine(row.awayLine), currentInning, parseLine(row.homeLine));
+  const homeLine = lineForDisplay(parseLine(row.homeLine), currentInning, awayLine);
+  return {
+    gameId: row.gameId,
+    homeHits: row.homeHits,
+    awayHits: row.awayHits,
+    homeWalks: row.homeWalks,
+    awayWalks: row.awayWalks,
+    homeOuts: row.homeOuts,
+    awayOuts: row.awayOuts,
+    currentOuts: row.currentOuts,
+    awayLine,
+    homeLine,
+    currentInning,
+    currentHalf,
+    awayBatterIndex: Math.max(0, Number(row.awayBatterIndex) || 0),
+    homeBatterIndex: Math.max(0, Number(row.homeBatterIndex) || 0),
+    liveStartedAt: row.liveStartedAt,
+    updatedAt: row.updatedAt,
+    updatedByUserId: row.updatedByUserId,
+  };
+}
+
+function userOnRoster(user: Pick<User, 'role' | 'teamId' | 'onRoster'>): boolean {
+  if (!user.teamId) return false;
+  if (user.role === 'player') return true;
+  if (user.role === 'manager') return user.onRoster !== false;
+  return false;
+}
+
 function userFromRow(row: UserRow): User {
   const user: User = {
     id: row.id,
@@ -375,6 +477,7 @@ function userFromRow(row: UserRow): User {
     name: row.name,
     role: backfillRole(row.role),
     teamId: row.teamId,
+    onRoster: row.onRoster !== 0,
     passwordHash: row.passwordHash,
     createdAt: row.createdAt,
   };
@@ -455,6 +558,8 @@ export class LeagueStore {
     }
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(SCHEMA);
+    this.ensureUserColumns();
+    this.ensureGameLogColumns();
     if (sqlitePath) this.importLegacyJsonIfNeeded(sqlitePath);
     this.seedIfEmpty();
   }
@@ -526,11 +631,11 @@ export class LeagueStore {
        VALUES (@id, @date, @homeTeamId, @awayTeamId, @homeScore, @awayScore, @played, @field, @time, @location, @week)`,
     );
     const insertUser = this.db.prepare(
-      `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, createdAt)
-       VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @createdAt)`,
+      `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, onRoster, createdAt)
+       VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @onRoster, @createdAt)`,
     );
     const insertPending = this.db.prepare(
-      'INSERT INTO pending_managers (email, teamId) VALUES (@email, @teamId)',
+      'INSERT INTO pending_managers (email, teamId, onRoster) VALUES (@email, @teamId, @onRoster)',
     );
 
     const tx = this.db.transaction(() => {
@@ -557,11 +662,16 @@ export class LeagueStore {
           position: user.position ?? null,
           number: user.number ?? null,
           photoUrl: user.photoUrl ?? null,
+          onRoster: user.onRoster === false ? 0 : 1,
           createdAt: user.createdAt,
         });
       }
       for (const pending of data.pendingManagers) {
-        insertPending.run({ email: pending.email, teamId: pending.teamId });
+        insertPending.run({
+          email: pending.email,
+          teamId: pending.teamId,
+          onRoster: pending.onRoster === false ? 0 : 1,
+        });
       }
       this.db
         .prepare(
@@ -575,8 +685,8 @@ export class LeagueStore {
   private insertUserRow(user: User): void {
     this.db
       .prepare(
-        `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, createdAt)
-         VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @createdAt)`,
+        `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, onRoster, createdAt)
+         VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @onRoster, @createdAt)`,
       )
       .run({
         id: user.id,
@@ -588,6 +698,7 @@ export class LeagueStore {
         position: user.position ?? null,
         number: user.number ?? null,
         photoUrl: user.photoUrl ?? null,
+        onRoster: user.onRoster === false ? 0 : 1,
         createdAt: user.createdAt,
       });
   }
@@ -596,7 +707,8 @@ export class LeagueStore {
     this.db
       .prepare(
         `UPDATE users SET email = @email, name = @name, role = @role, teamId = @teamId,
-         passwordHash = @passwordHash, position = @position, number = @number, photoUrl = @photoUrl, createdAt = @createdAt
+         passwordHash = @passwordHash, position = @position, number = @number, photoUrl = @photoUrl,
+         onRoster = @onRoster, createdAt = @createdAt
          WHERE id = @id`,
       )
       .run({
@@ -609,6 +721,7 @@ export class LeagueStore {
         position: user.position ?? null,
         number: user.number ?? null,
         photoUrl: user.photoUrl ?? null,
+        onRoster: user.onRoster === false ? 0 : 1,
         createdAt: user.createdAt,
       });
   }
@@ -758,6 +871,8 @@ export class LeagueStore {
        VALUES (@id, @date, @homeTeamId, @awayTeamId, @homeScore, @awayScore, @played, @field, @time, @location, @week)`,
     );
     const tx = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM game_logs').run();
+      this.db.prepare('DELETE FROM game_lineups').run();
       this.db.prepare('DELETE FROM games').run();
       this.db.prepare('DELETE FROM check_ins').run();
       for (const game of games) {
@@ -790,7 +905,7 @@ export class LeagueStore {
     return player;
   }
 
-  recordResult(gameId: string, homeScore: number, awayScore: number): Game {
+  recordResult(gameId: string, homeScore: number, awayScore: number, userId?: string): Game {
     const game = this.getGame(gameId);
     if (!game) {
       throw new Error(`Unknown game: ${gameId}`);
@@ -798,13 +913,370 @@ export class LeagueStore {
     if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore) || homeScore < 0 || awayScore < 0) {
       throw new Error('Scores must be non-negative numbers');
     }
-    this.db
-      .prepare('UPDATE games SET homeScore = ?, awayScore = ?, played = 1 WHERE id = ?')
-      .run(homeScore, awayScore, gameId);
+    const now = new Date().toISOString();
+    const awayLine = bumpInningLine(emptyLine(), 1, awayScore);
+    const homeLine = bumpInningLine(emptyLine(), 1, homeScore);
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare('UPDATE games SET homeScore = ?, awayScore = ?, played = 1 WHERE id = ?')
+        .run(homeScore, awayScore, gameId);
+      this.ensureGameLog(gameId);
+      this.db
+        .prepare(
+          'UPDATE game_logs SET awayLine = ?, homeLine = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?',
+        )
+        .run(JSON.stringify(awayLine), JSON.stringify(homeLine), now, userId ?? null, gameId);
+    });
+    tx();
     game.homeScore = homeScore;
     game.awayScore = awayScore;
     game.played = true;
     return game;
+  }
+
+  getGameLog(gameId: string): GameLog | undefined {
+    const row = this.db.prepare('SELECT * FROM game_logs WHERE gameId = ?').get(gameId) as GameLogRow | undefined;
+    return row ? gameLogFromRow(row) : undefined;
+  }
+
+  getGameLogs(): Map<string, GameLog> {
+    const rows = this.db.prepare('SELECT * FROM game_logs').all() as GameLogRow[];
+    return new Map(rows.map((row) => [row.gameId, gameLogFromRow(row)]));
+  }
+
+  getGameBox(game: Game, log?: GameLog | null): GameBoxScore {
+    return boxFromParts(game.homeScore, game.awayScore, log ?? this.getGameLog(game.id));
+  }
+
+  listLineupCandidates(teamId: string): LineupPlayer[] {
+    const members = this.getTeamMembers(teamId).map(
+      (m): LineupPlayer => ({
+        id: m.id,
+        name: m.name,
+        number: m.number,
+        position: m.position,
+      }),
+    );
+    const seen = new Set(members.map((m) => m.id));
+    const extras = this.getRoster(teamId)
+      .filter((p) => !seen.has(p.id))
+      .map(
+        (p): LineupPlayer => ({
+          id: p.id,
+          name: p.name,
+          number: p.number,
+          position: p.position,
+        }),
+      );
+    return [...members, ...extras];
+  }
+
+  getLineupSlots(gameId: string, teamId: string): { slots: LineupPlayer[]; saved: boolean } {
+    const candidates = this.listLineupCandidates(teamId);
+    const byId = new Map(candidates.map((c) => [c.id, c]));
+    const row = this.db
+      .prepare('SELECT playerIds FROM game_lineups WHERE gameId = ? AND teamId = ?')
+      .get(gameId, teamId) as { playerIds: string } | undefined;
+    const savedIds = parsePlayerIds(row?.playerIds);
+    const slots = savedIds.map((id) => byId.get(id)).filter((slot): slot is LineupPlayer => Boolean(slot));
+    if (slots.length > 0) return { slots, saved: true };
+    return { slots: candidates, saved: false };
+  }
+
+  buildGameLineup(game: Game, teamId: string, user?: PublicUser | null, nowMs = Date.now()): GameLineup {
+    const { slots, saved } = this.getLineupSlots(game.id, teamId);
+    const log = this.getGameLog(game.id);
+    const index =
+      teamId === game.homeTeamId ? (log?.homeBatterIndex ?? 0) : teamId === game.awayTeamId ? (log?.awayBatterIndex ?? 0) : 0;
+    const atBat = slots.length ? slots[wrapBatterIndex(index, slots.length)] : null;
+    const onDeck = slots.length ? slots[wrapBatterIndex(index + 1, slots.length)] : null;
+    const scheduledMs = scheduledStartMs(game.date, game.time);
+    const isAdmin = user?.role === 'admin';
+    const ownsTeam = Boolean(user && (isAdmin || (user.role === 'manager' && user.teamId === teamId)));
+    return {
+      teamId,
+      slots,
+      atBat,
+      onDeck,
+      canEdit: ownsTeam && canEditLineup(scheduledMs, nowMs, isAdmin),
+      locksAt: lineupLocksAt(scheduledMs),
+      saved,
+    };
+  }
+
+  setGameLineup(gameId: string, teamId: string, playerIds: string[], userId: string): void {
+    const game = this.getGame(gameId);
+    if (!game) throw new Error(`Unknown game: ${gameId}`);
+    if (teamId !== game.homeTeamId && teamId !== game.awayTeamId) {
+      throw new Error('Team is not playing in this game');
+    }
+    const allowed = new Set(this.listLineupCandidates(teamId).map((p) => p.id));
+    const ids = parsePlayerIds(playerIds);
+    if (ids.length === 0) throw new Error('Lineup needs at least one player');
+    if (new Set(ids).size !== ids.length) throw new Error('Lineup cannot list the same player twice');
+    const unknown = ids.find((id) => !allowed.has(id));
+    if (unknown) throw new Error('Every lineup player must be on this team');
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO game_lineups (gameId, teamId, playerIds, updatedAt, updatedByUserId)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(gameId, teamId) DO UPDATE SET
+           playerIds = excluded.playerIds,
+           updatedAt = excluded.updatedAt,
+           updatedByUserId = excluded.updatedByUserId`,
+      )
+      .run(gameId, teamId, JSON.stringify(ids), now, userId);
+  }
+
+  private lineupLength(gameId: string, teamId: string): number {
+    return this.getLineupSlots(gameId, teamId).slots.length;
+  }
+
+  private stepOutsAndBatters(
+    log: GameLog,
+    awayLen: number,
+    homeLen: number,
+    delta: number,
+  ): {
+    inning: number;
+    half: InningHalf;
+    outs: number;
+    awayBatterIndex: number;
+    homeBatterIndex: number;
+  } {
+    let inning = log.currentInning;
+    let half = log.currentHalf;
+    let outs = log.currentOuts;
+    let awayBatterIndex = log.awayBatterIndex;
+    let homeBatterIndex = log.homeBatterIndex;
+    const step = Math.trunc(delta);
+    if (step > 0) {
+      for (let i = 0; i < step; i += 1) {
+        if (half === 'top') awayBatterIndex = stepBatterIndex(awayBatterIndex, awayLen, 1);
+        else homeBatterIndex = stepBatterIndex(homeBatterIndex, homeLen, 1);
+        const next = stepHalfInning(inning, half, outs, 1);
+        inning = next.inning;
+        half = next.half;
+        outs = next.outs;
+      }
+    } else {
+      for (let i = 0; i < -step; i += 1) {
+        const next = stepHalfInning(inning, half, outs, -1);
+        inning = next.inning;
+        half = next.half;
+        outs = next.outs;
+        if (half === 'top') awayBatterIndex = stepBatterIndex(awayBatterIndex, awayLen, -1);
+        else homeBatterIndex = stepBatterIndex(homeBatterIndex, homeLen, -1);
+      }
+    }
+    return { inning, half, outs, awayBatterIndex, homeBatterIndex };
+  }
+
+  startLiveGame(gameId: string, userId: string, now = new Date()): GameLog {
+    const game = this.getGame(gameId);
+    if (!game) {
+      throw new Error(`Unknown game: ${gameId}`);
+    }
+    const iso = now.toISOString();
+    const tx = this.db.transaction(() => {
+      this.ensureGameLog(gameId);
+      const existing = this.getGameLog(gameId);
+      if (existing?.liveStartedAt) return;
+      this.db
+        .prepare(
+          'UPDATE game_logs SET liveStartedAt = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?',
+        )
+        .run(iso, iso, userId, gameId);
+    });
+    tx();
+    return this.getGameLog(gameId)!;
+  }
+
+  bumpScoreStat(gameId: string, side: ScoreSide, stat: ScoreStat, delta: number, userId: string): Game {
+    const game = this.getGame(gameId);
+    if (!game) {
+      throw new Error(`Unknown game: ${gameId}`);
+    }
+    if (side !== 'home' && side !== 'away') {
+      throw new Error('side must be home or away');
+    }
+    if (stat !== 'runs' && stat !== 'hits' && stat !== 'walks' && stat !== 'outs') {
+      throw new Error('stat must be runs, hits, walks, or outs');
+    }
+    const step = Math.trunc(delta);
+    if (!Number.isFinite(step) || step === 0) {
+      return game;
+    }
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.ensureGameLog(gameId);
+      if (stat === 'runs') {
+        const log = this.getGameLog(gameId)!;
+        this.writeInningRun(gameId, side, log.currentInning, step, now, userId);
+      } else {
+        const column =
+          stat === 'hits'
+            ? side === 'home'
+              ? 'homeHits'
+              : 'awayHits'
+            : stat === 'walks'
+              ? side === 'home'
+                ? 'homeWalks'
+                : 'awayWalks'
+              : side === 'home'
+                ? 'homeOuts'
+                : 'awayOuts';
+        const log = this.getGameLog(gameId)!;
+        const next = clampStat(Number(log[column]) + step);
+        this.db.prepare(`UPDATE game_logs SET ${column} = ? WHERE gameId = ?`).run(next, gameId);
+        if (stat === 'hits' || stat === 'walks') {
+          const length = this.lineupLength(gameId, side === 'home' ? game.homeTeamId : game.awayTeamId);
+          const indexCol = side === 'home' ? 'homeBatterIndex' : 'awayBatterIndex';
+          const nextIndex = stepBatterIndex(log[indexCol], length, step);
+          this.db.prepare(`UPDATE game_logs SET ${indexCol} = ? WHERE gameId = ?`).run(nextIndex, gameId);
+        }
+      }
+      this.db
+        .prepare('UPDATE game_logs SET updatedAt = ?, updatedByUserId = ? WHERE gameId = ?')
+        .run(now, userId, gameId);
+    });
+    tx();
+    return this.getGame(gameId)!;
+  }
+
+  bumpCurrentOuts(gameId: string, delta: number, userId: string): GameLog {
+    const game = this.getGame(gameId);
+    if (!game) {
+      throw new Error(`Unknown game: ${gameId}`);
+    }
+    const step = Math.trunc(delta);
+    if (!Number.isFinite(step)) {
+      throw new Error('delta must be a number');
+    }
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.ensureGameLog(gameId);
+      const log = this.getGameLog(gameId)!;
+      const awayLen = this.lineupLength(gameId, game.awayTeamId);
+      const homeLen = this.lineupLength(gameId, game.homeTeamId);
+      const next = this.stepOutsAndBatters(log, awayLen, homeLen, step);
+      const awayLine = lineForDisplay(log.awayLine, next.inning, log.homeLine);
+      const homeLine = lineForDisplay(log.homeLine, next.inning, awayLine);
+      this.db
+        .prepare(
+          `UPDATE game_logs SET currentOuts = ?, currentInning = ?, currentHalf = ?,
+           awayBatterIndex = ?, homeBatterIndex = ?,
+           awayLine = ?, homeLine = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?`,
+        )
+        .run(
+          next.outs,
+          next.inning,
+          next.half,
+          next.awayBatterIndex,
+          next.homeBatterIndex,
+          JSON.stringify(awayLine),
+          JSON.stringify(homeLine),
+          now,
+          userId,
+          gameId,
+        );
+    });
+    tx();
+    return this.getGameLog(gameId)!;
+  }
+
+  bumpInningRun(gameId: string, side: ScoreSide, inning: number, delta: number, userId: string): Game {
+    const game = this.getGame(gameId);
+    if (!game) {
+      throw new Error(`Unknown game: ${gameId}`);
+    }
+    if (side !== 'home' && side !== 'away') {
+      throw new Error('side must be home or away');
+    }
+    const step = Math.trunc(delta);
+    if (!Number.isFinite(step) || step === 0) {
+      return game;
+    }
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.ensureGameLog(gameId);
+      this.writeInningRun(gameId, side, inning, step, now, userId);
+    });
+    tx();
+    return this.getGame(gameId)!;
+  }
+
+  private writeInningRun(
+    gameId: string,
+    side: ScoreSide,
+    inning: number,
+    step: number,
+    now: string,
+    userId: string,
+  ): void {
+    const log = this.getGameLog(gameId)!;
+    const target = Math.max(1, Math.trunc(inning) || log.currentInning);
+    const awayLine =
+      side === 'away' ? bumpInningLine(log.awayLine, target, step) : lineForDisplay(log.awayLine, target, log.homeLine);
+    const homeLine =
+      side === 'home' ? bumpInningLine(log.homeLine, target, step) : lineForDisplay(log.homeLine, target, awayLine);
+    const awayRuns = sumLine(awayLine);
+    const homeRuns = sumLine(homeLine);
+    this.db
+      .prepare('UPDATE games SET homeScore = ?, awayScore = ?, played = 1 WHERE id = ?')
+      .run(homeRuns, awayRuns, gameId);
+    this.db
+      .prepare(
+        'UPDATE game_logs SET awayLine = ?, homeLine = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?',
+      )
+      .run(JSON.stringify(awayLine), JSON.stringify(homeLine), now, userId, gameId);
+  }
+
+  private ensureUserColumns(): void {
+    const userCols = new Set(
+      (this.db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!userCols.has('onRoster')) {
+      this.db.exec('ALTER TABLE users ADD COLUMN onRoster INTEGER NOT NULL DEFAULT 1');
+    }
+    const pendingCols = new Set(
+      (this.db.prepare('PRAGMA table_info(pending_managers)').all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!pendingCols.has('onRoster')) {
+      this.db.exec('ALTER TABLE pending_managers ADD COLUMN onRoster INTEGER NOT NULL DEFAULT 1');
+    }
+  }
+
+  private ensureGameLogColumns(): void {
+    const cols = new Set(
+      (this.db.prepare('PRAGMA table_info(game_logs)').all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    const extras: Array<[string, string]> = [
+      ['awayLine', "TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]'"],
+      ['homeLine', "TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]'"],
+      ['currentInning', 'INTEGER NOT NULL DEFAULT 1'],
+      ['currentHalf', "TEXT NOT NULL DEFAULT 'top'"],
+      ['awayBatterIndex', 'INTEGER NOT NULL DEFAULT 0'],
+      ['homeBatterIndex', 'INTEGER NOT NULL DEFAULT 0'],
+    ];
+    for (const [name, spec] of extras) {
+      if (!cols.has(name)) {
+        this.db.exec(`ALTER TABLE game_logs ADD COLUMN ${name} ${spec}`);
+      }
+    }
+  }
+
+  private ensureGameLog(gameId: string): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO game_logs (
+          gameId, homeHits, awayHits, homeWalks, awayWalks, homeOuts, awayOuts,
+          currentOuts, awayLine, homeLine, currentInning, currentHalf,
+          liveStartedAt, updatedAt, updatedByUserId
+        ) VALUES (?, 0, 0, 0, 0, 0, 0, 0, ?, ?, 1, 'top', NULL, ?, NULL)`,
+      )
+      .run(gameId, JSON.stringify(emptyLine()), JSON.stringify(emptyLine()), new Date().toISOString());
   }
 
   getStandings(): StandingRow[] {
@@ -967,20 +1439,12 @@ export class LeagueStore {
       name,
       role: input.role ?? 'player',
       teamId: input.role === 'manager' ? input.teamId ?? null : null,
+      onRoster: true,
       passwordHash: hashPassword(input.password),
       createdAt: new Date().toISOString(),
     };
 
-    const pending = this.db
-      .prepare('SELECT email, teamId FROM pending_managers WHERE email = ?')
-      .get(email) as PendingRow | undefined;
-    if (pending) {
-      this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
-      if (this.getTeam(pending.teamId)) {
-        user.role = 'manager';
-        user.teamId = pending.teamId;
-      }
-    }
+    this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
 
     this.insertUserRow(user);
     return toPublicUser(user);
@@ -993,15 +1457,29 @@ export class LeagueStore {
     return toPublicUser(user);
   }
 
-  /** Assign a role. Managers are pinned to a team; other roles clear teamId. */
-  setUserRole(userId: string, role: Role, teamId: string | null = null): PublicUser {
+  /**
+   * Assign a role. Managers can only be promoted from an existing player
+   * account (or reassigned if they are already a manager). They are pinned
+   * to a team and, by default, play for that same team. Pass `onRoster: false`
+   * for manager-only (off the roster).
+   */
+  setUserRole(userId: string, role: Role, teamId: string | null = null, onRoster?: boolean): PublicUser {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
+    if (role === 'admin') {
+      if (user.role === 'admin') return toPublicUser(user);
+      throw new Error('Admin access cannot be granted');
+    }
     if (role === 'manager') {
+      if (user.role !== 'player' && user.role !== 'manager') {
+        throw new Error('Managers can only be promoted from a player account');
+      }
       if (!teamId || !this.getTeam(teamId)) throw new Error('A valid team is required for managers');
       user.teamId = teamId;
+      user.onRoster = onRoster === undefined ? (user.role === 'manager' ? user.onRoster !== false : true) : onRoster;
     } else {
       user.teamId = null;
+      user.onRoster = true;
     }
     user.role = role;
     this.updateUserRow(user);
@@ -1019,6 +1497,9 @@ export class LeagueStore {
   setUserTeam(userId: string, teamId: string | null): PublicUser {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
+    if (user.role === 'manager') {
+      throw new Error('Managers play for the team they manage');
+    }
     if (user.role !== 'player') {
       throw new Error('Only player accounts can join a team');
     }
@@ -1062,8 +1543,9 @@ export class LeagueStore {
 
   /**
    * Account members of a team for attendance: player-role users with
-   * `teamId === team` plus the team's manager. Manual placeholder roster
-   * rows have no account and are excluded (same set as `getTeamMembers`).
+   * `teamId === team` plus playing managers. Manager-only accounts are
+   * excluded. Manual placeholder roster rows have no account and are excluded
+   * (same set as `getTeamMembers`).
    */
   getTeamAttendance(teamId: string, week: number): TeamAttendance {
     const members = this.accountMemberIdsByTeam().get(teamId) ?? [];
@@ -1093,12 +1575,12 @@ export class LeagueStore {
     return out;
   }
 
-  /** Player + manager account ids grouped by teamId. */
+  /** Playing player + manager account ids grouped by teamId. */
   private accountMemberIdsByTeam(): Map<string, string[]> {
     const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
     const byTeam = new Map<string, string[]>();
     for (const user of rows.map(userFromRow)) {
-      if ((user.role !== 'player' && user.role !== 'manager') || !user.teamId) continue;
+      if (!userOnRoster(user) || !user.teamId) continue;
       const list = byTeam.get(user.teamId) ?? [];
       list.push(user.id);
       byTeam.set(user.teamId, list);
@@ -1129,6 +1611,7 @@ export class LeagueStore {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
     if (!user.teamId) throw new Error('You must be on a team to check in');
+    if (!userOnRoster(user)) throw new Error('Manager-only accounts are not on the roster');
     if (!Number.isInteger(week)) throw new Error('week is not a scheduled week');
     const scheduled = this.db.prepare('SELECT 1 AS ok FROM games WHERE week = ? LIMIT 1').get(week) as
       | { ok: number }
@@ -1153,8 +1636,9 @@ export class LeagueStore {
   }
 
   /**
-   * Player-role accounts AND the team's manager on this team, public-safe (no email).
-   * Managers sort first (they also play); then by number, then name.
+   * Playing accounts on this team, public-safe (no email). Playing managers
+   * sort first; manager-only accounts are omitted (they still appear as
+   * `getTeamManager`). Then by number, then name.
    * `checkIn` is the member's RSVP for the current week (null = no response).
    */
   getTeamMembers(teamId: string): TeamMember[] {
@@ -1163,7 +1647,7 @@ export class LeagueStore {
     const rows = this.db.prepare('SELECT * FROM users').all() as UserRow[];
     return rows
       .map(userFromRow)
-      .filter((u) => (u.role === 'player' || u.role === 'manager') && u.teamId === teamId)
+      .filter((u) => userOnRoster(u) && u.teamId === teamId)
       .map(
         (u): TeamMember => ({
           id: u.id,
@@ -1197,20 +1681,26 @@ export class LeagueStore {
   }
 
   /** Manager-role user assigned to this team, or null. Name only — never email. */
-  getTeamManager(teamId: string): { name: string } | null {
+  getTeamManager(teamId: string): { name: string; onRoster: boolean } | null {
     const rows = this.db.prepare('SELECT * FROM users ORDER BY rowid').all() as UserRow[];
     const manager = rows.map(userFromRow).find((u) => u.role === 'manager' && u.teamId === teamId);
-    return manager ? { name: manager.name } : null;
+    return manager ? { name: manager.name, onRoster: manager.onRoster !== false } : null;
   }
 
   /**
-   * Authorize emails as managers of `teamId`. Existing accounts are promoted
-   * immediately; others are stored as pending and auto-granted on signup.
+   * Promote existing player accounts (or reassign current managers) to
+   * `teamId`. Unknown emails and non-player accounts are skipped — managers
+   * are never created at signup.
    */
-  authorizeManagers(emails: string[], teamId: string): { promoted: string[]; pending: string[] } {
+  authorizeManagers(
+    emails: string[],
+    teamId: string,
+    onRoster = true,
+  ): { promoted: string[]; skipped: string[] } {
     if (!this.getTeam(teamId)) throw new Error(`Unknown team: ${teamId}`);
+    const plays = onRoster !== false;
     const promoted: string[] = [];
-    const pending: string[] = [];
+    const skipped: string[] = [];
     const seen = new Set<string>();
 
     const tx = this.db.transaction(() => {
@@ -1221,31 +1711,22 @@ export class LeagueStore {
         seen.add(email);
 
         const existing = this.getUserByEmail(email);
-        if (existing) {
-          this.setUserRole(existing.id, 'manager', teamId);
-          this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
-          promoted.push(email);
-        } else {
-          const already = this.db
-            .prepare('SELECT email FROM pending_managers WHERE email = ?')
-            .get(email) as { email: string } | undefined;
-          if (already) {
-            this.db.prepare('UPDATE pending_managers SET teamId = ? WHERE email = ?').run(teamId, email);
-          } else {
-            this.db.prepare('INSERT INTO pending_managers (email, teamId) VALUES (?, ?)').run(email, teamId);
-          }
-          pending.push(email);
+        if (!existing || (existing.role !== 'player' && existing.role !== 'manager')) {
+          skipped.push(email);
+          continue;
         }
+        this.setUserRole(existing.id, 'manager', teamId, plays);
+        this.db.prepare('DELETE FROM pending_managers WHERE email = ?').run(email);
+        promoted.push(email);
       }
     });
     tx();
-    return { promoted, pending };
+    return { promoted, skipped };
   }
 
-  /** Combined list of active managers and pending (not-yet-registered) authorizations. */
+  /** Active managers for the admin list. Pending email invites are unused. */
   listManagerAuthorizations(): ManagerAuthorization[] {
     const rows: ManagerAuthorization[] = [];
-    const activeEmails = new Set<string>();
 
     const users = (this.db.prepare('SELECT * FROM users').all() as UserRow[]).map(userFromRow);
     for (const user of users) {
@@ -1256,27 +1737,11 @@ export class LeagueStore {
         teamId: user.teamId,
         teamName: team?.name ?? user.teamId,
         status: 'active',
-      });
-      activeEmails.add(user.email);
-    }
-
-    const pending = this.db.prepare('SELECT email, teamId FROM pending_managers').all() as PendingRow[];
-    for (const entry of pending) {
-      if (activeEmails.has(entry.email)) continue;
-      if (this.getUserByEmail(entry.email)) continue;
-      const team = this.getTeam(entry.teamId);
-      rows.push({
-        email: entry.email,
-        teamId: entry.teamId,
-        teamName: team?.name ?? entry.teamId,
-        status: 'pending',
+        onRoster: user.onRoster !== false,
       });
     }
 
-    return rows.sort((a, b) => {
-      if (a.status !== b.status) return a.status === 'pending' ? -1 : 1;
-      return a.email.localeCompare(b.email);
-    });
+    return rows.sort((a, b) => a.email.localeCompare(b.email));
   }
 
   /**
@@ -1300,13 +1765,23 @@ export class LeagueStore {
    */
   updateProfile(
     userId: string,
-    input: { name: string; position?: string; number?: number | null; photoUrl?: string | null },
+    input: {
+      name: string;
+      position?: string;
+      number?: number | null;
+      photoUrl?: string | null;
+      onRoster?: boolean;
+    },
   ): PublicUser {
     const user = this.getUserById(userId);
     if (!user) throw new Error('Unknown user');
     const name = (input.name ?? '').trim();
     if (!name) throw new Error('Name is required');
     user.name = name;
+    if (input.onRoster !== undefined) {
+      if (user.role !== 'manager') throw new Error('Only managers can change roster status');
+      user.onRoster = input.onRoster !== false;
+    }
     if (input.position !== undefined) {
       const position = (input.position ?? '').trim();
       if (position) user.position = position;
@@ -1343,6 +1818,15 @@ export class LeagueStore {
     const desiredTeamId = input.role === 'manager' ? input.teamId ?? null : null;
     const existing = this.getUserByEmail(input.email);
     if (existing) {
+      if (input.role === 'admin') {
+        if (existing.role !== 'admin') {
+          existing.role = 'admin';
+          existing.teamId = null;
+          existing.onRoster = true;
+          this.updateUserRow(existing);
+        }
+        return toPublicUser(existing);
+      }
       if (existing.role !== input.role || existing.teamId !== desiredTeamId) {
         return this.setUserRole(existing.id, input.role, desiredTeamId);
       }
@@ -1481,6 +1965,7 @@ export class LeagueStore {
           name: `Guest ${i}`,
           role: 'player',
           teamId: teams[teamIndex].id,
+          onRoster: true,
           passwordHash,
           createdAt,
         };
@@ -1572,6 +2057,8 @@ export class LeagueStore {
         this.db.prepare('SELECT COUNT(*) AS c FROM games').get() as { c: number }
       ).c;
       this.db.prepare('UPDATE games SET homeScore = NULL, awayScore = NULL, played = 0').run();
+      this.db.prepare('DELETE FROM game_logs').run();
+      this.db.prepare('DELETE FROM game_lineups').run();
 
       return {
         guestsRemoved: simUsers.length,

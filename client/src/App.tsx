@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, type CurrentWeek, type Game, type Landing, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { api, type CurrentWeek, type Game, type GameBoxScore, type GameLineup, type InningHalf, type Landing, type LineupPlayer, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
 import { applyTheme } from './theme';
@@ -14,6 +14,43 @@ const TAB_TITLES: Record<Tab, string> = {
   rules: 'Rules',
   admin: 'Admin',
 };
+
+const TABS = new Set<Tab>(['home', 'standings', 'schedule', 'rosters', 'rules', 'admin']);
+
+type AppRoute = { tab: Tab; gameId: string | null };
+
+function parseRoute(pathname: string): AppRoute {
+  const parts = pathname.split('/').filter(Boolean);
+  if (parts[0] === 'games' && parts[1]) {
+    return { tab: 'schedule', gameId: decodeURIComponent(parts[1]) };
+  }
+  const tab = parts[0];
+  if (tab && TABS.has(tab as Tab)) return { tab: tab as Tab, gameId: null };
+  return { tab: 'home', gameId: null };
+}
+
+function pathForTab(tab: Tab): string {
+  return tab === 'home' ? '/' : `/${tab}`;
+}
+
+function pathForGame(gameId: string): string {
+  return `/games/${gameId}`;
+}
+
+function useRoute() {
+  const [path, setPath] = useState(() => window.location.pathname);
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  const navigate = useCallback((next: string) => {
+    if (next === window.location.pathname) return;
+    window.history.pushState({}, '', next);
+    setPath(next);
+  }, []);
+  return { route: parseRoute(path), navigate };
+}
 
 /** Admins manage any team; team managers only their assigned team. */
 function canManageTeam(user: User | null, teamId: string | null): boolean {
@@ -43,15 +80,16 @@ function initials(name: string): string {
 
 export default function App() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<Tab>('home');
+  const { route, navigate } = useRoute();
+  const tab = route.tab;
   const [authOpen, setAuthOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
 
   // If a non-admin lands on the admin tab (e.g. after logout), bounce them out.
   useEffect(() => {
-    if (tab === 'admin' && user?.role !== 'admin') setTab('home');
-  }, [tab, user]);
+    if (tab === 'admin' && user?.role !== 'admin') navigate('/');
+  }, [tab, user, navigate]);
 
   useEffect(() => {
     if (!canOpenTeamChat(user)) setChatOpen(false);
@@ -82,7 +120,7 @@ export default function App() {
           <img className="app-logo" src="/app-icon.svg" alt="" width="28" height="28" />
           <div className="app-bar-text">
             <span className="app-bar-title">Oakdale Mens Softball League</span>
-            <span className="app-bar-sub">{TAB_TITLES[tab]}</span>
+            <span className="app-bar-sub">{route.gameId ? 'Game' : TAB_TITLES[tab]}</span>
           </div>
           <div className="app-bar-actions">
             {canOpenTeamChat(user) && (
@@ -101,22 +139,27 @@ export default function App() {
       </header>
 
       <main className="app-content">
-        {tab === 'home' && <LandingPage />}
+        {tab === 'home' && <HomePage onOpenGame={(id) => navigate(pathForGame(id))} />}
         {tab === 'standings' && <Standings />}
-        {tab === 'schedule' && <Schedule />}
+        {tab === 'schedule' && route.gameId && (
+          <GamePage gameId={route.gameId} onBack={() => navigate(pathForTab('schedule'))} />
+        )}
+        {tab === 'schedule' && !route.gameId && (
+          <Schedule onOpenGame={(id) => navigate(pathForGame(id))} />
+        )}
         {tab === 'rosters' && <Rosters />}
         {tab === 'rules' && <Rules />}
         {tab === 'admin' && user?.role === 'admin' && <Admin />}
       </main>
 
       <nav className="tab-bar" role="tablist" aria-label="Main navigation">
-        <TabButton tab="home" current={tab} onSelect={setTab} label="Home" icon={HomeIcon} />
-        <TabButton tab="standings" current={tab} onSelect={setTab} label="Standings" icon={TrophyIcon} />
-        <TabButton tab="schedule" current={tab} onSelect={setTab} label="Schedule" icon={CalendarIcon} />
-        <TabButton tab="rosters" current={tab} onSelect={setTab} label="Rosters" icon={RosterIcon} />
-        <TabButton tab="rules" current={tab} onSelect={setTab} label="Rules" icon={RulesIcon} />
+        <TabButton tab="home" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Home" icon={HomeIcon} />
+        <TabButton tab="standings" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Standings" icon={TrophyIcon} />
+        <TabButton tab="schedule" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Schedule" icon={CalendarIcon} />
+        <TabButton tab="rosters" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Rosters" icon={RosterIcon} />
+        <TabButton tab="rules" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Rules" icon={RulesIcon} />
         {user?.role === 'admin' && (
-          <TabButton tab="admin" current={tab} onSelect={setTab} label="Admin" icon={GearIcon} />
+          <TabButton tab="admin" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Admin" icon={GearIcon} />
         )}
       </nav>
 
@@ -238,6 +281,7 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
   const [position, setPosition] = useState(user?.position ?? '');
   const [number, setNumber] = useState(user?.number != null ? String(user.number) : '');
   const [photoUrl, setPhotoUrl] = useState<string | null>(user?.photoUrl ?? null);
+  const [onRoster, setOnRoster] = useState(user?.onRoster !== false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -261,6 +305,7 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
         position,
         number: parsedNumber,
         photoUrl,
+        ...(user?.role === 'manager' ? { onRoster } : {}),
       });
       await refresh();
       onClose();
@@ -312,6 +357,19 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setNumber(e.target.value)}
             />
           </label>
+          {user?.role === 'manager' && (
+            <label className="field">
+              I play for the team I manage
+              <select
+                aria-label="Manager roster option"
+                value={onRoster ? 'player' : 'only'}
+                onChange={(e) => setOnRoster(e.target.value === 'player')}
+              >
+                <option value="player">Yes — on my team&apos;s roster</option>
+                <option value="only">No — manager only, not on the roster</option>
+              </select>
+            </label>
+          )}
           {error && <p className="error inline-error">{error}</p>}
           <button className="primary-btn" type="submit" disabled={busy}>
             {busy ? 'Saving…' : 'Save profile'}
@@ -398,7 +456,208 @@ function TabButton({
   );
 }
 
-function LandingPage() {
+const IN_MARK = '🥎';
+const OUT_MARK = '🚫';
+
+function checkInMark(status: 'in' | 'out' | null | undefined): string {
+  if (status === 'in') return IN_MARK;
+  if (status === 'out') return OUT_MARK;
+  return '—';
+}
+
+function nextGameForTeam(games: Game[], teamId: string): Game | null {
+  const upcoming = games
+    .filter((g) => (g.homeTeamId === teamId || g.awayTeamId === teamId) && !g.played)
+    .slice()
+    .sort((a, b) => `${a.date} ${a.time ?? ''}`.localeCompare(`${b.date} ${b.time ?? ''}`));
+  if (upcoming.length === 0) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  return upcoming.find((g) => g.date >= today) ?? upcoming[0];
+}
+
+function HomePage({ onOpenGame }: { onOpenGame: (id: string) => void }) {
+  const { user } = useAuth();
+  if (user && (user.role === 'player' || user.role === 'manager')) {
+    return <PlayerHome onOpenGame={onOpenGame} />;
+  }
+  return <LeagueLanding />;
+}
+
+function PlayerHome({ onOpenGame }: { onOpenGame: (id: string) => void }) {
+  const { user } = useAuth();
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [games, setGames] = useState<Game[]>([]);
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
+  const [checkingIn, setCheckingIn] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+
+  const teamId = user?.teamId ?? null;
+  const team = teams.find((t) => t.id === teamId) ?? null;
+  const nextGame = teamId ? nextGameForTeam(games, teamId) : null;
+  const playsOnTeam = Boolean(
+    teamId && (user?.role === 'player' || (user?.role === 'manager' && user.onRoster !== false)),
+  );
+  const checkWeek = nextGame?.week ?? currentWeek?.week ?? null;
+  const checkDate = nextGame?.date ?? currentWeek?.date ?? null;
+  const myCheckIn = members.find((m) => m.id === user?.id)?.checkIn ?? null;
+  const checkInCounts = {
+    in: members.filter((m) => m.checkIn === 'in').length,
+    out: members.filter((m) => m.checkIn === 'out').length,
+    none: members.filter((m) => m.checkIn !== 'in' && m.checkIn !== 'out').length,
+  };
+
+  function loadRoster(id: string) {
+    api
+      .getRoster(id)
+      .then((r) => {
+        setMembers(r.members ?? []);
+        setCurrentWeek(r.currentWeek ?? null);
+        setTeams((prev) => {
+          const next = prev.map((t) => (t.id === r.team.id ? r.team : t));
+          return next.some((t) => t.id === r.team.id) ? next : [...next, r.team];
+        });
+      })
+      .catch((e) => setError((e as Error).message));
+  }
+
+  useEffect(() => {
+    Promise.all([api.getTeams(), api.getSchedule()])
+      .then(([nextTeams, nextGames]) => {
+        setTeams(nextTeams);
+        setGames(nextGames);
+      })
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (!teamId) {
+      setMembers([]);
+      setCurrentWeek(null);
+      return;
+    }
+    loadRoster(teamId);
+  }, [teamId]);
+
+  async function handleCheckIn(status: 'in' | 'out') {
+    if (checkWeek == null) return;
+    const next = myCheckIn === status ? null : status;
+    setError(null);
+    setCheckingIn(true);
+    try {
+      await api.checkIn(checkWeek, next);
+      if (teamId) loadRoster(teamId);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setCheckingIn(false);
+    }
+  }
+
+  const opponent = nextGame
+    ? nextGame.homeTeamId === teamId
+      ? nextGame.awayTeamName
+      : nextGame.homeTeamName
+    : null;
+  const vsLabel = nextGame
+    ? nextGame.homeTeamId === teamId
+      ? `vs ${opponent}`
+      : `at ${opponent}`
+    : null;
+
+  return (
+    <div className="landing player-home">
+      <section className="card player-home-card">
+        <p className="player-home-hello">Hey {user?.name?.split(' ')[0] || 'there'}</p>
+        <h1 className="player-home-team">{team?.name ?? (teamId ? (ready ? 'Your team' : 'Loading…') : 'No team yet')}</h1>
+        {!teamId && ready && (
+          <p className="muted-copy player-home-empty">
+            Join a team from Rosters to see your next game and check in.
+          </p>
+        )}
+        {teamId && ready && !nextGame && (
+          <p className="muted-copy player-home-empty">No upcoming games on the schedule.</p>
+        )}
+        {nextGame && (
+          <button
+            type="button"
+            className="player-next-game"
+            onClick={() => onOpenGame(nextGame.id)}
+            aria-label={`Open next game ${vsLabel} on ${formatGameDate(nextGame.date)}`}
+          >
+            <span className="player-next-kicker">Next game</span>
+            <span className="player-next-matchup">{vsLabel}</span>
+            <span className="player-next-when">{formatGameDate(nextGame.date)}</span>
+            <dl className="player-next-meta">
+              <div>
+                <dt>Field</dt>
+                <dd>{nextGame.field || 'TBD'}</dd>
+              </div>
+              <div>
+                <dt>Time</dt>
+                <dd>{nextGame.time || 'TBD'}</dd>
+              </div>
+            </dl>
+          </button>
+        )}
+      </section>
+
+      {teamId && checkWeek != null && checkDate && (
+        <section className="card">
+          <div className="checkin-panel player-home-checkin">
+            <h2 className="checkin-heading">
+              Check-in — Week {checkWeek} · {formatGameDate(checkDate)}
+            </h2>
+            {members.length > 0 && (
+              <p className="checkin-summary">
+                {IN_MARK} {checkInCounts.in} · {OUT_MARK} {checkInCounts.out} · — {checkInCounts.none}
+              </p>
+            )}
+            {playsOnTeam ? (
+              <div className="checkin-actions">
+                <button
+                  type="button"
+                  className={`checkin-btn${myCheckIn === 'in' ? ' active-in' : ''}`}
+                  aria-pressed={myCheckIn === 'in'}
+                  aria-label="I'm there"
+                  disabled={checkingIn}
+                  onClick={() => handleCheckIn('in')}
+                >
+                  <span className="checkin-emoji" aria-hidden="true">
+                    {IN_MARK}
+                  </span>
+                  I&apos;m there
+                </button>
+                <button
+                  type="button"
+                  className={`checkin-btn${myCheckIn === 'out' ? ' active-out' : ''}`}
+                  aria-pressed={myCheckIn === 'out'}
+                  aria-label="Can't make it"
+                  disabled={checkingIn}
+                  onClick={() => handleCheckIn('out')}
+                >
+                  <span className="checkin-emoji" aria-hidden="true">
+                    {OUT_MARK}
+                  </span>
+                  Can&apos;t make it
+                </button>
+              </div>
+            ) : (
+              <p className="theme-help">Manager-only accounts do not check in.</p>
+            )}
+            {error && <p className="error inline-error">{error}</p>}
+          </div>
+        </section>
+      )}
+
+      <SuggestionsBox />
+    </div>
+  );
+}
+
+function LeagueLanding() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [landing, setLanding] = useState<Landing | null>(null);
@@ -938,10 +1197,114 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function formatGameDate(iso: string): string {
+  if (!iso) return '';
   const [y, m, d] = iso.split('-').map(Number);
   if (!y || !m || !d) return iso;
   const date = new Date(Date.UTC(y, m - 1, d));
   return `${WEEKDAYS[date.getUTCDay()]} ${MONTHS[m - 1]} ${d}`;
+}
+
+const EMPTY_LINE = [0, 0, 0, 0, 0, 0, 0];
+
+const EMPTY_BOX: GameBoxScore = {
+  homeRuns: 0,
+  awayRuns: 0,
+  homeHits: 0,
+  awayHits: 0,
+  homeWalks: 0,
+  awayWalks: 0,
+  homeOuts: 0,
+  awayOuts: 0,
+  currentOuts: 0,
+  awayLine: EMPTY_LINE,
+  homeLine: EMPTY_LINE,
+  currentInning: 1,
+  currentHalf: 'top',
+  batterUp: 'away',
+};
+
+function gameBox(game: Game): GameBoxScore {
+  const raw = game.box ?? {
+    ...EMPTY_BOX,
+    homeRuns: game.homeScore ?? 0,
+    awayRuns: game.awayScore ?? 0,
+  };
+  return {
+    ...EMPTY_BOX,
+    ...raw,
+    awayLine: raw.awayLine && raw.awayLine.length ? raw.awayLine : EMPTY_LINE,
+    homeLine: raw.homeLine && raw.homeLine.length ? raw.homeLine : EMPTY_LINE,
+    currentInning: raw.currentInning ?? 1,
+    currentHalf: raw.currentHalf ?? 'top',
+    batterUp: raw.batterUp ?? 'away',
+  };
+}
+
+function scoringPhaseLabel(phase: ScoringPhase | undefined): string {
+  if (phase === 'live') return 'LIVE';
+  if (phase === 'grace') return 'OPEN';
+  if (phase === 'locked') return 'FINAL';
+  return 'UPCOMING';
+}
+
+function teamAbbr(name: string): string {
+  const words = String(name ?? '')
+    .replace(/&/g, ' ')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean);
+  if (words.length >= 2) {
+    return words
+      .slice(0, 3)
+      .map((word) => word[0] ?? '')
+      .join('')
+      .toUpperCase();
+  }
+  return (words[0] ?? name).slice(0, 3).toUpperCase();
+}
+
+const MARK_COLORS = [
+  { bg: '#e41e2d', fg: '#ffffff' },
+  { bg: '#0a2240', fg: '#ffffff' },
+  { bg: '#14532d', fg: '#facc15' },
+  { bg: '#7c2d12', fg: '#fde68a' },
+  { bg: '#1d4ed8', fg: '#ffffff' },
+  { bg: '#334155', fg: '#f8fafc' },
+  { bg: '#854d0e', fg: '#fef3c7' },
+  { bg: '#4c1d95', fg: '#f5f3ff' },
+];
+
+function markColors(teamId: string): { bg: string; fg: string } {
+  let hash = 0;
+  for (let i = 0; i < teamId.length; i += 1) hash = (hash * 31 + teamId.charCodeAt(i)) >>> 0;
+  return MARK_COLORS[hash % MARK_COLORS.length];
+}
+
+function remainingLabel(iso: string | null | undefined, now = Date.now()): string | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso) - now;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const hours = Math.floor(ms / 3_600_000);
+  const minutes = Math.floor((ms % 3_600_000) / 60_000);
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    return `${days}d ${hours % 24}h`;
+  }
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${Math.max(1, minutes)}m`;
+}
+
+function GameScoreLabel({ game }: { game: Game }) {
+  const box = gameBox(game);
+  const phase = game.scoring?.phase;
+  const hasRuns = game.played || box.homeRuns > 0 || box.awayRuns > 0 || Boolean(game.scoring?.liveStartedAt);
+  const score = `${box.awayRuns}–${box.homeRuns}`;
+  if (phase === 'live') {
+    return <span className="game-score live">{hasRuns ? `LIVE ${score}` : 'LIVE'}</span>;
+  }
+  if (hasRuns || phase === 'grace' || phase === 'locked') {
+    return <span className="game-score">{score}</span>;
+  }
+  return <span className="game-score">Upcoming</span>;
 }
 
 const EMPTY_ATTENDANCE: TeamAttendance = { in: 0, out: 0, none: 0, total: 0 };
@@ -971,7 +1334,7 @@ function AttendanceBreakdown({ name, attendance }: { name: string; attendance?: 
   const shortHanded = a.total > 0 && a.in < 8;
   return (
     <p className="game-att-line">
-      <span className="game-att-name">{name}:</span> 🥎 {a.in} · 💩 {a.out} · — {a.none}
+      <span className="game-att-name">{name}:</span> {IN_MARK} {a.in} · {OUT_MARK} {a.out} · — {a.none}
       {shortHanded ? <span className="att-short"> short-handed</span> : null}
     </p>
   );
@@ -990,7 +1353,37 @@ function groupGamesByWeek(games: Game[]): { week: number; date: string; games: G
   return groups;
 }
 
-function Schedule() {
+function GameRow({ game, onOpen }: { game: Game; onOpen: (id: string) => void }) {
+  return (
+    <li className={`game ${game.played ? 'played' : 'upcoming'}`}>
+      <button
+        type="button"
+        className="game-toggle"
+        aria-label={`Open game: ${game.awayTeamName} at ${game.homeTeamName} on ${formatGameDate(game.date)}`}
+        onClick={() => onOpen(game.id)}
+      >
+        <span className="game-date">{formatGameDate(game.date)}</span>
+        <span className="game-teams">
+          <span className="game-team">
+            {game.awayTeamName} <AttendanceChip attendance={game.awayAttendance} />
+          </span>
+          <span className="at">@</span>
+          <span className="game-team">
+            {game.homeTeamName} <AttendanceChip attendance={game.homeAttendance} />
+          </span>
+        </span>
+        <GameScoreLabel game={game} />
+        <span className="game-chevron" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function Schedule({ onOpenGame }: { onOpenGame: (id: string) => void }) {
   const { user } = useAuth();
   const [games, setGames] = useState<Game[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -998,18 +1391,18 @@ function Schedule() {
   const [weeks, setWeeks] = useState('11');
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [home, setHome] = useState('');
-  const [away, setAway] = useState('');
 
   const isAdmin = user?.role === 'admin';
   const weekGroups = useMemo(() => groupGamesByWeek(games), [games]);
+  const liveGames = useMemo(
+    () => games.filter((g) => g.scoring?.phase === 'live' || g.scoring?.phase === 'grace'),
+    [games],
+  );
 
   function load() {
     api.getSchedule().then(setGames).catch((e) => setError(e.message));
   }
-  useEffect(load, []);
+  useEffect(load, [user?.id, user?.role, user?.teamId]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -1022,41 +1415,12 @@ function Schedule() {
         Number.isInteger(weeksNum) ? weeksNum : undefined,
       );
       setGames(next);
-      setExpanded(null);
-      setEditing(null);
       setMessage(`Generated ${next.length} games from the current teams.`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setGenerating(false);
     }
-  }
-
-  function startEdit(g: Game) {
-    setEditing(g.id);
-    setExpanded(g.id);
-    setHome(g.homeScore?.toString() ?? '');
-    setAway(g.awayScore?.toString() ?? '');
-    setMessage(null);
-  }
-
-  async function saveScore(g: Game) {
-    try {
-      await api.recordResult(g.id, Number(home), Number(away));
-      setEditing(null);
-      load();
-      setMessage('Score saved!');
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
-  const canReport = (g: Game) =>
-    canManageTeam(user, g.homeTeamId) || canManageTeam(user, g.awayTeamId);
-
-  function toggleGame(id: string) {
-    setExpanded((current) => (current === id ? null : id));
-    if (editing && editing !== id) setEditing(null);
   }
 
   if (error) return <p className="error">{error}</p>;
@@ -1092,103 +1456,672 @@ function Schedule() {
         </div>
       )}
       {message && <p className="message">{message}</p>}
+      {liveGames.length > 0 && (
+        <div className="live-now" aria-label="Live games">
+          <h3 className="week-heading">Live now</h3>
+          <ul className="games">
+            {liveGames.map((g) => (
+              <GameRow key={`live-${g.id}`} game={g} onOpen={onOpenGame} />
+            ))}
+          </ul>
+        </div>
+      )}
       {weekGroups.map((group) => (
         <div key={`${group.week}-${group.date}`} className="week-group">
           <h3 className="week-heading">
             {group.week ? `Week ${group.week} — ${formatGameDate(group.date)}` : formatGameDate(group.date)}
           </h3>
           <ul className="games">
-            {group.games.map((g) => {
-              const isOpen = expanded === g.id;
-              return (
-                <li key={g.id} className={`game ${g.played ? 'played' : 'upcoming'} ${isOpen ? 'expanded' : ''}`}>
-                  <button
-                    type="button"
-                    className="game-toggle"
-                    aria-expanded={isOpen}
-                    aria-label={`${isOpen ? 'Hide' : 'Show'} details for ${g.awayTeamName} at ${g.homeTeamName} on ${formatGameDate(g.date)}`}
-                    onClick={() => toggleGame(g.id)}
-                  >
-                    <span className="game-date">{formatGameDate(g.date)}</span>
-                    <span className="game-teams">
-                      <span className="game-team">
-                        {g.awayTeamName} <AttendanceChip attendance={g.awayAttendance} />
-                      </span>
-                      <span className="at">@</span>
-                      <span className="game-team">
-                        {g.homeTeamName} <AttendanceChip attendance={g.homeAttendance} />
-                      </span>
-                    </span>
-                    <span className="game-score">
-                      {g.played ? `${g.awayScore} - ${g.homeScore}` : 'Upcoming'}
-                    </span>
-                    <span className="game-chevron" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                    </span>
-                  </button>
-                  {isOpen && (
-                    <div className="game-details">
-                      <dl className="game-meta">
-                        <div>
-                          <dt>Time</dt>
-                          <dd>{g.time || 'TBD'}</dd>
-                        </div>
-                        <div>
-                          <dt>Field</dt>
-                          <dd>{g.field || 'TBD'}</dd>
-                        </div>
-                        <div>
-                          <dt>Location</dt>
-                          <dd>{g.location || 'Kerr Park'}</dd>
-                        </div>
-                        <div>
-                          <dt>Week</dt>
-                          <dd>{g.week || '—'}</dd>
-                        </div>
-                      </dl>
-                      <div className="game-attendance">
-                        <AttendanceBreakdown name={g.awayTeamName} attendance={g.awayAttendance} />
-                        <AttendanceBreakdown name={g.homeTeamName} attendance={g.homeAttendance} />
-                      </div>
-                      {editing === g.id ? (
-                        <div className="score-edit">
-                          <input
-                            aria-label={`${g.awayTeamName} score`}
-                            type="number"
-                            value={away}
-                            onChange={(e) => setAway(e.target.value)}
-                          />
-                          <span className="at">-</span>
-                          <input
-                            aria-label={`${g.homeTeamName} score`}
-                            type="number"
-                            value={home}
-                            onChange={(e) => setHome(e.target.value)}
-                          />
-                          <button className="mini-btn" onClick={() => saveScore(g)}>
-                            Save
-                          </button>
-                        </div>
-                      ) : (
-                        canReport(g) && (
-                          <div className="game-actions">
-                            <button className="link-btn" onClick={() => startEdit(g)}>
-                              {g.played ? 'Edit score' : 'Report score'}
-                            </button>
-                          </div>
-                        )
-                      )}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
+            {group.games.map((g) => (
+              <GameRow key={g.id} game={g} onOpen={onOpenGame} />
+            ))}
           </ul>
         </div>
       ))}
     </section>
+  );
+}
+
+function GamePage({ gameId, onBack }: { gameId: string; onBack: () => void }) {
+  const { user } = useAuth();
+  const [game, setGame] = useState<Game | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const shouldPoll = game?.scoring?.phase === 'live' || game?.scoring?.phase === 'grace';
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    api
+      .getGame(gameId)
+      .then((next) => {
+        if (!cancelled) setGame(next);
+      })
+      .catch((e) => {
+        if (!cancelled) setError((e as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gameId, user?.id, user?.role, user?.teamId]);
+
+  useEffect(() => {
+    if (!shouldPoll) return;
+    const timer = window.setInterval(() => {
+      api
+        .getGame(gameId)
+        .then(setGame)
+        .catch(() => {
+          /* keep last good snapshot */
+        });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [shouldPoll, gameId]);
+
+  if (error) {
+    return (
+      <section className="card game-page">
+        <button type="button" className="back-link" onClick={onBack} aria-label="Back to schedule">
+          ← Schedule
+        </button>
+        <p className="error">{error}</p>
+      </section>
+    );
+  }
+  if (!game) {
+    return (
+      <section className="card game-page">
+        <button type="button" className="back-link" onClick={onBack} aria-label="Back to schedule">
+          ← Schedule
+        </button>
+        <p>Loading game…</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card game-page">
+      <button type="button" className="back-link" onClick={onBack} aria-label="Back to schedule">
+        ← Schedule
+      </button>
+      <h2>
+        {game.awayTeamName} at {game.homeTeamName}
+      </h2>
+      <p className="game-page-when">
+        {formatGameDate(game.date)}
+        {game.time ? ` · ${game.time}` : ''}
+        {game.week ? ` · Week ${game.week}` : ''}
+      </p>
+      {message && <p className="message">{message}</p>}
+      <LiveScoreboard game={game} onChanged={setGame} onMessage={setMessage} onError={setError} />
+      <dl className="game-meta">
+        <div>
+          <dt>Time</dt>
+          <dd>{game.time || 'TBD'}</dd>
+        </div>
+        <div>
+          <dt>Field</dt>
+          <dd>{game.field || 'TBD'}</dd>
+        </div>
+        <div>
+          <dt>Location</dt>
+          <dd>{game.location || 'Kerr Park'}</dd>
+        </div>
+        <div>
+          <dt>Week</dt>
+          <dd>{game.week || '—'}</dd>
+        </div>
+      </dl>
+      <div className="game-attendance">
+        <AttendanceBreakdown name={game.awayTeamName} attendance={game.awayAttendance} />
+        <AttendanceBreakdown name={game.homeTeamName} attendance={game.homeAttendance} />
+      </div>
+      <GameLineups game={game} onChanged={setGame} onMessage={setMessage} onError={setError} />
+    </section>
+  );
+}
+
+function lineFor(box: GameBoxScore, side: ScoreSide): number[] {
+  const line = side === 'home' ? box.homeLine : box.awayLine;
+  return line && line.length ? line : EMPTY_LINE;
+}
+
+function TeamMark({ name, teamId, photoUrl }: { name: string; teamId: string; photoUrl?: string }) {
+  const abbr = teamAbbr(name);
+  const colors = markColors(teamId);
+  return (
+    <span className="mlb-mark" style={{ background: colors.bg, color: colors.fg }} title={name}>
+      {photoUrl ? <img src={photoUrl} alt="" /> : <span>{abbr.slice(0, 2)}</span>}
+    </span>
+  );
+}
+
+function LiveScoreboard({
+  game,
+  onChanged,
+  onMessage,
+  onError,
+}: {
+  game: Game;
+  onChanged: (game: Game) => void;
+  onMessage: (text: string | null) => void;
+  onError: (text: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [photos, setPhotos] = useState<Record<string, string | undefined>>({});
+  const box = gameBox(game);
+  const scoring = game.scoring;
+  const phase = scoring?.phase ?? 'upcoming';
+  const canStart = Boolean(scoring?.canStart);
+  const canScore = Boolean(scoring?.canScore);
+  const remaining =
+    phase === 'live'
+      ? remainingLabel(scoring?.liveEndsAt)
+      : phase === 'grace'
+        ? remainingLabel(scoring?.closesAt)
+        : phase === 'upcoming'
+          ? remainingLabel(scoring?.opensAt)
+          : null;
+  const hint =
+    phase === 'live'
+      ? remaining
+        ? `${remaining} left`
+        : ''
+      : phase === 'grace'
+        ? remaining
+          ? `${remaining} to edit`
+          : ''
+        : phase === 'locked'
+          ? ''
+          : remaining
+            ? remaining
+            : '';
+
+  useEffect(() => {
+    api
+      .getTeams()
+      .then((list) => {
+        const next: Record<string, string | undefined> = {};
+        for (const team of list) next[team.id] = team.photoUrl;
+        setPhotos(next);
+      })
+      .catch(() => {
+        /* marks still render initials */
+      });
+  }, []);
+
+  async function run(action: () => Promise<Game>, ok?: string) {
+    if (busy) return;
+    setBusy(true);
+    onError(null);
+    try {
+      const next = await action();
+      onChanged(next);
+      if (ok) onMessage(ok);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="scoreboard mlb-board">
+      <div className="mlb-matchup" aria-label="Live box score">
+        <TeamMark name={game.awayTeamName} teamId={game.awayTeamId} photoUrl={photos[game.awayTeamId]} />
+        <span className="mlb-runs">{box.awayRuns}</span>
+        <div className="mlb-status" title={hint || undefined}>
+          <span className={`mlb-phase phase-${phase}`}>{scoringPhaseLabel(phase)}</span>
+        </div>
+        <span className="mlb-runs">{box.homeRuns}</span>
+        <TeamMark name={game.homeTeamName} teamId={game.homeTeamId} photoUrl={photos[game.homeTeamId]} />
+      </div>
+      <hr className="mlb-rule" />
+      <LineScore
+        gameId={game.id}
+        awayName={game.awayTeamName}
+        homeName={game.homeTeamName}
+        box={box}
+        canScore={canScore}
+        busy={busy}
+        onRun={(action) => run(action)}
+      />
+      <div className="inning-outs">
+        <div className="inning-outs-copy">
+          <span className="mlb-outs-label">Outs</span>
+          <span className="inning-outs-dots" aria-label={`${box.currentOuts} outs`}>
+            {[0, 1, 2].map((i) => (
+              <span key={i} className={`out-dot ${i < box.currentOuts ? 'on' : ''}`} />
+            ))}
+          </span>
+          {canScore && (
+            <div className="inning-outs-actions">
+              <button
+                type="button"
+                className="score-step"
+                disabled={busy || (box.currentOuts === 0 && box.currentInning === 1 && box.currentHalf === 'top')}
+                aria-label="Remove an out this inning"
+                onClick={() => run(() => api.bumpCurrentOuts(game.id, -1))}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="score-step"
+                disabled={busy}
+                aria-label="Add an out this inning"
+                onClick={() => run(() => api.bumpCurrentOuts(game.id, 1))}
+              >
+                +
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="batter-up">
+          <p
+            className="batter-slot"
+            aria-label={`Batter up ${playerLabel(battingLineup(game, box)?.atBat) || battingTeamName(game, box)}`}
+          >
+            <span className="mlb-outs-label">Batter up</span>
+            <strong>{playerLabel(battingLineup(game, box)?.atBat) || battingTeamName(game, box)}</strong>
+          </p>
+          <p
+            className="batter-slot"
+            aria-label={`On deck ${playerLabel(battingLineup(game, box)?.onDeck) || 'none'}`}
+          >
+            <span className="mlb-outs-label">On deck</span>
+            <strong>{playerLabel(battingLineup(game, box)?.onDeck) || '—'}</strong>
+          </p>
+          <span className="batter-half">
+            {box.currentHalf === 'bottom' ? 'Bot' : 'Top'} {box.currentInning} · {battingTeamName(game, box)}
+          </span>
+        </div>
+      </div>
+      {canStart && (
+        <button
+          type="button"
+          className="start-live-btn"
+          disabled={busy}
+          onClick={() => run(() => api.startLiveGame(game.id), 'Live scorekeeping started.')}
+        >
+          Start live scorekeeping
+        </button>
+      )}
+      {!canScore && !canStart && phase === 'upcoming' && (
+        <p className="scoreboard-note">Team managers can keep score from 2 hours before first pitch through 24 hours after the game.</p>
+      )}
+    </div>
+  );
+}
+
+function battingTeamName(game: Game, box: GameBoxScore): string {
+  return box.batterUp === 'home' ? game.homeTeamName : game.awayTeamName;
+}
+
+function battingLineup(game: Game, box: GameBoxScore): GameLineup | undefined {
+  return box.batterUp === 'home' ? game.lineups?.home : game.lineups?.away;
+}
+
+function playerLabel(player?: LineupPlayer | null): string {
+  if (!player) return '';
+  return player.number != null ? `#${player.number} ${player.name}` : player.name;
+}
+
+function formatLineupLock(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function GameLineups({
+  game,
+  onChanged,
+  onMessage,
+  onError,
+}: {
+  game: Game;
+  onChanged: (game: Game) => void;
+  onMessage: (text: string | null) => void;
+  onError: (text: string | null) => void;
+}) {
+  const away = game.lineups?.away;
+  const home = game.lineups?.home;
+  if (!away && !home) return null;
+  return (
+    <div className="lineup-pair">
+      {away && (
+        <LineupEditor
+          gameId={game.id}
+          teamName={game.awayTeamName}
+          lineup={away}
+          onChanged={onChanged}
+          onMessage={onMessage}
+          onError={onError}
+        />
+      )}
+      {home && (
+        <LineupEditor
+          gameId={game.id}
+          teamName={game.homeTeamName}
+          lineup={home}
+          onChanged={onChanged}
+          onMessage={onMessage}
+          onError={onError}
+        />
+      )}
+    </div>
+  );
+}
+
+function LineupEditor({
+  gameId,
+  teamName,
+  lineup,
+  onChanged,
+  onMessage,
+  onError,
+}: {
+  gameId: string;
+  teamName: string;
+  lineup: GameLineup;
+  onChanged: (game: Game) => void;
+  onMessage: (text: string | null) => void;
+  onError: (text: string | null) => void;
+}) {
+  const [order, setOrder] = useState<string[]>(() => lineup.slots.map((p) => p.id));
+  const [busy, setBusy] = useState(false);
+  const byId = useMemo(() => new Map(lineup.slots.map((p) => [p.id, p])), [lineup.slots]);
+
+  useEffect(() => {
+    setOrder(lineup.slots.map((p) => p.id));
+  }, [lineup.teamId, lineup.saved, lineup.slots.map((p) => p.id).join('|')]);
+
+  const lockLabel = formatLineupLock(lineup.locksAt);
+  const lockPassed = Boolean(lineup.locksAt && Date.parse(lineup.locksAt) <= Date.now());
+
+  async function save() {
+    if (busy) return;
+    setBusy(true);
+    onError(null);
+    try {
+      onChanged(await api.saveLineup(gameId, lineup.teamId, order));
+      onMessage(`Saved ${teamName} lineup.`);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function move(id: string, dir: -1 | 1) {
+    setOrder((current) => {
+      const index = current.indexOf(id);
+      const nextIndex = index + dir;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      const [slot] = next.splice(index, 1);
+      next.splice(nextIndex, 0, slot);
+      return next;
+    });
+  }
+
+  return (
+    <section className="lineup-card" aria-label={`${teamName} lineup`}>
+      <h3 className="lineup-heading">{teamName} lineup</h3>
+      {lineup.canEdit ? (
+        <p className="lineup-note">
+          {lockLabel ? `You can change this until ${lockLabel}.` : 'Set the batting order before the game.'}
+        </p>
+      ) : lockPassed ? (
+        <p className="lineup-note">{lockLabel ? `Lineup locked since ${lockLabel}.` : 'Lineup is locked for this game.'}</p>
+      ) : (
+        <p className="lineup-note">Only this team's manager can set the batting order, until 24 hours before first pitch.</p>
+      )}
+      <ol className="lineup-list">
+        {order.map((id, index) => {
+          const player = byId.get(id);
+          if (!player) return null;
+          return (
+            <li key={id} className="lineup-row">
+              <span className="lineup-spot">{index + 1}</span>
+              <span className="lineup-name">{playerLabel(player)}</span>
+              {lineup.canEdit && (
+                <span className="lineup-moves">
+                  <button type="button" className="score-step tiny" disabled={busy || index === 0} aria-label={`Move ${player.name} up`} onClick={() => move(id, -1)}>
+                    ↑
+                  </button>
+                  <button type="button" className="score-step tiny" disabled={busy || index === order.length - 1} aria-label={`Move ${player.name} down`} onClick={() => move(id, 1)}>
+                    ↓
+                  </button>
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {lineup.canEdit && (
+        <button type="button" className="lineup-save" disabled={busy || order.length === 0} onClick={() => void save()}>
+          {busy ? 'Saving…' : `Save ${teamName} lineup`}
+        </button>
+      )}
+    </section>
+  );
+}
+
+function inningHasStarted(side: ScoreSide, inning: number, currentInning: number, currentHalf: InningHalf): boolean {
+  if (inning < currentInning) return true;
+  if (inning > currentInning) return false;
+  return side === 'away' || currentHalf === 'bottom';
+}
+
+function LineCell({
+  value,
+  blank,
+  canScore,
+  busy,
+  decreaseLabel,
+  increaseLabel,
+  onMinus,
+  onPlus,
+}: {
+  value: number;
+  blank?: boolean;
+  canScore: boolean;
+  busy: boolean;
+  decreaseLabel: string;
+  increaseLabel: string;
+  onMinus: () => void;
+  onPlus: () => void;
+}) {
+  const shown = blank && value === 0 ? '–' : value;
+  if (!canScore) {
+    return <span className={`scoreboard-value ${blank ? 'is-blank' : ''}`}>{shown}</span>;
+  }
+  return (
+    <span className="scoreboard-cell">
+      <button
+        type="button"
+        className="score-step tiny"
+        disabled={busy || value === 0}
+        aria-label={decreaseLabel}
+        onClick={onMinus}
+      >
+        −
+      </button>
+      <span className="scoreboard-value">{shown === '–' ? 0 : shown}</span>
+      <button
+        type="button"
+        className="score-step tiny"
+        disabled={busy}
+        aria-label={increaseLabel}
+        onClick={onPlus}
+      >
+        +
+      </button>
+    </span>
+  );
+}
+
+function LineScoreRow({
+  side,
+  name,
+  line,
+  runs,
+  hits,
+  innings,
+  currentInning,
+  currentHalf,
+  canScore,
+  busy,
+  gameId,
+  onRun,
+}: {
+  side: ScoreSide;
+  name: string;
+  line: number[];
+  runs: number;
+  hits: number;
+  innings: number;
+  currentInning: number;
+  currentHalf: InningHalf;
+  canScore: boolean;
+  busy: boolean;
+  gameId: string;
+  onRun: (action: () => Promise<Game>) => void;
+}) {
+  const batting = (currentHalf === 'top' && side === 'away') || (currentHalf === 'bottom' && side === 'home');
+  return (
+    <tr className={batting ? 'is-batting' : undefined}>
+      <th className="line-team-col" scope="row" title={name}>
+        {teamAbbr(name)}
+      </th>
+      {Array.from({ length: innings }, (_, i) => {
+        const inning = i + 1;
+        const value = line[i] ?? 0;
+        const started = inningHasStarted(side, inning, currentInning, currentHalf);
+        const current = batting && inning === currentInning;
+        return (
+          <td key={inning} className={`line-cell ${current ? 'is-current' : ''} ${started ? '' : 'is-future'}`}>
+            <span className={`scoreboard-value ${started ? '' : 'is-blank'}`}>{started || value > 0 ? value : '–'}</span>
+          </td>
+        );
+      })}
+      <td className="line-tot line-tot-r">
+        <LineCell
+          value={runs}
+          canScore={canScore}
+          busy={busy}
+          decreaseLabel={`Decrease ${name} R`}
+          increaseLabel={`Increase ${name} R`}
+          onMinus={() => onRun(() => api.bumpInningRun(gameId, side, currentInning, -1))}
+          onPlus={() => onRun(() => api.bumpInningRun(gameId, side, currentInning, 1))}
+        />
+      </td>
+      <td className="line-tot line-tot-h">
+        <LineCell
+          value={hits}
+          canScore={canScore}
+          busy={busy}
+          decreaseLabel={`Decrease ${name} H`}
+          increaseLabel={`Increase ${name} H`}
+          onMinus={() => onRun(() => api.bumpScoreStat(gameId, side, 'hits', -1))}
+          onPlus={() => onRun(() => api.bumpScoreStat(gameId, side, 'hits', 1))}
+        />
+      </td>
+    </tr>
+  );
+}
+
+function LineScore({
+  gameId,
+  awayName,
+  homeName,
+  box,
+  canScore,
+  busy,
+  onRun,
+}: {
+  gameId: string;
+  awayName: string;
+  homeName: string;
+  box: GameBoxScore;
+  canScore: boolean;
+  busy: boolean;
+  onRun: (action: () => Promise<Game>) => void;
+}) {
+  const awayLine = lineFor(box, 'away');
+  const homeLine = lineFor(box, 'home');
+  const innings = Math.max(awayLine.length, homeLine.length, 7);
+  const currentInning = box.currentInning ?? 1;
+  const currentHalf = box.currentHalf ?? 'top';
+  return (
+    <div className={`line-score ${innings > 7 ? 'has-extras' : ''}`} aria-label="Line score">
+      <div className="line-score-scroll">
+        <table className={`line-score-table ${innings > 7 ? 'is-extras' : ''} ${canScore ? 'is-scoring' : ''}`}>
+          <colgroup>
+            <col className="line-col-team" />
+            {Array.from({ length: innings }, (_, i) => (
+              <col key={i} className="line-col-inning" />
+            ))}
+            <col className="line-col-tot" />
+            <col className="line-col-tot" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="line-team-col" scope="col">
+                <span className="visually-hidden">Team</span>
+              </th>
+              {Array.from({ length: innings }, (_, i) => (
+                <th
+                  key={i + 1}
+                  scope="col"
+                  className={currentInning === i + 1 ? 'is-current' : undefined}
+                >
+                  {i + 1}
+                </th>
+              ))}
+              <th className="line-tot line-tot-r" scope="col">
+                R
+              </th>
+              <th className="line-tot line-tot-h" scope="col">
+                H
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <LineScoreRow
+              side="away"
+              name={awayName}
+              line={awayLine}
+              runs={box.awayRuns}
+              hits={box.awayHits}
+              innings={innings}
+              currentInning={currentInning}
+              currentHalf={currentHalf}
+              canScore={canScore}
+              busy={busy}
+              gameId={gameId}
+              onRun={onRun}
+            />
+            <LineScoreRow
+              side="home"
+              name={homeName}
+              line={homeLine}
+              runs={box.homeRuns}
+              hits={box.homeHits}
+              innings={innings}
+              currentInning={currentInning}
+              currentHalf={currentHalf}
+              canScore={canScore}
+              busy={busy}
+              gameId={gameId}
+              onRun={onRun}
+            />
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -1200,6 +2133,7 @@ function Rosters() {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
   const [managerName, setManagerName] = useState<string | null>(null);
+  const [managerOnRoster, setManagerOnRoster] = useState(true);
   const [checkingIn, setCheckingIn] = useState(false);
   const [accounts, setAccounts] = useState<PlayerAccount[]>([]);
   const [pickMember, setPickMember] = useState('');
@@ -1236,6 +2170,7 @@ function Rosters() {
       setMembers(r.members ?? []);
       setCurrentWeek(r.currentWeek ?? null);
       setManagerName(r.manager?.name ?? null);
+      setManagerOnRoster(r.manager?.onRoster !== false);
       setTeams((prev) => prev.map((t) => (t.id === r.team.id ? r.team : t)));
     });
   }
@@ -1394,7 +2329,10 @@ function Rosters() {
     ? teams.find((t) => t.id === user.teamId)?.name ?? user.teamId
     : null;
 
-  const canCheckIn = Boolean(user && user.teamId === selected && currentWeek);
+  const playsOnTeam = Boolean(
+    user?.teamId && (user.role === 'player' || (user.role === 'manager' && user.onRoster !== false)),
+  );
+  const canCheckIn = Boolean(playsOnTeam && user && user.teamId === selected && currentWeek);
   const myCheckIn = members.find((m) => m.id === user?.id)?.checkIn ?? null;
   const checkInCounts = {
     in: members.filter((m) => m.checkIn === 'in').length,
@@ -1478,7 +2416,12 @@ function Rosters() {
           )}
           <div>
             <h3 className="roster-team-name">{selectedTeam.name}</h3>
-            {managerName && <p className="roster-manager">Manager: {managerName}</p>}
+            {managerName && (
+              <p className="roster-manager">
+                Manager: {managerName}
+                {managerOnRoster ? '' : ' · does not play'}
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -1490,7 +2433,7 @@ function Rosters() {
           </h3>
           {members.length > 0 && (
             <p className="checkin-summary">
-              🥎 {checkInCounts.in} · 💩 {checkInCounts.out} · — {checkInCounts.none}
+              {IN_MARK} {checkInCounts.in} · {OUT_MARK} {checkInCounts.out} · — {checkInCounts.none}
             </p>
           )}
           {canCheckIn && (
@@ -1504,7 +2447,7 @@ function Rosters() {
                 onClick={() => handleCheckIn('in')}
               >
                 <span className="checkin-emoji" aria-hidden="true">
-                  🥎
+                  {IN_MARK}
                 </span>
                 I&apos;m there
               </button>
@@ -1517,7 +2460,7 @@ function Rosters() {
                 onClick={() => handleCheckIn('out')}
               >
                 <span className="checkin-emoji" aria-hidden="true">
-                  💩
+                  {OUT_MARK}
                 </span>
                 Can&apos;t make it
               </button>
@@ -1591,7 +2534,7 @@ function Rosters() {
                         : `${m.name} hasn't checked in`
                   }
                 >
-                  {m.checkIn === 'in' ? '🥎' : m.checkIn === 'out' ? '💩' : '—'}
+                  {checkInMark(m.checkIn)}
                 </span>
               )}
               {canEdit && !m.isManager && (
@@ -1766,9 +2709,9 @@ function ColorSchemeAdmin({
   onMessage: (message: string | null) => void;
 }) {
   const [theme, setTheme] = useState<Theme | null>(null);
-  const [selected, setSelected] = useState<ThemeId>('grass');
-  const [primary, setPrimary] = useState('#14532d');
-  const [accent, setAccent] = useState('#facc15');
+  const [selected, setSelected] = useState<ThemeId>('liberty');
+  const [primary, setPrimary] = useState('#1d3557');
+  const [accent, setAccent] = useState('#f2a900');
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -1878,8 +2821,9 @@ function Admin() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [newTeam, setNewTeam] = useState('');
-  const [mgrEmails, setMgrEmails] = useState('');
+  const [mgrPlayerId, setMgrPlayerId] = useState('');
   const [mgrTeamId, setMgrTeamId] = useState('');
+  const [mgrOnRoster, setMgrOnRoster] = useState(true);
   const [authorizations, setAuthorizations] = useState<ManagerAuthorization[]>([]);
   const [authorizing, setAuthorizing] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -1888,6 +2832,22 @@ function Admin() {
   const [testDataSummary, setTestDataSummary] = useState<string | null>(null);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
+  const managedTeamIds = useMemo(
+    () => new Set(users.filter((u) => u.role === 'manager' && u.teamId).map((u) => u.teamId as string)),
+    [users],
+  );
+  const openTeams = useMemo(() => teams.filter((t) => !managedTeamIds.has(t.id)), [teams, managedTeamIds]);
+  const playerAccounts = useMemo(() => users.filter((u) => u.role === 'player'), [users]);
+
+  useEffect(() => {
+    setMgrTeamId((current) => (openTeams.some((t) => t.id === current) ? current : openTeams[0]?.id ?? ''));
+  }, [openTeams]);
+
+  useEffect(() => {
+    setMgrPlayerId((current) =>
+      playerAccounts.some((u) => u.id === current) ? current : playerAccounts[0]?.id ?? '',
+    );
+  }, [playerAccounts]);
 
   function load() {
     api.listUsers().then(setUsers).catch((e) => setError(e.message));
@@ -1896,7 +2856,6 @@ function Admin() {
       .then((next) => {
         setTeams(next);
         setDrafts(Object.fromEntries(next.map((t) => [t.id, t.name])));
-        setMgrTeamId((current) => current || next[0]?.id || '');
       })
       .catch((e) => setError(e.message));
     api.listManagerEmails().then(setAuthorizations).catch((e) => setError(e.message));
@@ -1904,11 +2863,11 @@ function Admin() {
   }
   useEffect(load, []);
 
-  async function changeRole(u: User, role: Role, teamId: string | null) {
+  async function changeRole(u: User, role: Role, teamId: string | null, onRoster?: boolean) {
     setError(null);
     setMessage(null);
     try {
-      await api.setUserRole(u.id, role, teamId);
+      await api.setUserRole(u.id, role, teamId, onRoster);
       setMessage(`Updated ${u.name}.`);
       load();
     } catch (e) {
@@ -1948,9 +2907,16 @@ function Admin() {
     setMessage(null);
     setAuthorizing(true);
     try {
-      const result = await api.authorizeManagers(mgrEmails, mgrTeamId);
-      setMessage(`Promoted ${result.promoted.length}, pending ${result.pending.length}`);
-      setMgrEmails('');
+      const player = playerAccounts.find((u) => u.id === mgrPlayerId);
+      if (!player) throw new Error('Pick a player to promote');
+      const result = await api.authorizeManagers(player.email, mgrTeamId, mgrOnRoster);
+      const parts = [`Promoted ${result.promoted.length} player${result.promoted.length === 1 ? '' : 's'} to manager.`];
+      if (result.skipped.length) {
+        parts.push(
+          `Skipped ${result.skipped.length} — they need a player account first.`,
+        );
+      }
+      setMessage(parts.join(' '));
       load();
     } catch (err) {
       setError((err as Error).message);
@@ -2176,40 +3142,65 @@ function Admin() {
         <button type="submit">Create team</button>
       </form>
 
-      <h3 className="admin-users-heading">Team Managers (by email)</h3>
-      <form className="mgr-auth-form" onSubmit={authorizeManagers}>
-        <label className="field">
-          Emails
-          <textarea
-            aria-label="Manager emails"
-            placeholder="one@example.com, two@example.com"
-            value={mgrEmails}
-            onChange={(e) => setMgrEmails(e.target.value)}
-            rows={3}
-            required
-          />
-        </label>
-        <label className="field">
-          Team:{' '}
-          <select
-            aria-label="Manager team"
-            value={mgrTeamId}
-            onChange={(e) => setMgrTeamId(e.target.value)}
-            required
-          >
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="primary-btn" type="submit" disabled={authorizing || !mgrTeamId}>
-          {authorizing ? 'Authorizing…' : 'Authorize'}
-        </button>
-      </form>
+      <h3 className="admin-users-heading">Promote players to manager</h3>
+      {openTeams.length === 0 ? (
+        <p className="member-empty">Every team already has a manager.</p>
+      ) : playerAccounts.length === 0 ? (
+        <p className="member-empty">No player accounts to promote yet.</p>
+      ) : (
+        <form className="mgr-auth-form" onSubmit={authorizeManagers}>
+          <label className="field">
+            Team without a manager:{' '}
+            <select
+              aria-label="Team without a manager"
+              value={mgrTeamId}
+              onChange={(e) => setMgrTeamId(e.target.value)}
+              required
+            >
+              {openTeams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Player:{' '}
+            <select
+              aria-label="Player to promote"
+              value={mgrPlayerId}
+              onChange={(e) => setMgrPlayerId(e.target.value)}
+              required
+            >
+              {playerAccounts.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.email})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Also plays:{' '}
+            <select
+              aria-label="Manager roster option"
+              value={mgrOnRoster ? 'player' : 'only'}
+              onChange={(e) => setMgrOnRoster(e.target.value === 'player')}
+            >
+              <option value="player">Yes — for this team</option>
+              <option value="only">Manager only</option>
+            </select>
+          </label>
+          <p className="theme-help">
+            Only teams that still need a manager are listed. Pick an existing player to
+            promote. Playing managers stay on the team they manage.
+          </p>
+          <button className="primary-btn" type="submit" disabled={authorizing || !mgrTeamId || !mgrPlayerId}>
+            {authorizing ? 'Promoting…' : 'Promote to manager'}
+          </button>
+        </form>
+      )}
       {authorizations.length === 0 ? (
-        <p className="member-empty">No manager authorizations yet.</p>
+        <p className="member-empty">No team managers yet.</p>
       ) : (
         <ul className="user-list">
           {authorizations.map((row) => (
@@ -2221,7 +3212,10 @@ function Admin() {
                 </span>
               </div>
               <div className="role-controls">
-                <span className="manager-of">{row.teamName}</span>
+                <span className="manager-of">
+                  {row.teamName}
+                  {row.onRoster === false ? ' · manager only' : ' · plays for this team'}
+                </span>
                 <button
                   type="button"
                   className="link-btn danger"
@@ -2237,6 +3231,9 @@ function Admin() {
       )}
 
       <h3 className="admin-users-heading">Players &amp; roles</h3>
+      <p className="theme-help">
+        There is one league admin. You can promote players to manager, but not to admin.
+      </p>
       <ul className="user-list">
         {users.map((u) => (
           <li key={u.id} className="user-row">
@@ -2248,27 +3245,42 @@ function Admin() {
               <select
                 aria-label={`Role for ${u.name}`}
                 value={u.role}
-                disabled={u.id === me?.id}
+                disabled={u.role === 'admin' || u.id === me?.id}
                 onChange={(e) => {
                   const role = e.target.value as Role;
-                  changeRole(u, role, role === 'manager' ? u.teamId ?? teams[0]?.id ?? null : null);
+                  changeRole(u, role, role === 'manager' ? u.teamId ?? openTeams[0]?.id ?? u.teamId ?? null : null);
                 }}
               >
-                <option value="player">Player</option>
-                <option value="manager">Team Manager</option>
-                <option value="admin">Admin</option>
+                {u.role === 'admin' ? (
+                  <option value="admin">Admin</option>
+                ) : (
+                  <>
+                    <option value="player">Player</option>
+                    <option value="manager">Team Manager</option>
+                  </>
+                )}
               </select>
               {u.role === 'manager' && (
                 <select
                   aria-label={`Team for ${u.name}`}
                   value={u.teamId ?? ''}
-                  onChange={(e) => changeRole(u, 'manager', e.target.value)}
+                  onChange={(e) => changeRole(u, 'manager', e.target.value, u.onRoster !== false)}
                 >
                   {teams.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
                     </option>
                   ))}
+                </select>
+              )}
+              {u.role === 'manager' && (
+                <select
+                  aria-label={`Manager type for ${u.name}`}
+                  value={u.onRoster === false ? 'only' : 'player'}
+                  onChange={(e) => changeRole(u, 'manager', u.teamId, e.target.value === 'player')}
+                >
+                  <option value="player">Plays for this team</option>
+                  <option value="only">Manager only</option>
                 </select>
               )}
               {u.role === 'manager' && u.teamId && (

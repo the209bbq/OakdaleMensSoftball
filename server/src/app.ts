@@ -4,13 +4,22 @@ import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { LeagueStore } from './store.js';
-import type { LandingContent, PublicUser, TeamAttendance } from './types.js';
+import type { Game, LandingContent, PublicUser, TeamAttendance } from './types.js';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_MS,
   createSessionToken,
   verifySessionToken,
 } from './auth.js';
+import {
+  canEditLineup,
+  canScoreLiveGame,
+  canStartLiveGame,
+  scheduledStartMs,
+  scoringWindow,
+  type ScoreSide,
+  type ScoreStat,
+} from './gameScoring.js';
 
 export interface AppOptions {
   clientDist?: string;
@@ -136,8 +145,8 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
   api.put('/auth/profile', requireAuth, (req: Request, res: Response) => {
     try {
-      const { name, position, number, photoUrl } = req.body ?? {};
-      const updated = store.updateProfile(req.user!.id, { name, position, number, photoUrl });
+      const { name, position, number, photoUrl, onRoster } = req.body ?? {};
+      const updated = store.updateProfile(req.user!.id, { name, position, number, photoUrl, onRoster });
       res.json(updated);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
@@ -145,6 +154,10 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
   });
 
   api.put('/auth/team', requireAuth, (req: Request, res: Response) => {
+    if (req.user!.role === 'manager') {
+      res.status(400).json({ error: 'Managers play for the team they manage' });
+      return;
+    }
     if (req.user!.role !== 'player') {
       res.status(400).json({ error: 'Your team is managed by the league' });
       return;
@@ -172,8 +185,17 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     res.json(store.getStandings());
   });
 
-  api.get('/schedule', (_req: Request, res: Response) => {
-    res.json(withTeamNames(store));
+  api.get('/schedule', (req: Request, res: Response) => {
+    res.json(withTeamNames(store, req.user));
+  });
+
+  api.get('/games/:id', (req: Request, res: Response) => {
+    const game = store.getGame(req.params.id);
+    if (!game) {
+      res.status(404).json({ error: 'Game not found' });
+      return;
+    }
+    res.json(decorateGame(store, game, req.user));
   });
 
   api.get('/current-week', (_req: Request, res: Response) => {
@@ -444,7 +466,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         weekCount = n;
       }
       store.generateSchedule({ startDate, weeks: weekCount });
-      res.status(201).json(withTeamNames(store));
+      res.status(201).json(withTeamNames(store, req.user));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
@@ -459,14 +481,144 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         res.status(404).json({ error: 'Game not found' });
         return;
       }
-      const allowed = canManageTeam(req.user, game.homeTeamId) || canManageTeam(req.user, game.awayTeamId);
-      if (!allowed) {
-        res.status(403).json({ error: 'You can only report scores for your own games' });
+      if (!canScoreGame(req.user, game, store)) {
+        const owns = canManageGame(req.user, game);
+        res.status(403).json({
+          error: owns
+            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
+            : 'You can only report scores for your own games',
+        });
         return;
       }
       const { homeScore, awayScore } = req.body ?? {};
-      const updated = store.recordResult(req.params.id, Number(homeScore), Number(awayScore));
-      res.json(updated);
+      const updated = store.recordResult(req.params.id, Number(homeScore), Number(awayScore), req.user!.id);
+      res.json(decorateGame(store, updated, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.post('/games/:id/scorelog/start', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      if (!canManageGame(req.user, game)) {
+        res.status(403).json({ error: 'You can only keep score for your own games' });
+        return;
+      }
+      if (!canStartGame(req.user, game, store)) {
+        res.status(403).json({
+          error: 'Live scorekeeping opens two hours before first pitch and stays open through the 24-hour grace window.',
+        });
+        return;
+      }
+      store.startLiveGame(game.id, req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.post('/games/:id/scorelog/stat', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      if (!canScoreGame(req.user, game, store)) {
+        const owns = canManageGame(req.user, game);
+        res.status(403).json({
+          error: owns
+            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
+            : 'You can only keep score for your own games',
+        });
+        return;
+      }
+      const { side, stat, delta } = req.body ?? {};
+      store.bumpScoreStat(game.id, side as ScoreSide, stat as ScoreStat, Number(delta), req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.post('/games/:id/scorelog/outs', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      if (!canScoreGame(req.user, game, store)) {
+        const owns = canManageGame(req.user, game);
+        res.status(403).json({
+          error: owns
+            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
+            : 'You can only keep score for your own games',
+        });
+        return;
+      }
+      const { delta } = req.body ?? {};
+      store.bumpCurrentOuts(game.id, Number(delta), req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.put('/games/:id/lineups/:teamId', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      const teamId = req.params.teamId;
+      if (teamId !== game.homeTeamId && teamId !== game.awayTeamId) {
+        res.status(404).json({ error: 'Team is not playing in this game' });
+        return;
+      }
+      if (!canManageTeam(req.user, teamId)) {
+        res.status(403).json({ error: 'You can only set the lineup for your own team' });
+        return;
+      }
+      const { scheduledMs } = scoringFor(store, game);
+      if (!canEditLineup(scheduledMs, Date.now(), req.user!.role === 'admin')) {
+        res.status(403).json({
+          error: 'Lineups lock 24 hours before first pitch. Managers can set the batting order before then.',
+        });
+        return;
+      }
+      store.setGameLineup(game.id, teamId, req.body?.playerIds ?? [], req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.post('/games/:id/scorelog/inning', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      if (!canScoreGame(req.user, game, store)) {
+        const owns = canManageGame(req.user, game);
+        res.status(403).json({
+          error: owns
+            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
+            : 'You can only keep score for your own games',
+        });
+        return;
+      }
+      const { side, inning, delta } = req.body ?? {};
+      store.bumpInningRun(game.id, side as ScoreSide, Number(inning), Number(delta), req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
@@ -486,6 +638,10 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     const target = store.getUserById(req.params.id);
     if (!target) {
       res.status(400).json({ error: 'Unknown user' });
+      return;
+    }
+    if (target.role === 'manager') {
+      res.status(400).json({ error: 'Managers play for the team they manage' });
       return;
     }
     if (target.role !== 'player') {
@@ -532,16 +688,21 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
   api.post('/users/:id/role', requireAdmin, (req: Request, res: Response) => {
     try {
-      const { role, teamId } = req.body ?? {};
-      if (!['admin', 'manager', 'player'].includes(role)) {
-        res.status(400).json({ error: 'role must be admin, manager, or player' });
+      const { role, teamId, onRoster } = req.body ?? {};
+      if (role === 'admin') {
+        res.status(400).json({ error: 'Admin access cannot be granted' });
         return;
       }
-      if (req.params.id === req.user!.id && role !== 'admin') {
+      if (!['manager', 'player'].includes(role)) {
+        res.status(400).json({ error: 'role must be manager or player' });
+        return;
+      }
+      if (req.params.id === req.user!.id) {
         res.status(400).json({ error: 'You cannot remove your own admin access' });
         return;
       }
-      const updated = store.setUserRole(req.params.id, role, teamId ?? null);
+      const plays = typeof onRoster === 'boolean' ? onRoster : undefined;
+      const updated = store.setUserRole(req.params.id, role, teamId ?? null, plays);
       res.json(updated);
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
@@ -555,7 +716,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
   });
 
   api.post('/manager-emails', requireAdmin, (req: Request, res: Response) => {
-    const { emails, teamId } = req.body ?? {};
+    const { emails, teamId, onRoster } = req.body ?? {};
     if (typeof teamId !== 'string' || !teamId) {
       res.status(400).json({ error: 'teamId is required' });
       return;
@@ -570,7 +731,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       return;
     }
     try {
-      res.json(store.authorizeManagers(parsed, teamId));
+      res.json(store.authorizeManagers(parsed, teamId, onRoster !== false));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
@@ -624,17 +785,65 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
 const EMPTY_ATTENDANCE: TeamAttendance = { in: 0, out: 0, none: 0, total: 0 };
 
-function withTeamNames(store: LeagueStore) {
+function canManageGame(user: PublicUser | undefined, game: Game): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  return user.role === 'manager' && (user.teamId === game.homeTeamId || user.teamId === game.awayTeamId);
+}
+
+function scoringFor(store: LeagueStore, game: Game, nowMs = Date.now()) {
+  const log = store.getGameLog(game.id);
+  const scheduledMs = scheduledStartMs(game.date, game.time);
+  const liveStartedAtMs = log?.liveStartedAt ? Date.parse(log.liveStartedAt) : null;
+  const window = scoringWindow(scheduledMs, Number.isNaN(liveStartedAtMs ?? NaN) ? null : liveStartedAtMs, nowMs);
+  return { log, scheduledMs, liveStartedAtMs: Number.isNaN(liveStartedAtMs ?? NaN) ? null : liveStartedAtMs, window };
+}
+
+function canStartGame(user: PublicUser | undefined, game: Game, store: LeagueStore, nowMs = Date.now()): boolean {
+  if (!canManageGame(user, game)) return false;
+  const { scheduledMs, liveStartedAtMs } = scoringFor(store, game, nowMs);
+  return canStartLiveGame(scheduledMs, liveStartedAtMs, nowMs, user?.role === 'admin');
+}
+
+function canScoreGame(user: PublicUser | undefined, game: Game, store: LeagueStore, nowMs = Date.now()): boolean {
+  if (!canManageGame(user, game)) return false;
+  const { window } = scoringFor(store, game, nowMs);
+  return canScoreLiveGame(window, user?.role === 'admin');
+}
+
+function decorateGame(store: LeagueStore, game: Game, user?: PublicUser, attendance?: Map<string, TeamAttendance>) {
   const teams = new Map(store.getTeams().map((t) => [t.id, t.name]));
+  const { log, window, scheduledMs, liveStartedAtMs } = scoringFor(store, game);
+  const isAdmin = user?.role === 'admin';
+  const owns = canManageGame(user, game);
+  return {
+    ...game,
+    homeTeamName: teams.get(game.homeTeamId) ?? game.homeTeamId,
+    awayTeamName: teams.get(game.awayTeamId) ?? game.awayTeamId,
+    homeAttendance: attendance?.get(`${game.homeTeamId}:${game.week}`) ?? EMPTY_ATTENDANCE,
+    awayAttendance: attendance?.get(`${game.awayTeamId}:${game.week}`) ?? EMPTY_ATTENDANCE,
+    box: store.getGameBox(game, log),
+    lineups: {
+      away: store.buildGameLineup(game, game.awayTeamId, user),
+      home: store.buildGameLineup(game, game.homeTeamId, user),
+    },
+    scoring: {
+      phase: window.phase,
+      open: window.open,
+      opensAt: window.opensAt,
+      liveEndsAt: window.liveEndsAt,
+      closesAt: window.closesAt,
+      liveStartedAt: log?.liveStartedAt ?? null,
+      canStart: owns && canStartLiveGame(scheduledMs, liveStartedAtMs, Date.now(), isAdmin),
+      canScore: owns && canScoreLiveGame(window, isAdmin),
+    },
+  };
+}
+
+function withTeamNames(store: LeagueStore, user?: PublicUser) {
   const games = store.getSchedule();
   const attendance = store.getAttendanceForGames(games);
-  return games.map((g) => ({
-    ...g,
-    homeTeamName: teams.get(g.homeTeamId) ?? g.homeTeamId,
-    awayTeamName: teams.get(g.awayTeamId) ?? g.awayTeamId,
-    homeAttendance: attendance.get(`${g.homeTeamId}:${g.week}`) ?? EMPTY_ATTENDANCE,
-    awayAttendance: attendance.get(`${g.awayTeamId}:${g.week}`) ?? EMPTY_ATTENDANCE,
-  }));
+  return games.map((g) => decorateGame(store, g, user, attendance));
 }
 
 /** Split a string or string[] of emails on commas / whitespace / newlines. */
