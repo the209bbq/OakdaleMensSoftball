@@ -707,6 +707,54 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Undo last play' })).toBeEnabled();
   });
 
+  it('lets a checked-in player record a play on their team’s live game', async () => {
+    const playerUser = {
+      id: 'u1',
+      email: 'pat@example.com',
+      name: 'Pat Shortstop',
+      role: 'player' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const liveGame = {
+      ...scheduleGames[0],
+      scoring: {
+        ...scheduleGames[0].scoring!,
+        phase: 'live' as const,
+        open: true,
+        liveStartedAt: '2026-09-26T19:00:00.000Z',
+        canStart: false,
+        canScore: true,
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: playerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) return jsonOk(liveGame);
+        if (url.includes('/api/schedule')) return jsonOk([liveGame]);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/messages')) return jsonOk([]);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /open game: da beers at oakdale tigers/i })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Record Single' })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Expand dugout scoreboard' })).toBeInTheDocument();
+  });
+
   it('lets a manager reorder and save their lineup', async () => {
     const managerUser = {
       id: 'u-mgr',

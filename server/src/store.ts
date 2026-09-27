@@ -2281,6 +2281,19 @@ export class LeagueStore {
     return map;
   }
 
+  getUserCheckIns(userId: string): Map<number, CheckInStatus> {
+    const rows = this.db
+      .prepare('SELECT week, status FROM check_ins WHERE userId = ?')
+      .all(userId) as CheckInRow[];
+    const map = new Map<number, CheckInStatus>();
+    for (const row of rows) {
+      if (row.status === 'in' || row.status === 'out') {
+        map.set(row.week, row.status);
+      }
+    }
+    return map;
+  }
+
   /**
    * Account members of a team for attendance: player-role users with
    * `teamId === team` plus playing managers. Manager-only accounts are

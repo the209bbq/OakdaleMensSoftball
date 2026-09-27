@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { LeagueStore, MANAGERS_PER_TEAM } from './store.js';
-import type { Game, LandingContent, PublicUser, TeamAttendance } from './types.js';
+import type { CheckInStatus, Game, LandingContent, PublicUser, TeamAttendance } from './types.js';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_MS,
@@ -321,7 +321,8 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       res.status(404).json({ error: 'Game not found' });
       return;
     }
-    res.json(decorateGame(store, game, req.user));
+    const userCheckIns = req.user?.role === 'player' ? store.getUserCheckIns(req.user.id) : undefined;
+    res.json(decorateGame(store, game, req.user, undefined, userCheckIns));
   });
 
   api.get('/current-week', (_req: Request, res: Response) => {
@@ -602,7 +603,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
-  // ---- Score reporting (admin, or a manager of one of the two teams) ----
+  // ---- Score reporting (admin, team managers, or checked-in players on either side) ----
 
   api.post('/games/:id/result', requireAuth, (req: Request, res: Response) => {
     try {
@@ -612,12 +613,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        const owns = canManageGame(req.user, game);
-        res.status(403).json({
-          error: owns
-            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
-            : 'You can only report scores for your own games',
-        });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
         return;
       }
       const { homeScore, awayScore } = req.body ?? {};
@@ -636,8 +632,8 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         res.status(404).json({ error: 'Game not found' });
         return;
       }
-      if (!canManageGame(req.user, game)) {
-        res.status(403).json({ error: 'You can only keep score for your own games' });
+      if (!canKeepScore(req.user, game, store)) {
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
         return;
       }
       if (!canStartGame(req.user, game, store)) {
@@ -661,12 +657,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        const owns = canManageGame(req.user, game);
-        res.status(403).json({
-          error: owns
-            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
-            : 'You can only keep score for your own games',
-        });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
         return;
       }
       const { side, stat, delta } = req.body ?? {};
@@ -685,12 +676,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        const owns = canManageGame(req.user, game);
-        res.status(403).json({
-          error: owns
-            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
-            : 'You can only keep score for your own games',
-        });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
         return;
       }
       store.recordPlay(game.id, req.body?.result, req.user!.id);
@@ -708,12 +694,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        const owns = canManageGame(req.user, game);
-        res.status(403).json({
-          error: owns
-            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
-            : 'You can only keep score for your own games',
-        });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
         return;
       }
       store.undoLastPlay(game.id, req.user!.id);
@@ -731,12 +712,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        const owns = canManageGame(req.user, game);
-        res.status(403).json({
-          error: owns
-            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
-            : 'You can only keep score for your own games',
-        });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
         return;
       }
       const { delta } = req.body ?? {};
@@ -785,12 +761,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        const owns = canManageGame(req.user, game);
-        res.status(403).json({
-          error: owns
-            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
-            : 'You can only keep score for your own games',
-        });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
         return;
       }
       const { side, inning, delta } = req.body ?? {};
@@ -1003,10 +974,33 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
 
 const EMPTY_ATTENDANCE: TeamAttendance = { in: 0, out: 0, none: 0, total: 0 };
 
-function canManageGame(user: PublicUser | undefined, game: Game): boolean {
+function isOnGameTeam(user: PublicUser | undefined, game: Game): boolean {
+  return Boolean(user?.teamId && (user.teamId === game.homeTeamId || user.teamId === game.awayTeamId));
+}
+
+function canKeepScore(
+  user: PublicUser | undefined,
+  game: Game,
+  store: LeagueStore,
+  userCheckIns?: Map<number, CheckInStatus>,
+): boolean {
   if (!user) return false;
   if (user.role === 'admin') return true;
-  return user.role === 'manager' && (user.teamId === game.homeTeamId || user.teamId === game.awayTeamId);
+  if (!isOnGameTeam(user, game)) return false;
+  if (user.role === 'manager') return true;
+  if (user.role !== 'player') return false;
+  const status = userCheckIns?.get(game.week) ?? store.getCheckInsForWeek(game.week).get(user.id);
+  return status === 'in';
+}
+
+function scoreDeniedMessage(user: PublicUser | undefined, game: Game, store: LeagueStore): string {
+  if (canKeepScore(user, game, store)) {
+    return 'Scoring is closed for this game. Checked-in players and managers can keep score during the game and for 24 hours after.';
+  }
+  if (isOnGameTeam(user, game) && user?.role === 'player') {
+    return 'Check in for this week to keep score for your team.';
+  }
+  return 'You can only keep score for your own team\'s games';
 }
 
 function scoringFor(store: LeagueStore, game: Game, nowMs = Date.now()) {
@@ -1018,22 +1012,28 @@ function scoringFor(store: LeagueStore, game: Game, nowMs = Date.now()) {
 }
 
 function canStartGame(user: PublicUser | undefined, game: Game, store: LeagueStore, nowMs = Date.now()): boolean {
-  if (!canManageGame(user, game)) return false;
+  if (!canKeepScore(user, game, store)) return false;
   const { scheduledMs, liveStartedAtMs } = scoringFor(store, game, nowMs);
   return canStartLiveGame(scheduledMs, liveStartedAtMs, nowMs, user?.role === 'admin');
 }
 
 function canScoreGame(user: PublicUser | undefined, game: Game, store: LeagueStore, nowMs = Date.now()): boolean {
-  if (!canManageGame(user, game)) return false;
+  if (!canKeepScore(user, game, store)) return false;
   const { window } = scoringFor(store, game, nowMs);
   return canScoreLiveGame(window, user?.role === 'admin');
 }
 
-function decorateGame(store: LeagueStore, game: Game, user?: PublicUser, attendance?: Map<string, TeamAttendance>) {
+function decorateGame(
+  store: LeagueStore,
+  game: Game,
+  user?: PublicUser,
+  attendance?: Map<string, TeamAttendance>,
+  userCheckIns?: Map<number, CheckInStatus>,
+) {
   const teams = new Map(store.getTeams().map((t) => [t.id, t.name]));
   const { log, window, scheduledMs, liveStartedAtMs } = scoringFor(store, game);
   const isAdmin = user?.role === 'admin';
-  const owns = canManageGame(user, game);
+  const keeps = canKeepScore(user, game, store, userCheckIns);
   return {
     ...game,
     homeTeamName: teams.get(game.homeTeamId) ?? game.homeTeamId,
@@ -1058,8 +1058,8 @@ function decorateGame(store: LeagueStore, game: Game, user?: PublicUser, attenda
       liveEndsAt: window.liveEndsAt,
       closesAt: window.closesAt,
       liveStartedAt: log?.liveStartedAt ?? null,
-      canStart: owns && canStartLiveGame(scheduledMs, liveStartedAtMs, Date.now(), isAdmin),
-      canScore: owns && canScoreLiveGame(window, isAdmin),
+      canStart: keeps && canStartLiveGame(scheduledMs, liveStartedAtMs, Date.now(), isAdmin),
+      canScore: keeps && canScoreLiveGame(window, isAdmin),
     },
   };
 }
@@ -1067,7 +1067,8 @@ function decorateGame(store: LeagueStore, game: Game, user?: PublicUser, attenda
 function withTeamNames(store: LeagueStore, user?: PublicUser) {
   const games = store.getSchedule();
   const attendance = store.getAttendanceForGames(games);
-  return games.map((g) => decorateGame(store, g, user, attendance));
+  const userCheckIns = user?.role === 'player' ? store.getUserCheckIns(user.id) : undefined;
+  return games.map((g) => decorateGame(store, g, user, attendance, userCheckIns));
 }
 
 /** Split a string or string[] of emails on commas / whitespace / newlines. */

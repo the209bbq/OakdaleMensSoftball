@@ -17,6 +17,7 @@ const TAB_TITLES: Record<Tab, string> = {
 };
 
 const TABS = new Set<Tab>(['home', 'standings', 'schedule', 'teams', 'rules', 'admin']);
+const LIVE_POLL_MS = 2000;
 
 type AppRoute = { tab: Tab; gameId: string | null; teamId: string | null; playerId: string | null };
 
@@ -1620,7 +1621,7 @@ function GameRow({ game, onOpen }: { game: Game; onOpen: (id: string) => void })
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const shown = detail ?? game;
-  const shouldPoll = expanded && (shown.scoring?.phase === 'live' || shown.scoring?.phase === 'grace');
+  const shouldPoll = expanded;
 
   useEffect(() => {
     if (!expanded) return;
@@ -1647,7 +1648,7 @@ function GameRow({ game, onOpen }: { game: Game; onOpen: (id: string) => void })
         .catch(() => {
           /* keep last good snapshot */
         });
-    }, 5000);
+    }, LIVE_POLL_MS);
     return () => window.clearInterval(timer);
   }, [shouldPoll, game.id]);
 
@@ -1717,6 +1718,17 @@ function Schedule({ onOpenGame }: { onOpenGame: (id: string) => void }) {
     api.getSchedule().then(setGames).catch((e) => setError(e.message));
   }
   useEffect(load, [user?.id, user?.role, user?.teamId]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      api
+        .getSchedule()
+        .then(setGames)
+        .catch(() => {
+          /* keep last good snapshot */
+        });
+    }, LIVE_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [user?.id, user?.role, user?.teamId]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -1801,7 +1813,7 @@ function GamePage({ gameId, onBack }: { gameId: string; onBack: () => void }) {
   const [game, setGame] = useState<Game | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const shouldPoll = game?.scoring?.phase === 'live' || game?.scoring?.phase === 'grace';
+  const shouldPoll = Boolean(gameId);
 
   useEffect(() => {
     let cancelled = false;
@@ -1828,7 +1840,7 @@ function GamePage({ gameId, onBack }: { gameId: string; onBack: () => void }) {
         .catch(() => {
           /* keep last good snapshot */
         });
-    }, 5000);
+    }, LIVE_POLL_MS);
     return () => window.clearInterval(timer);
   }, [shouldPoll, gameId]);
 
@@ -2097,7 +2109,7 @@ function LiveScoreboard({
         </button>
       )}
       {!canScore && !canStart && phase === 'upcoming' && (
-        <p className="scoreboard-note">Team managers can keep score from 2 hours before first pitch through 24 hours after the game.</p>
+        <p className="scoreboard-note">Checked-in players and team managers can keep score from 2 hours before first pitch through 24 hours after the game.</p>
       )}
     </div>
   );
