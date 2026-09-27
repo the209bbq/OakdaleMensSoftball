@@ -136,6 +136,16 @@ export interface CurrentWeek {
   date: string;
 }
 
+export type MailTransport = 'resend' | 'smtp' | 'none';
+
+export interface MailStatus {
+  configured: boolean;
+  transport: MailTransport;
+  from: string | null;
+  notifyEmails: string[];
+  publicAppUrl: string;
+}
+
 export interface ManagerAuthorization {
   email: string;
   teamId: string;
@@ -354,4 +364,7 @@ export const api = {
     request<TestDataGenerateResult>('/api/admin/test-data/generate', { method: 'POST' }),
   clearTestData: () =>
     request<TestDataClearResult>('/api/admin/test-data/clear', { method: 'POST' }),
+
+  getMailStatus: () => request<MailStatus>('/api/mail'),
+  sendTestMail: () => request<{ ok: true; to: string }>('/api/mail/test', { method: 'POST' }),
 };

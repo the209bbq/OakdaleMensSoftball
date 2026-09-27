@@ -2159,6 +2159,19 @@ body {
   cursor: default;
 }
 
+.mail-panel {
+  margin: 0.2rem 0 1.4rem;
+}
+
+.mail-panel h3 {
+  margin: 0 0 0.35rem;
+}
+
+.mail-panel .primary-btn {
+  margin-top: 0.15rem;
+  padding: 0.45rem 0.95rem;
+}
+
 .theme-panel {
   margin: 0.2rem 0 1.4rem;
 }

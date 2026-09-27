@@ -6,6 +6,7 @@ import request from 'supertest';
 import { createApp } from './app.js';
 import { LeagueStore, SIM_EMAIL_DOMAIN } from './store.js';
 import { seedDemoUsers } from './demoUsers.js';
+import type { Mailer, MailMessage } from './mailer.js';
 
 const TEAM_OWN = 'nothin-but-dingers';
 const TEAM_OTHER = 'da-beers';
@@ -139,6 +140,97 @@ describe('Authentication', () => {
       .post('/api/auth/register')
       .send({ email: 'dup@b.com', name: 'B', password: 'longenough' });
     expect(dup.status).toBe(400);
+  });
+
+  it('emails the player and commissioner after a real signup', async () => {
+    const sent: MailMessage[] = [];
+    const mailer: Mailer = {
+      configured: true,
+      transport: 'resend',
+      from: 'League <noreply@test.dev>',
+      async send(message) {
+        sent.push(message);
+      },
+    };
+    const store = new LeagueStore(null);
+    store.ensureAdmin('admin@oakdale.local', 'Commish', 'admin-password');
+    const app = createApp(store, {
+      sessionSecret: 'test-secret',
+      mailer,
+      notifyEmail: 'david@example.com',
+      publicAppUrl: 'https://oakdale-mens-softball.fly.dev',
+    });
+
+    const res = await request(app).post('/api/auth/register').send({
+      email: 'Pat@example.com',
+      name: 'Pat Shortstop',
+      password: 'longenough',
+    });
+    expect(res.status).toBe(201);
+    expect(sent).toHaveLength(2);
+    expect(sent[0].to).toBe('pat@example.com');
+    expect(sent[0].subject).toMatch(/welcome/i);
+    expect(sent[1].to).toBe('david@example.com');
+    expect(sent[1].subject).toBe('New player signup: Pat Shortstop');
+    expect(sent[1].text).toContain('/admin');
+  });
+
+  it('still registers when signup email sending fails', async () => {
+    const mailer: Mailer = {
+      configured: true,
+      transport: 'smtp',
+      from: 'League <noreply@test.dev>',
+      async send() {
+        throw new Error('SMTP down');
+      },
+    };
+    const store = new LeagueStore(null);
+    store.ensureAdmin('admin@oakdale.local', 'Commish', 'admin-password');
+    const app = createApp(store, { sessionSecret: 'test-secret', mailer, notifyEmail: 'david@example.com' });
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'ok@example.com', name: 'Ok Player', password: 'longenough' });
+    expect(res.status).toBe(201);
+    expect(store.getUserByEmail('ok@example.com')?.name).toBe('Ok Player');
+  });
+
+  it('lets an admin inspect mail status and send a test email', async () => {
+    const sent: MailMessage[] = [];
+    const mailer: Mailer = {
+      configured: true,
+      transport: 'resend',
+      from: 'League <noreply@test.dev>',
+      async send(message) {
+        sent.push(message);
+      },
+    };
+    const store = new LeagueStore(null);
+    store.ensureAdmin('admin@oakdale.local', 'Commish', 'admin-password');
+    const app = createApp(store, {
+      sessionSecret: 'test-secret',
+      mailer,
+      notifyEmail: 'david@example.com',
+      publicAppUrl: 'https://oakdale-mens-softball.fly.dev',
+    });
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const status = await admin.get('/api/mail');
+    expect(status.status).toBe(200);
+    expect(status.body).toMatchObject({
+      configured: true,
+      transport: 'resend',
+      from: 'League <noreply@test.dev>',
+      notifyEmails: ['david@example.com'],
+    });
+    const test = await admin.post('/api/mail/test');
+    expect(test.status).toBe(200);
+    expect(test.body.to).toBe('david@example.com');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].subject).toMatch(/mail test/i);
+
+    const player = request.agent(app);
+    await player.post('/api/auth/register').send({ email: 'p@example.com', name: 'P', password: 'longenough' });
+    expect((await player.get('/api/mail')).status).toBe(403);
+    expect((await player.post('/api/mail/test')).status).toBe(403);
   });
 
   it('rejects bad login credentials', async () => {

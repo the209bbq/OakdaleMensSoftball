@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, type CurrentWeek, type Game, type GameBoxScore, type GameLineup, type InningHalf, type Landing, type LineupPlayer, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
+import { api, type CurrentWeek, type Game, type GameBoxScore, type GameLineup, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type Role, type ScoreSide, type ScoringPhase, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl } from './image';
 import { applyTheme } from './theme';
@@ -2830,6 +2830,8 @@ function Admin() {
   const [testDataConfirm, setTestDataConfirm] = useState<'generate' | 'clear' | null>(null);
   const [testDataBusy, setTestDataBusy] = useState(false);
   const [testDataSummary, setTestDataSummary] = useState<string | null>(null);
+  const [mailStatus, setMailStatus] = useState<MailStatus | null>(null);
+  const [mailTestBusy, setMailTestBusy] = useState(false);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
   const managedTeamIds = useMemo(
@@ -2860,6 +2862,12 @@ function Admin() {
       .catch((e) => setError(e.message));
     api.listManagerEmails().then(setAuthorizations).catch((e) => setError(e.message));
     api.listSuggestions().then(setSuggestions).catch((e) => setError(e.message));
+    api
+      .getMailStatus()
+      .then((status) => {
+        if (status && typeof status === 'object' && 'configured' in status) setMailStatus(status);
+      })
+      .catch((e) => setError(e.message));
   }
   useEffect(load, []);
 
@@ -2983,6 +2991,20 @@ function Admin() {
     }
   }
 
+  async function sendTestMail() {
+    setMailTestBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.sendTestMail();
+      setMessage(`Test email sent to ${result.to}.`);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setMailTestBusy(false);
+    }
+  }
+
   async function runClearTestData() {
     setTestDataBusy(true);
     setError(null);
@@ -3010,6 +3032,35 @@ function Admin() {
         onError={setError}
         onMessage={setMessage}
       />
+
+      <div className="mail-panel">
+        <h3>Signup emails</h3>
+        {mailStatus?.configured ? (
+          <>
+            <p className="theme-help">
+              On via {mailStatus.transport === 'resend' ? 'Resend' : 'SMTP'}. New players get a
+              welcome email, and{' '}
+              {mailStatus.notifyEmails.length
+                ? mailStatus.notifyEmails.join(', ')
+                : 'no commissioner inbox'}{' '}
+              get a signup notice.
+            </p>
+            <button
+              type="button"
+              className="primary-btn"
+              disabled={mailTestBusy}
+              onClick={() => void sendTestMail()}
+            >
+              {mailTestBusy ? 'Sending…' : 'Send test email'}
+            </button>
+          </>
+        ) : (
+          <p className="theme-help">
+            Off until the host has <code>RESEND_API_KEY</code> or SMTP settings and{' '}
+            <code>SIGNUP_NOTIFY_EMAIL</code> is a real inbox. Signups still work.
+          </p>
+        )}
+      </div>
 
       <div className="test-data-panel">
         <h3>Test Data (simulation)</h3>

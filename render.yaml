@@ -26,6 +26,14 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: SIGNUP_NOTIFY_EMAIL
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
     disk:
       name: data
       mountPath: /data
