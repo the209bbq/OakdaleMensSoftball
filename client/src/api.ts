@@ -265,11 +265,16 @@ export interface TeamManagerSummary {
   onRoster?: boolean;
 }
 
+/** Each team can have two managers so a backup can keep score. */
+export const MANAGERS_PER_TEAM = 2;
+
 export interface RosterResponse {
   team: Team;
   roster: Player[];
   members: TeamMember[];
   manager: TeamManagerSummary | null;
+  managers?: TeamManagerSummary[];
+  managerSpots?: number;
   currentWeek: CurrentWeek | null;
   freeAgencyOpen?: boolean;
 }
@@ -295,6 +300,7 @@ export interface TeamBoardRow extends Team {
   checkedInCount: number;
   lineupStatus: LineupStatus;
   manager: TeamManagerSummary | null;
+  managers?: TeamManagerSummary[];
   weekGame?: TeamWeekGame | null;
 }
 
@@ -302,6 +308,7 @@ export interface TeamBoard {
   currentWeek: CurrentWeek | null;
   fullLineupSize: number;
   rosterSpots: number;
+  managerSpots?: number;
   freeAgencyOpen: boolean;
   lastRegularSeasonDate: string | null;
   freeAgents: FreeAgent[];

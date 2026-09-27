@@ -124,6 +124,7 @@ describe('Public read endpoints', () => {
     expect(res.status).toBe(200);
     expect(res.body.fullLineupSize).toBe(10);
     expect(res.body.rosterSpots).toBe(15);
+    expect(res.body.managerSpots).toBe(2);
     expect(res.body.freeAgencyOpen).toBe(true);
     expect(res.body.freeAgents[0]).toMatchObject({
       id: free.id,
@@ -1728,6 +1729,8 @@ describe('Manager email authorizations', () => {
     const roster = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
     expect(roster.status).toBe(200);
     expect(roster.body.manager).toEqual({ name: 'Mgr Player', onRoster: true });
+    expect(roster.body.managers).toEqual([{ name: 'Mgr Player', onRoster: true }]);
+    expect(roster.body.managerSpots).toBe(2);
     expect(roster.body.members).toHaveLength(2);
     const managerRow = roster.body.members[0];
     expect(managerRow).toMatchObject({
@@ -1798,6 +1801,53 @@ describe('Manager email authorizations', () => {
     const steal = await admin.post(`/api/users/${pat.id}/team`).send({ teamId: TEAM_OTHER });
     expect(steal.status).toBe(400);
     expect(steal.body.error).toMatch(/play for the team they manage/i);
+  });
+
+  it('lets a team have two managers and both can keep score; a third is rejected', async () => {
+    const { app, store } = makeApp();
+    store.generateSchedule({ startDate: utcToday(), weeks: 1 });
+    const games = store.getSchedule();
+    const ownGame = games.find((g) => g.homeTeamId === TEAM_OWN || g.awayTeamId === TEAM_OWN)!;
+
+    store.registerUser({ email: 'mgr1@b.com', name: 'First Mgr', password: 'longenough' });
+    store.registerUser({ email: 'mgr2@b.com', name: 'Backup Mgr', password: 'longenough' });
+    store.registerUser({ email: 'mgr3@b.com', name: 'Third Mgr', password: 'longenough' });
+    store.setUserRole(store.getUserByEmail('mgr1@b.com')!.id, 'manager', TEAM_OWN);
+    store.setUserRole(store.getUserByEmail('mgr2@b.com')!.id, 'manager', TEAM_OWN);
+    expect(() => store.setUserRole(store.getUserByEmail('mgr3@b.com')!.id, 'manager', TEAM_OWN)).toThrow(
+      /already has 2 managers/i,
+    );
+
+    const roster = await request(app).get(`/api/teams/${TEAM_OWN}/roster`);
+    expect(roster.body.managers).toEqual([
+      { name: 'First Mgr', onRoster: true },
+      { name: 'Backup Mgr', onRoster: true },
+    ]);
+    expect(roster.body.managerSpots).toBe(2);
+
+    const board = await request(app).get('/api/team-board');
+    const own = board.body.teams.find((t: { id: string }) => t.id === TEAM_OWN);
+    expect(own.managers).toHaveLength(2);
+    expect(board.body.managerSpots).toBe(2);
+
+    const backup = await loginAs(app, 'mgr2@b.com', 'longenough');
+    const ownStart = await backup.post(`/api/games/${ownGame.id}/scorelog/start`);
+    expect(ownStart.body.error ?? '').not.toMatch(/only keep score for your own games/i);
+    const otherGame = games.find((g) => g.homeTeamId !== TEAM_OWN && g.awayTeamId !== TEAM_OWN);
+    if (otherGame) {
+      const otherStart = await backup.post(`/api/games/${otherGame.id}/scorelog/start`);
+      expect(otherStart.status).toBe(403);
+      expect(otherStart.body.error).toMatch(/only keep score for your own games/i);
+    }
+
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const overflow = await admin.post('/api/manager-emails').send({
+      emails: 'mgr3@b.com',
+      teamId: TEAM_OWN,
+    });
+    expect(overflow.status).toBe(200);
+    expect(overflow.body.promoted).toEqual([]);
+    expect(overflow.body.skipped).toEqual(['mgr3@b.com']);
   });
 });
 
