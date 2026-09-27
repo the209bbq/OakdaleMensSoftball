@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { api, MANAGERS_PER_TEAM, SKILL_LEVEL_LABELS, SKILL_LEVELS, TEAM_ROSTER_SPOTS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PlayerStatsSheetStatus, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TeamManagerSummary, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl, fileToWaiverDataUrl } from './image';
@@ -1480,14 +1481,122 @@ function groupGamesByWeek(games: Game[]): { week: number; date: string; games: G
   return groups;
 }
 
+const DUGOUT_STORAGE_KEY = (gameId: string) => `oms-dugout:${gameId}`;
+
+function readDugoutOpen(gameId: string): boolean {
+  try {
+    return sessionStorage.getItem(DUGOUT_STORAGE_KEY(gameId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeDugoutOpen(gameId: string, open: boolean) {
+  try {
+    if (open) sessionStorage.setItem(DUGOUT_STORAGE_KEY(gameId), '1');
+    else sessionStorage.removeItem(DUGOUT_STORAGE_KEY(gameId));
+  } catch {
+    /* private mode / blocked storage */
+  }
+}
+
+function useDugoutMode(gameId: string) {
+  const [open, setOpen] = useState(() => readDugoutOpen(gameId));
+
+  useEffect(() => {
+    setOpen(readDugoutOpen(gameId));
+  }, [gameId]);
+
+  useEffect(() => {
+    writeDugoutOpen(gameId, open);
+  }, [gameId, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    type WakeLockLike = { release: () => Promise<void> };
+    const nav = navigator as Navigator & {
+      wakeLock?: { request: (type: 'screen') => Promise<WakeLockLike> };
+    };
+    let lock: WakeLockLike | null = null;
+    const requestLock = () => {
+      nav.wakeLock
+        ?.request('screen')
+        .then((next) => {
+          lock = next;
+        })
+        .catch(() => {
+          /* not supported or denied */
+        });
+    };
+    requestLock();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') requestLock();
+    };
+    document.addEventListener('visibilitychange', onVis);
+
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('visibilitychange', onVis);
+      document.body.style.overflow = previousOverflow;
+      void lock?.release();
+    };
+  }, [open]);
+
+  return [open, setOpen] as const;
+}
+
 function GameRow({ game, onOpen }: { game: Game; onOpen: (id: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [detail, setDetail] = useState<Game | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const shown = detail ?? game;
+  const shouldPoll = expanded && (shown.scoring?.phase === 'live' || shown.scoring?.phase === 'grace');
+
+  useEffect(() => {
+    if (!expanded) return;
+    let cancelled = false;
+    api
+      .getGame(game.id)
+      .then((next) => {
+        if (!cancelled) setDetail((current) => current ?? next);
+      })
+      .catch((e) => {
+        if (!cancelled) setError((e as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, game.id]);
+
+  useEffect(() => {
+    if (!shouldPoll) return;
+    const timer = window.setInterval(() => {
+      api
+        .getGame(game.id)
+        .then(setDetail)
+        .catch(() => {
+          /* keep last good snapshot */
+        });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [shouldPoll, game.id]);
+
   return (
-    <li className={`game ${game.played ? 'played' : 'upcoming'}`}>
+    <li className={`game ${game.played ? 'played' : 'upcoming'}${expanded ? ' is-expanded' : ''}`}>
       <button
         type="button"
         className="game-toggle"
+        aria-expanded={expanded}
         aria-label={`Open game: ${game.awayTeamName} at ${game.homeTeamName} on ${formatGameDate(game.date)}`}
-        onClick={() => onOpen(game.id)}
+        onClick={() => setExpanded((value) => !value)}
       >
         <span className="game-date">{formatGameDate(game.date)}</span>
         <span className="game-teams">
@@ -1500,12 +1609,28 @@ function GameRow({ game, onOpen }: { game: Game; onOpen: (id: string) => void })
           </span>
         </span>
         <GameScoreLabel game={game} />
-        <span className="game-chevron" aria-hidden="true">
+        <span className={`game-chevron${expanded ? ' is-open' : ''}`} aria-hidden="true">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
             <path d="M9 6l6 6-6 6" />
           </svg>
         </span>
       </button>
+      {expanded && (
+        <div className="game-log-panel">
+          {error && <p className="error">{error}</p>}
+          {message && <p className="message">{message}</p>}
+          <LiveScoreboard game={shown} onChanged={setDetail} onMessage={setMessage} onError={setError} />
+          <div className="game-log-actions">
+            <button
+              type="button"
+              className="game-details-link"
+              onClick={() => onOpen(game.id)}
+            >
+              Game details
+            </button>
+          </div>
+        </div>
+      )}
     </li>
   );
 }
@@ -1736,6 +1861,7 @@ function LiveScoreboard({
 }) {
   const [busy, setBusy] = useState(false);
   const [photos, setPhotos] = useState<Record<string, string | undefined>>({});
+  const [dugout, setDugout] = useDugoutMode(game.id);
   const box = gameBox(game);
   const scoring = game.scoring;
   const phase = scoring?.phase ?? 'upcoming';
@@ -1792,8 +1918,31 @@ function LiveScoreboard({
     }
   }
 
-  return (
-    <div className="scoreboard mlb-board">
+  const board = (
+    <div
+      className={`scoreboard mlb-board${dugout ? ' is-dugout' : ''}`}
+      role={dugout ? 'dialog' : undefined}
+      aria-label={dugout ? 'Dugout scoreboard' : undefined}
+      aria-modal={dugout || undefined}
+    >
+      <div className="dugout-bar">
+        <button
+          type="button"
+          className={`dugout-toggle${canScore ? ' is-scoring' : ''}`}
+          aria-expanded={dugout}
+          aria-label={dugout ? 'Exit dugout' : canScore ? 'Expand dugout scoreboard' : 'Expand scoreboard'}
+          onClick={() => setDugout((value) => !value)}
+        >
+          {dugout ? 'Exit dugout' : canScore ? 'Dugout' : 'Expand'}
+        </button>
+        {dugout && (
+          <p className="dugout-title">
+            {game.awayTeamName} at {game.homeTeamName}
+            {game.time ? ` · ${game.time}` : ''}
+            {game.field ? ` · ${game.field}` : ''}
+          </p>
+        )}
+      </div>
       <div className="mlb-matchup" aria-label="Live box score">
         <TeamMark name={game.awayTeamName} teamId={game.awayTeamId} photoUrl={photos[game.awayTeamId]} />
         <span className="mlb-runs">{box.awayRuns}</span>
@@ -1874,7 +2023,7 @@ function LiveScoreboard({
           onRun={(action) => run(action)}
         />
       )}
-      {!canScore && (game.plays?.length ?? 0) > 0 && <PlayByPlayList plays={game.plays ?? []} />}
+      {!canScore && (game.plays?.length ?? 0) > 0 && <PlayByPlayList plays={game.plays ?? []} expandable />}
       {canStart && (
         <button
           type="button"
@@ -1890,6 +2039,8 @@ function LiveScoreboard({
       )}
     </div>
   );
+
+  return dugout ? createPortal(board, document.body) : board;
 }
 
 function battingTeamName(game: Game, box: GameBoxScore): string {
@@ -1990,7 +2141,7 @@ function PlayLogPad({
           </button>
         ))}
       </div>
-      <PlayByPlayList plays={game.plays ?? []} />
+      <PlayByPlayList plays={game.plays ?? []} expandable />
       <button
         type="button"
         className="play-undo"
@@ -2004,22 +2155,35 @@ function PlayLogPad({
   );
 }
 
-function PlayByPlayList({ plays }: { plays: GamePlay[] }) {
+function PlayByPlayList({ plays, expandable = false }: { plays: GamePlay[]; expandable?: boolean }) {
+  const [open, setOpen] = useState(false);
   if (plays.length === 0) {
     return <p className="play-log-empty">No plays yet. Tap a result to add it to the log.</p>;
   }
   const newestFirst = [...plays].reverse();
   return (
-    <ol className="play-log" aria-label="Play by play">
-      {newestFirst.map((play, index) => (
-        <li key={play.id} className="play-log-row">
-          <span className="play-log-index">{plays.length - index}</span>
-          <span className="play-log-when">{playHalfLabel(play) || '—'}</span>
-          <span className="play-log-who">{play.name}</span>
-          <span className={`play-log-result is-${play.result}`}>{playLabel(play.result)}</span>
-        </li>
-      ))}
-    </ol>
+    <div className="play-log-wrap">
+      {expandable && plays.length > 6 && (
+        <button
+          type="button"
+          className="play-log-expand"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? 'Show fewer plays' : `Show all ${plays.length} plays`}
+        </button>
+      )}
+      <ol className={`play-log${open ? ' is-open' : ''}`} aria-label="Play by play">
+        {newestFirst.map((play, index) => (
+          <li key={play.id} className="play-log-row">
+            <span className="play-log-index">{plays.length - index}</span>
+            <span className="play-log-when">{playHalfLabel(play) || '—'}</span>
+            <span className="play-log-who">{play.name}</span>
+            <span className={`play-log-result is-${play.result}`}>{playLabel(play.result)}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 

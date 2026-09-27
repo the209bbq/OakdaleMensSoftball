@@ -1162,6 +1162,41 @@ body {
   transition: transform 0.15s ease;
 }
 
+.game-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.game.is-expanded {
+  background: var(--bg);
+}
+
+.game-log-panel {
+  padding: 0 0.2rem 0.9rem;
+}
+
+.game-log-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.65rem;
+}
+
+.game-details-link {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--heading);
+  border-radius: 999px;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.game-details-link:hover,
+.game-details-link:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
 .live-now {
   margin: 0 0 1.15rem;
   padding: 0.2rem 0.45rem 0.35rem;
@@ -1800,6 +1835,112 @@ body {
   color: #8b919a;
 }
 
+.dugout-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 0 0.7rem;
+}
+
+.dugout-toggle {
+  flex: none;
+  min-height: 2.4rem;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid #3f4550;
+  border-radius: 999px;
+  background: #181c22;
+  color: #ffffff;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.dugout-toggle.is-scoring {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.dugout-toggle:hover,
+.dugout-toggle:focus-visible {
+  border-color: #ffffff;
+  outline: none;
+}
+
+.dugout-title {
+  margin: 0;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.scoreboard.mlb-board.is-dugout {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  height: 100dvh;
+  border-radius: 0;
+  overflow: auto;
+  padding: calc(0.7rem + env(safe-area-inset-top)) 0.9rem calc(0.95rem + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+}
+
+.scoreboard.mlb-board.is-dugout .play-log-pad {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.scoreboard.mlb-board.is-dugout .play-log-wrap,
+.scoreboard.mlb-board.is-dugout .play-log {
+  flex: 1;
+  max-height: none;
+}
+
+.scoreboard.mlb-board.is-dugout .play-buttons {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.scoreboard.mlb-board.is-dugout .play-btn {
+  min-height: 3.8rem;
+  font-size: 1.15rem;
+}
+
+.scoreboard.mlb-board.is-dugout .play-undo {
+  min-height: 2.8rem;
+}
+
+@media (orientation: landscape) and (max-height: 540px) {
+  .scoreboard.mlb-board.is-dugout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    grid-template-rows: auto auto 1fr auto;
+    column-gap: 0.85rem;
+    align-content: start;
+  }
+
+  .scoreboard.mlb-board.is-dugout .dugout-bar {
+    grid-column: 1 / -1;
+  }
+
+  .scoreboard.mlb-board.is-dugout .play-log-pad {
+    grid-column: 2;
+    grid-row: 2 / -1;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+}
+
 .play-log-pad {
   margin-top: 0.95rem;
   padding-top: 0.85rem;
@@ -1858,13 +1999,34 @@ body {
   font-size: 0.78rem;
 }
 
-.play-log {
+.play-log-wrap {
   margin: 0.7rem 0 0;
+}
+
+.play-log-expand {
+  width: 100%;
+  margin: 0 0 0.35rem;
+  border: none;
+  background: transparent;
+  color: #c5cbd4;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: left;
+  padding: 0.2rem 0;
+  cursor: pointer;
+}
+
+.play-log {
+  margin: 0;
   padding: 0;
   max-height: 14rem;
   overflow-y: auto;
   list-style: none;
   border-top: 1px solid #2a2e35;
+}
+
+.play-log.is-open {
+  max-height: none;
 }
 
 .play-log-row {
