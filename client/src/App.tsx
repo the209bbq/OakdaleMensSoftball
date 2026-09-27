@@ -3883,14 +3883,15 @@ function Admin() {
       <div className="test-data-panel">
         <h3>Test Data (simulation)</h3>
         <p className="test-data-warning">
-          For testing only. Generates 72 guest players (<code>@sim.local</code>), check-ins, team chat, and
-          season scores. Clear removes those guests and resets standings — demo accounts, teams, landing, and
-          rules stay put.
+          For testing only. Generates a full 11-week season: 15 rostered guests per team, free agents,
+          profiles (number, position, skill, phone, waiver), weekly check-ins and 10-man lineups, team chat,
+          FA invites, and play-by-play for every game. Guests use <code>@sim.local</code>. Clear removes
+          those guests and resets standings — demo accounts, teams, landing, and rules stay put.
         </p>
         {testDataSummary && <p className="message">{testDataSummary}</p>}
         {testDataConfirm === 'generate' ? (
           <div className="test-data-confirm">
-            <p>Create 72 guest accounts, fill check-ins/chat, and score the season?</p>
+            <p>Create 15-man rosters, free agents, and a scored 11-week season?</p>
             <div className="test-data-actions">
               <button
                 type="button"

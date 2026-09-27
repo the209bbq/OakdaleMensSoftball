@@ -352,9 +352,12 @@ export interface TeamMessage {
 export interface TestDataGenerateResult {
   alreadySeeded?: boolean;
   guestsCreated: number;
+  rosteredPlayers?: number;
+  freeAgents?: number;
   checkIns: number;
   messages: number;
   gamesPlayed: number;
+  invites?: number;
 }
 
 export interface TestDataClearResult {

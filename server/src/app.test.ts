@@ -2130,7 +2130,7 @@ describe('Team group chat', () => {
 });
 
 describe('Admin test data simulation', () => {
-  it('generateTestData seeds 72 guests, check-ins, chat, and a W/L spread; clear wipes sim data only', () => {
+  it('generateTestData seeds 15-man rosters, free agents, an 11-week season, and wipes only sim data', () => {
     const store = new LeagueStore(null);
     store.ensureAdmin('admin@oakdale.local', 'Commish', 'admin-password');
     seedDemoUsers(store);
@@ -2142,56 +2142,77 @@ describe('Admin test data simulation', () => {
 
     const first = store.generateTestData();
     expect(first.alreadySeeded).toBe(false);
-    expect(first.guestsCreated).toBe(72);
-    expect(first.checkIns).toBe(72);
-    expect(first.messages).toBeGreaterThanOrEqual(24);
-    expect(first.messages).toBeLessThanOrEqual(40);
-    expect(first.gamesPlayed).toBeGreaterThan(0);
+    expect(first.guestsCreated).toBe(128);
+    expect(first.rosteredPlayers).toBe(120);
+    expect(first.freeAgents).toBe(8);
+    expect(first.checkIns).toBe(1320);
+    expect(first.messages).toBeGreaterThanOrEqual(32);
+    expect(first.messages).toBeLessThanOrEqual(56);
+    expect(first.gamesPlayed).toBe(44);
+    expect(first.invites).toBe(8);
 
     const guests = store
       .listUsers()
       .filter((u) => u.email.endsWith(SIM_EMAIL_DOMAIN))
-      .sort((a, b) => Number(a.name.replace('Guest ', '')) - Number(b.name.replace('Guest ', '')));
-    expect(guests).toHaveLength(72);
+      .sort((a, b) => Number(a.email.replace(/\D/g, '')) - Number(b.email.replace(/\D/g, '')));
+    expect(guests).toHaveLength(128);
     expect(guests.every((u) => u.role === 'player')).toBe(true);
-    expect(guests.map((u) => u.name)).toEqual(
-      Array.from({ length: 72 }, (_, i) => `Guest ${i + 1}`),
-    );
     expect(guests.map((u) => u.email)).toEqual(
-      Array.from({ length: 72 }, (_, i) => `guest${i + 1}${SIM_EMAIL_DOMAIN}`),
+      Array.from({ length: 128 }, (_, i) => `guest${i + 1}${SIM_EMAIL_DOMAIN}`),
     );
+    expect(new Set(guests.map((u) => u.name)).size).toBe(128);
+    expect(guests.every((u) => u.position && u.number && u.skillLevel)).toBe(true);
+    expect(guests.some((u) => u.sharePhone && u.phone)).toBe(true);
+    expect(guests.some((u) => u.waiverStatus === 'pending')).toBe(true);
+    expect(guests.some((u) => u.waiverStatus === 'approved')).toBe(true);
+    expect(guests.some((u) => u.waiverStatus === 'rejected')).toBe(true);
+    expect(guests.filter((u) => !u.teamId)).toHaveLength(8);
 
     const teams = store.getTeams();
     expect(teams).toHaveLength(8);
     for (let i = 0; i < teams.length; i++) {
       const onTeam = guests.filter((g) => g.teamId === teams[i].id);
-      expect(onTeam).toHaveLength(9);
+      expect(onTeam).toHaveLength(15);
       const members = store.getTeamMembers(teams[i].id);
-      const guestMembers = members.filter((m) => m.name.startsWith('Guest '));
-      expect(guestMembers).toHaveLength(9);
+      const guestMembers = members.filter((m) => m.id.startsWith('u-sim-guest-'));
+      expect(guestMembers).toHaveLength(15);
       expect(guestMembers.every((m) => m.checkIn === 'in' || m.checkIn === 'out')).toBe(true);
+      expect(guestMembers.filter((m) => m.checkIn === 'in')).toHaveLength(10);
+      expect(guestMembers.filter((m) => m.checkIn === 'out')).toHaveLength(5);
       const messages = store.getTeamMessages(teams[i].id);
-      expect(messages.length).toBeGreaterThanOrEqual(3);
-      expect(messages.length).toBeLessThanOrEqual(5);
+      expect(messages.length).toBeGreaterThanOrEqual(4);
+      expect(messages.length).toBeLessThanOrEqual(7);
     }
 
     const current = store.getCurrentWeek();
     expect(current).not.toBeNull();
     const checkIns = store.getCheckInsForWeek(current!.week);
-    expect(checkIns.size).toBeGreaterThanOrEqual(72);
     let inn = 0;
     let out = 0;
-    for (const guest of guests) {
+    for (const guest of guests.filter((g) => g.teamId)) {
       const status = checkIns.get(guest.id);
       if (status === 'in') inn += 1;
       else if (status === 'out') out += 1;
     }
-    expect(inn + out).toBe(72);
-    expect(inn).toBe(54);
-    expect(out).toBe(18);
+    expect(inn).toBe(80);
+    expect(out).toBe(40);
+
+    const schedule = store.getSchedule();
+    expect(schedule).toHaveLength(44);
+    expect(new Set(schedule.map((g) => g.week)).size).toBe(11);
+    expect(schedule.every((g) => g.played && g.homeScore !== null && g.awayScore !== null)).toBe(true);
+    const sample = schedule[0];
+    const homeLineup = store.getLineupSlots(sample.id, sample.homeTeamId);
+    expect(homeLineup.saved).toBe(true);
+    expect(homeLineup.slots).toHaveLength(10);
+    const plays = store.listGamePlays(sample.id);
+    expect(plays.length).toBeGreaterThan(20);
+    expect(plays.some((p) => p.result === 'single' || p.result === 'double' || p.result === 'homer')).toBe(true);
+    expect(plays.some((p) => p.result === 'out' || p.result === 'strikeout')).toBe(true);
+    expect(plays.every((p) => p.inning && p.half)).toBe(true);
 
     const standings = store.getStandings();
-    expect(standings.every((row) => row.gamesPlayed > 0)).toBe(true);
+    expect(standings.every((row) => row.gamesPlayed === 11)).toBe(true);
     const guestStats = store.getPlayerStats(guests[0].id);
     expect(guestStats.gamesPlayed).toBeGreaterThan(0);
     expect(guestStats.atBats).toBeGreaterThan(0);
@@ -2201,14 +2222,18 @@ describe('Admin test data simulation', () => {
     const winCounts = new Set(standings.map((row) => row.wins));
     expect(winCounts.size).toBeGreaterThan(1);
 
+    const admin = store.getUserByEmail('admin@oakdale.local')!;
+    expect(store.listFaInvites(admin).length).toBe(8);
+    expect(store.getFreeAgents().filter((fa) => fa.id.startsWith('u-sim-guest-'))).toHaveLength(8);
+
     const again = store.generateTestData();
     expect(again.alreadySeeded).toBe(true);
     expect(again.guestsCreated).toBe(0);
-    expect(store.listUsers().filter((u) => u.email.endsWith(SIM_EMAIL_DOMAIN))).toHaveLength(72);
+    expect(store.listUsers().filter((u) => u.email.endsWith(SIM_EMAIL_DOMAIN))).toHaveLength(128);
 
     const cleared = store.clearTestData();
-    expect(cleared.guestsRemoved).toBe(72);
-    expect(cleared.checkInsRemoved).toBe(72);
+    expect(cleared.guestsRemoved).toBe(128);
+    expect(cleared.checkInsRemoved).toBe(1320);
     expect(cleared.messagesRemoved).toBe(first.messages);
     expect(cleared.gamesReset).toBe(first.gamesPlayed);
 
@@ -2260,8 +2285,10 @@ describe('Admin test data simulation', () => {
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
     const generated = await admin.post('/api/admin/test-data/generate');
     expect(generated.status).toBe(200);
-    expect(generated.body.guestsCreated).toBe(72);
-    expect(generated.body.gamesPlayed).toBeGreaterThan(0);
+    expect(generated.body.guestsCreated).toBe(128);
+    expect(generated.body.rosteredPlayers).toBe(120);
+    expect(generated.body.freeAgents).toBe(8);
+    expect(generated.body.gamesPlayed).toBe(44);
 
     const dup = await admin.post('/api/admin/test-data/generate');
     expect(dup.status).toBe(409);
@@ -2269,14 +2296,14 @@ describe('Admin test data simulation', () => {
 
     const roster = await request(app).get(`/api/teams/${store.getTeams()[0].id}/roster`);
     expect(roster.status).toBe(200);
-    expect(roster.body.members.filter((m: { name: string }) => m.name.startsWith('Guest '))).toHaveLength(9);
+    expect(roster.body.members.filter((m: { id: string }) => m.id.startsWith('u-sim-guest-'))).toHaveLength(15);
 
     const standings = await request(app).get('/api/standings');
     expect(standings.body.some((row: { gamesPlayed: number }) => row.gamesPlayed > 0)).toBe(true);
 
     const cleared = await admin.post('/api/admin/test-data/clear');
     expect(cleared.status).toBe(200);
-    expect(cleared.body.guestsRemoved).toBe(72);
+    expect(cleared.body.guestsRemoved).toBe(128);
     const after = await request(app).get('/api/standings');
     expect(after.body.every((row: { gamesPlayed: number }) => row.gamesPlayed === 0)).toBe(true);
   });

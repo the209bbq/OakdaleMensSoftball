@@ -1058,10 +1058,18 @@ describe('App', () => {
         if (url.includes('/api/standings')) return jsonOk(standings);
         if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
         if (url.includes('/api/admin/test-data/generate') && init?.method === 'POST') {
-          return jsonOk({ guestsCreated: 72, checkIns: 72, messages: 28, gamesPlayed: 44 });
+          return jsonOk({
+            guestsCreated: 128,
+            rosteredPlayers: 120,
+            freeAgents: 8,
+            checkIns: 1320,
+            messages: 40,
+            gamesPlayed: 44,
+            invites: 8,
+          });
         }
         if (url.includes('/api/admin/test-data/clear') && init?.method === 'POST') {
-          return jsonOk({ guestsRemoved: 72, checkInsRemoved: 72, messagesRemoved: 28, gamesReset: 44 });
+          return jsonOk({ guestsRemoved: 128, checkInsRemoved: 1320, messagesRemoved: 40, gamesReset: 44 });
         }
         if (url.includes('/api/suggestions')) return jsonOk([]);
         if (url.includes('/api/manager-emails')) return jsonOk([]);
@@ -1086,14 +1094,14 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm generate' }));
     await waitFor(() => {
       expect(
-        screen.getByText('Created 72 guests, 72 check-ins, 28 messages, 44 games scored'),
+        screen.getByText('Created 128 guests, 1320 check-ins, 40 messages, 44 games scored'),
       ).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear test data' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm clear' }));
     await waitFor(() => {
-      expect(screen.getByText('Removed 72 guests, reset 44 games')).toBeInTheDocument();
+      expect(screen.getByText('Removed 128 guests, reset 44 games')).toBeInTheDocument();
     });
   });
 
