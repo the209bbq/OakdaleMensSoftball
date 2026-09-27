@@ -3821,7 +3821,7 @@ function Admin() {
         <h3>Player stats Google Sheet</h3>
         <p className="theme-help">
           Writes batting stats (GP, Hits, AB, AVG, 1B, 2B, 3B, HR, K, Out) to the{' '}
-          <code>Player Stats</code> tab, one section per team. Other tabs stay untouched.{' '}
+          <code>Player Stats</code> tab. Each team gets 15 roster spots. Other tabs stay untouched.{' '}
           {sheetStatus?.spreadsheetUrl ? (
             <a href={sheetStatus.spreadsheetUrl} target="_blank" rel="noreferrer">
               Open the sheet

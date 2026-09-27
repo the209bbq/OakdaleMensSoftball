@@ -4,6 +4,8 @@ import { emptyBattingLine, type PlayerBattingLine } from './gameScoring.js';
 export const DEFAULT_SPREADSHEET_ID = '1LwMlsDCZBEqCQqb2qW0lhpTlWNNa-OpcGOPQnbqj1wc';
 export const PLAYER_STATS_TAB = 'Player Stats';
 export const FA_SECTION_TITLE = 'Free Agents (unattached)';
+/** Blank roster lines written under every team so the sheet always has 15 spots. */
+export const TEAM_ROSTER_SPOTS = 15;
 
 export const PLAYER_STATS_HEADERS = [
   'Player',
@@ -140,6 +142,17 @@ export function groupPlayersByTeam(
   return sections;
 }
 
+export function emptyRosterSpot(): SheetValue[] {
+  return PLAYER_STATS_HEADERS.map(() => '');
+}
+
+/** Team sections always have at least 15 player lines. Extra attached players are kept. */
+export function padTeamPlayerRows(players: SheetPlayerRow[], spots = TEAM_ROSTER_SPOTS): SheetValue[][] {
+  const rows = players.map(rowValues);
+  while (rows.length < spots) rows.push(emptyRosterSpot());
+  return rows;
+}
+
 export function rowValues(row: SheetPlayerRow): SheetValue[] {
   return [
     row.player,
@@ -167,7 +180,9 @@ export function buildPlayerStatsValues(sections: TeamStatsSection[], updatedAt: 
   for (const section of sections) {
     values.push([section.teamName]);
     values.push([...PLAYER_STATS_HEADERS]);
-    if (section.players.length === 0) {
+    if (section.teamId !== null) {
+      for (const row of padTeamPlayerRows(section.players)) values.push(row);
+    } else if (section.players.length === 0) {
       values.push(['(no players attached)']);
     } else {
       for (const row of section.players) values.push(rowValues(row));

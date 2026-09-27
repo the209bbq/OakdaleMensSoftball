@@ -1163,6 +1163,7 @@ describe('App', () => {
       sheetStatus.spreadsheetUrl,
     );
     expect(screen.getByText(/3 players across 8 teams/)).toBeInTheDocument();
+    expect(screen.getByText(/Each team gets 15 roster spots/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Preview rows' }));
     await waitFor(() => {

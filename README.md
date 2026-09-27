@@ -52,7 +52,7 @@ Then open http://localhost:5173. The Vite dev server proxies `/api/*` to the API
 
 David's workbook is [Softball Stats](https://docs.google.com/spreadsheets/d/1LwMlsDCZBEqCQqb2qW0lhpTlWNNa-OpcGOPQnbqj1wc/edit). When we inspected it, it had a single empty `Sheet1` tab (cell A1 was `1`) and no team or player rows yet. The app writes a dedicated **Player Stats** tab only — schedule/standings/`Sheet1` are left alone.
 
-Layout (one section per team, then Free Agents if anyone is unattached):
+Layout (one section per team with **15 roster spots**, then Free Agents if anyone is unattached):
 
 `Player | # | Pos | GP | Hits | AB | AVG | 1B | 2B | 3B | HR | K | Out`
 

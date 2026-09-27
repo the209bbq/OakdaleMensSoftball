@@ -4,9 +4,11 @@ import {
   FA_SECTION_TITLE,
   PLAYER_STATS_HEADERS,
   PLAYER_STATS_TAB,
+  TEAM_ROSTER_SPOTS,
   buildPlayerStatsWorkbook,
   csvEscape,
   groupPlayersByTeam,
+  padTeamPlayerRows,
   playerStatsToCsv,
   toSheetPlayerRow,
 } from './playerStatsSheet.js';
@@ -123,8 +125,15 @@ describe('buildPlayerStatsWorkbook', () => {
     expect(book.values[4]).toEqual([...PLAYER_STATS_HEADERS]);
     expect(book.values[5]).toEqual(['Pat "Slugger"', '12', 'SS', 3, 4, 10, '.400', 2, 1, 0, 1, 1, 4]);
     expect(book.values.some((row) => row[0] === 'Da Beers')).toBe(true);
-    expect(book.values.some((row) => row[0] === '(no players attached)')).toBe(true);
+    expect(book.values.some((row) => row[0] === '(no players attached)')).toBe(false);
     expect(book.values.some((row) => row[0] === FA_SECTION_TITLE)).toBe(true);
+    const dingersHeader = book.values.findIndex((row) => row[0] === 'Nothin but Dingers');
+    const dingersSpots = book.values.slice(dingersHeader + 2, dingersHeader + 2 + TEAM_ROSTER_SPOTS);
+    expect(dingersSpots).toHaveLength(15);
+    expect(dingersSpots[0][0]).toBe('Pat "Slugger"');
+    expect(dingersSpots.slice(1).every((row) => row[0] === '')).toBe(true);
+    const beersHeader = book.values.findIndex((row) => row[0] === 'Da Beers');
+    expect(book.values.slice(beersHeader + 2, beersHeader + 2 + TEAM_ROSTER_SPOTS)).toHaveLength(15);
     expect(book.csv).toContain('"Pat ""Slugger""",12,SS,3,4,10,.400,2,1,0,1,1,4');
     expect(book.csv.endsWith('\n')).toBe(true);
   });
@@ -133,6 +142,28 @@ describe('buildPlayerStatsWorkbook', () => {
     expect(csvEscape('Camp Boys')).toBe('Camp Boys');
     expect(csvEscape('Last, First')).toBe('"Last, First"');
     expect(playerStatsToCsv([['A', 'B,C']])).toBe('A,"B,C"\n');
+  });
+
+  it('pads every team to 15 roster spots and keeps extra players', () => {
+    expect(TEAM_ROSTER_SPOTS).toBe(15);
+    const one = padTeamPlayerRows([
+      toSheetPlayerRow({ id: 'p1', name: 'Pat', number: 1, teamId: 'dingers', teamName: 'Dingers' }),
+    ]);
+    expect(one).toHaveLength(15);
+    expect(one[0][0]).toBe('Pat');
+    expect(one[14]).toEqual(['', '', '', '', '', '', '', '', '', '', '', '', '']);
+    const sixteen = padTeamPlayerRows(
+      Array.from({ length: 16 }, (_, i) =>
+        toSheetPlayerRow({
+          id: `p${i}`,
+          name: `Player ${i + 1}`,
+          number: i + 1,
+          teamId: 'dingers',
+          teamName: 'Dingers',
+        }),
+      ),
+    );
+    expect(sixteen).toHaveLength(16);
   });
 
   it('fills missing play-type columns with zeros', () => {
