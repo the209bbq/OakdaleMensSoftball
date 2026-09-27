@@ -142,12 +142,16 @@ export interface TestDataClearSummary {
 }
 
 export const DEFAULT_LANDING: LandingContent = {
-  headline: 'Welcome to the Oakdale Mens Softball League',
-  body: 'Season updates and announcements will appear here. TODO: add real content.',
+  headline: 'Oakdale beer league softball',
+  body: 'Wednesday nights at Kerr Park. Check in from Home, keep the live book if you are at the field, and tap beers for your dugout. Fifteen spots a team, two managers, one public scoreboard.',
   imageUrl: null,
   countdownLabel: 'Opening Day',
   countdownTarget: null,
 };
+
+const PLACEHOLDER_LANDING_HEADLINE = 'Welcome to the Oakdale Mens Softball League';
+const PLACEHOLDER_LANDING_BODY = 'Season updates and announcements will appear here. TODO: add real content.';
+const PLACEHOLDER_RULES_MARKER = 'TODO: Replace this entire section with the real league rules';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS teams (
@@ -735,6 +739,19 @@ export class LeagueStore {
     this.ensurePlateAppearancesTable();
     if (sqlitePath) this.importLegacyJsonIfNeeded(sqlitePath);
     this.seedIfEmpty();
+    this.upgradePlaceholderLeagueCopy();
+  }
+
+  /** Replace leftover TODO landing/rules with beer-league copy. Custom text stays. */
+  private upgradePlaceholderLeagueCopy(): void {
+    const landing = this.getLanding();
+    if (landing.headline === PLACEHOLDER_LANDING_HEADLINE && landing.body === PLACEHOLDER_LANDING_BODY) {
+      this.setLanding({ headline: DEFAULT_LANDING.headline, body: DEFAULT_LANDING.body });
+    }
+    const rules = this.getRules();
+    if (rules.includes(PLACEHOLDER_RULES_MARKER)) {
+      this.setRules(createSeedData().rules);
+    }
   }
 
   /** Close the SQLite connection. Safe to call more than once. */
@@ -2039,7 +2056,29 @@ export class LeagueStore {
         runsFor: 0,
         runsAgainst: 0,
         gamesPlayed: 0,
+        beers: 0,
       });
+    }
+
+    const beerLogs = this.db
+      .prepare(
+        `SELECT g.homeTeamId, g.awayTeamId,
+                COALESCE(l.homeBeers, 0) AS homeBeers,
+                COALESCE(l.awayBeers, 0) AS awayBeers
+         FROM games g
+         LEFT JOIN game_logs l ON l.gameId = g.id`,
+      )
+      .all() as Array<{
+      homeTeamId: string;
+      awayTeamId: string;
+      homeBeers: number;
+      awayBeers: number;
+    }>;
+    for (const log of beerLogs) {
+      const home = rows.get(log.homeTeamId);
+      const away = rows.get(log.awayTeamId);
+      if (home) home.beers += Number(log.homeBeers) || 0;
+      if (away) away.beers += Number(log.awayBeers) || 0;
     }
 
     const games = this.db

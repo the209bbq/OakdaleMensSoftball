@@ -4,7 +4,7 @@ import App from './App';
 import { AuthProvider } from './auth';
 
 const standings = [
-  { teamId: 'tigers', teamName: 'Oakdale Tigers', wins: 2, losses: 0, ties: 0, runsFor: 18, runsAgainst: 8, gamesPlayed: 2 },
+  { teamId: 'tigers', teamName: 'Oakdale Tigers', wins: 2, losses: 0, ties: 0, runsFor: 18, runsAgainst: 8, gamesPlayed: 2, beers: 14 },
 ];
 
 const scheduleGames = [
@@ -267,6 +267,7 @@ describe('App', () => {
       expect(screen.getByText('Welcome to the Oakdale Mens Softball League')).toBeInTheDocument();
     });
     expect(screen.getByText(/TODO: add real content/i)).toBeInTheDocument();
+    expect(screen.getByText(/Oakdale Mens Softball · Beer league/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 
@@ -314,6 +315,7 @@ describe('App', () => {
       expect(screen.getByRole('heading', { name: 'Oakdale Tigers' })).toBeInTheDocument();
     });
     expect(screen.getByText('Hey Pat')).toBeInTheDocument();
+    expect(screen.getByText(/beer league night/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Oakdale Tigers' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit profile' })).toHaveTextContent('PS');
     expect(screen.queryByText('Pat Shortstop')).not.toBeInTheDocument();
@@ -463,11 +465,14 @@ describe('App', () => {
     renderApp();
     fireEvent.click(screen.getByRole('tab', { name: 'Standings' }));
     await waitFor(() => {
-      expect(screen.getByText('Oakdale Tigers')).toBeInTheDocument();
+      expect(screen.getAllByText('Oakdale Tigers').length).toBeGreaterThan(0);
     });
     expect(screen.getByRole('columnheader', { name: 'Runs' })).toHaveAttribute('title', 'Runs scored');
     expect(screen.getByRole('columnheader', { name: 'RA' })).toHaveAttribute('title', 'Runs allowed');
     expect(screen.queryByRole('columnheader', { name: 'RF' })).not.toBeInTheDocument();
+    expect(screen.getByText(/oakdale is a beer league/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Beers this season' })).toBeInTheDocument();
+    expect(screen.getByText('14')).toBeInTheDocument();
   });
 
   it('opens a schedule game on its own page', async () => {
@@ -987,6 +992,7 @@ describe('App', () => {
     expect(screen.getByLabelText('Team record')).toHaveTextContent('W');
     expect(screen.getByLabelText('Team record')).toHaveTextContent('2');
     expect(screen.getByLabelText('Team run totals')).toHaveTextContent('Runs');
+    expect(screen.getByLabelText('Team beers')).toHaveTextContent('14');
     expect(screen.getByText('This week')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open this week's game vs da beers/i })).toBeInTheDocument();
     expect(screen.getByText('Roster · 3/15')).toBeInTheDocument();

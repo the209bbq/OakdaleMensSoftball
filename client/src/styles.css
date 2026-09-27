@@ -1103,6 +1103,48 @@ body {
 .standings-col-runs { width: 2.35rem; }
 .standings-col-diff { width: 2.15rem; }
 
+.beer-league-note {
+  padding: 0 0 0.85rem;
+  margin: 0;
+}
+
+.beer-league-kicker {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.beer-standings-heading {
+  margin: 1.1rem 0 0.45rem;
+  color: var(--heading);
+  font-size: 1rem;
+}
+
+.beer-standings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.beer-standings li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.15rem;
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+}
+
+.beer-standings li span {
+  color: var(--accent-dark);
+  font-variant-numeric: tabular-nums;
+}
+
 .table tbody tr:first-child td {
   font-weight: 600;
 }

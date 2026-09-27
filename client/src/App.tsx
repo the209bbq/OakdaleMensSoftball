@@ -167,6 +167,7 @@ export default function App() {
           <img className="app-logo" src="/app-icon.svg" alt="" width="28" height="28" />
           <div className="app-bar-text">
             <span className="app-bar-title">Oakdale Mens Softball League</span>
+            <span className="app-bar-kicker">Beer league</span>
             <span className="app-bar-sub">{route.gameId ? 'Game' : route.playerId ? 'Player' : TAB_TITLES[tab]}</span>
           </div>
           <div className="app-bar-actions">
@@ -750,6 +751,7 @@ function PlayerHome({
         ) : (
           <h1 className="player-home-team is-empty">No team</h1>
         )}
+        <p className="beer-league-kicker">Beer league night — check in, keep the book, tap the cooler.</p>
         {!teamId && ready && (
           <p className="muted-copy player-home-empty">
             Open Free agency below to join a team.
@@ -924,7 +926,7 @@ function LeagueLanding({
     <div className="landing">
       <section className="landing-hero">
         <img className="landing-logo" src="/app-icon.svg" alt="" width="56" height="56" />
-        <p className="landing-league">Oakdale Mens Softball League</p>
+        <p className="landing-league">Oakdale Mens Softball · Beer league</p>
         <h1 className="landing-headline">{landing.headline}</h1>
       </section>
 
@@ -1073,7 +1075,7 @@ function SuggestionsBox() {
             Suggestion
             <textarea
               aria-label="Suggestion"
-              placeholder="Ideas for the league, fields, schedule…"
+              placeholder="Ideas for the beer league, fields, kegs…"
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={4}
@@ -1345,6 +1347,9 @@ function Standings({ onOpenTeam }: { onOpenTeam: (teamId: string) => void }) {
   return (
     <section className="card">
       <h2>League Standings</h2>
+      <p className="muted-copy beer-league-note">
+        Oakdale is a beer league. Wins still count. Beers are the unofficial standings.
+      </p>
       <div className="table-scroll">
       <table className="table standings-table">
         <colgroup>
@@ -1392,6 +1397,19 @@ function Standings({ onOpenTeam }: { onOpenTeam: (teamId: string) => void }) {
         </tbody>
       </table>
       </div>
+      <h3 className="beer-standings-heading">Beers this season</h3>
+      <ol className="beer-standings">
+        {[...rows]
+          .sort((a, b) => b.beers - a.beers || a.teamName.localeCompare(b.teamName))
+          .map((row) => (
+            <li key={row.teamId}>
+              <button type="button" className="team-cell-link" onClick={() => onOpenTeam(row.teamId)}>
+                {row.teamName}
+              </button>
+              <span>{row.beers}</span>
+            </li>
+          ))}
+      </ol>
     </section>
   );
 }
@@ -2673,7 +2691,9 @@ function BeerTracker({
           onPlus={() => onRun(() => api.bumpScoreStat(gameId, 'away', 'beers', 1))}
         />
       </div>
-      <span className="beer-label">Beers</span>
+      <span className="beer-label" title="Beer league tally for this game">
+        Beers
+      </span>
       <div className="beer-side is-home">
         <LineCell
           value={homeBeers}
@@ -2867,7 +2887,7 @@ function FreeAgencyPanel({
             </p>
           ) : (
             <>
-              <p className="muted-copy">Sign up as a free agent and join a team until the regular season ends.</p>
+              <p className="muted-copy">Beer league free agency — join a team until the regular season ends.</p>
               {!user && onSignUp && (
                 <button type="button" className="primary-btn" onClick={onSignUp}>
                   Sign up as a free agent
@@ -3530,6 +3550,14 @@ function TeamPage({
               {recordDiff >= 0 ? '+' : ''}
               {recordDiff}
             </dd>
+          </div>
+        </dl>
+      )}
+      {standing && (
+        <dl className="stat-line" aria-label="Team beers">
+          <div>
+            <dt title="Beers drank this season">Beers</dt>
+            <dd>{standing.beers}</dd>
           </div>
         </dl>
       )}
