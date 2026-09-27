@@ -22,7 +22,7 @@ export interface TeamAttendance {
 
 export type ScoringPhase = 'upcoming' | 'live' | 'grace' | 'locked';
 export type ScoreSide = 'home' | 'away';
-export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs';
+export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs' | 'beers';
 export type InningHalf = 'top' | 'bottom';
 
 export interface PlayerBattingLine {
@@ -79,6 +79,8 @@ export interface GameBoxScore {
   awayWalks: number;
   homeOuts: number;
   awayOuts: number;
+  homeBeers: number;
+  awayBeers: number;
   currentOuts: number;
   awayLine?: number[];
   homeLine?: number[];

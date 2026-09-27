@@ -243,6 +243,8 @@ CREATE TABLE IF NOT EXISTS game_logs (
   awayWalks INTEGER NOT NULL DEFAULT 0,
   homeOuts INTEGER NOT NULL DEFAULT 0,
   awayOuts INTEGER NOT NULL DEFAULT 0,
+  homeBeers INTEGER NOT NULL DEFAULT 0,
+  awayBeers INTEGER NOT NULL DEFAULT 0,
   currentOuts INTEGER NOT NULL DEFAULT 0,
   awayLine TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]',
   homeLine TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]',
@@ -340,6 +342,8 @@ type GameLogRow = {
   awayWalks: number;
   homeOuts: number;
   awayOuts: number;
+  homeBeers?: number | null;
+  awayBeers?: number | null;
   currentOuts: number;
   awayLine?: string | null;
   homeLine?: string | null;
@@ -360,6 +364,8 @@ export interface GameLog {
   awayWalks: number;
   homeOuts: number;
   awayOuts: number;
+  homeBeers: number;
+  awayBeers: number;
   currentOuts: number;
   awayLine: number[];
   homeLine: number[];
@@ -554,6 +560,8 @@ function gameLogFromRow(row: GameLogRow): GameLog {
     awayWalks: row.awayWalks,
     homeOuts: row.homeOuts,
     awayOuts: row.awayOuts,
+    homeBeers: Number(row.homeBeers) || 0,
+    awayBeers: Number(row.awayBeers) || 0,
     currentOuts: row.currentOuts,
     awayLine,
     homeLine,
@@ -1486,8 +1494,8 @@ export class LeagueStore {
     if (side !== 'home' && side !== 'away') {
       throw new Error('side must be home or away');
     }
-    if (stat !== 'runs' && stat !== 'hits' && stat !== 'walks' && stat !== 'outs') {
-      throw new Error('stat must be runs, hits, walks, or outs');
+    if (stat !== 'runs' && stat !== 'hits' && stat !== 'walks' && stat !== 'outs' && stat !== 'beers') {
+      throw new Error('stat must be runs, hits, walks, outs, or beers');
     }
     const step = Math.trunc(delta);
     if (!Number.isFinite(step) || step === 0) {
@@ -1509,9 +1517,13 @@ export class LeagueStore {
               ? side === 'home'
                 ? 'homeWalks'
                 : 'awayWalks'
-              : side === 'home'
-                ? 'homeOuts'
-                : 'awayOuts';
+              : stat === 'outs'
+                ? side === 'home'
+                  ? 'homeOuts'
+                  : 'awayOuts'
+                : side === 'home'
+                  ? 'homeBeers'
+                  : 'awayBeers';
         const log = this.getGameLog(gameId)!;
         const next = clampStat(Number(log[column]) + step);
         this.db.prepare(`UPDATE game_logs SET ${column} = ? WHERE gameId = ?`).run(next, gameId);
@@ -1993,6 +2005,8 @@ export class LeagueStore {
       ['currentHalf', "TEXT NOT NULL DEFAULT 'top'"],
       ['awayBatterIndex', 'INTEGER NOT NULL DEFAULT 0'],
       ['homeBatterIndex', 'INTEGER NOT NULL DEFAULT 0'],
+      ['homeBeers', 'INTEGER NOT NULL DEFAULT 0'],
+      ['awayBeers', 'INTEGER NOT NULL DEFAULT 0'],
     ];
     for (const [name, spec] of extras) {
       if (!cols.has(name)) {
@@ -2987,7 +3001,8 @@ export class LeagueStore {
     this.db
       .prepare(
         `UPDATE game_logs SET homeHits = ?, awayHits = ?, homeWalks = ?, awayWalks = ?,
-         homeOuts = ?, awayOuts = ?, currentInning = 8, currentHalf = 'top', currentOuts = 0,
+         homeOuts = ?, awayOuts = ?, homeBeers = ?, awayBeers = ?,
+         currentInning = 8, currentHalf = 'top', currentOuts = 0,
          liveStartedAt = COALESCE(liveStartedAt, ?), updatedAt = ?, updatedByUserId = ?
          WHERE gameId = ?`,
       )
@@ -2998,6 +3013,8 @@ export class LeagueStore {
         tally.away.walks,
         tally.home.outs,
         tally.away.outs,
+        6 + Math.floor(rng() * 18) + homeScore,
+        6 + Math.floor(rng() * 18) + awayScore,
         now,
         now,
         actorId,

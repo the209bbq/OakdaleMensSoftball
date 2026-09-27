@@ -1734,6 +1734,46 @@ body {
   cursor: default;
 }
 
+.beer-tracker {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+  padding: 0.45rem 0.15rem 0.15rem;
+}
+
+.beer-side {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.beer-side.is-home {
+  justify-content: flex-end;
+}
+
+.beer-team {
+  color: #c9cdd3;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.beer-label {
+  color: #f2a900;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.beer-tracker .scoreboard-value {
+  min-width: 1.4rem;
+  text-align: center;
+}
+
 .inning-outs {
   display: flex;
   align-items: center;

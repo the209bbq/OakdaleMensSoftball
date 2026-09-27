@@ -77,10 +77,12 @@ describe('wrapCurrentOuts', () => {
 
 describe('boxFromParts', () => {
   it('treats missing scores as zeros and wraps current outs', () => {
-    const box = boxFromParts(null, 4, { homeHits: 3, currentOuts: 4 });
+    const box = boxFromParts(null, 4, { homeHits: 3, currentOuts: 4, awayBeers: 6 });
     expect(box.homeRuns).toBe(0);
     expect(box.awayRuns).toBe(4);
     expect(box.homeHits).toBe(3);
+    expect(box.homeBeers).toBe(0);
+    expect(box.awayBeers).toBe(6);
     expect(box.currentOuts).toBe(1);
     expect(box.awayLine[0]).toBe(4);
     expect(box.awayLine).toHaveLength(7);

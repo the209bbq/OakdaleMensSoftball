@@ -517,6 +517,8 @@ describe('Live game log', () => {
       awayWalks: 0,
       homeOuts: 0,
       awayOuts: 0,
+      homeBeers: 0,
+      awayBeers: 0,
       currentOuts: 0,
       currentInning: 1,
       currentHalf: 'top',
@@ -674,6 +676,55 @@ describe('Live game log', () => {
     expect(anon.body.scoring.canScore).toBe(false);
     expect(anon.body.box[ownSide === 'home' ? 'homeRuns' : 'awayRuns']).toBe(1);
     expect(anon.body.scoring.phase).toBe('live');
+  });
+
+  it('tracks beers drank for each team and shows them to everyone', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: utcToday() });
+    const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
+    const ownGame = games.find((g) => g.homeTeamId === TEAM_OWN || g.awayTeamId === TEAM_OWN)!;
+    const otherGame = games.find((g) => g.homeTeamId !== TEAM_OWN && g.awayTeamId !== TEAM_OWN)!;
+    const ownSide = ownGame.homeTeamId === TEAM_OWN ? 'home' : 'away';
+    const otherSide = ownSide === 'home' ? 'away' : 'home';
+
+    store.registerUser({ email: 'beer.pat@b.com', name: 'Beer Pat', password: 'longenough' });
+    const pat = store.getUserByEmail('beer.pat@b.com')!;
+    store.setUserTeam(pat.id, TEAM_OWN);
+    store.setCheckIn(pat.id, ownGame.week, 'in');
+    const player = await loginAs(app, 'beer.pat@b.com', 'longenough');
+
+    const started = await admin.post(`/api/games/${ownGame.id}/scorelog/start`);
+    expect(started.status).toBe(200);
+
+    const first = await player
+      .post(`/api/games/${ownGame.id}/scorelog/stat`)
+      .send({ side: ownSide, stat: 'beers', delta: 1 });
+    expect(first.status).toBe(200);
+    expect(first.body.box[ownSide === 'home' ? 'homeBeers' : 'awayBeers']).toBe(1);
+
+    const visitor = await player
+      .post(`/api/games/${ownGame.id}/scorelog/stat`)
+      .send({ side: otherSide, stat: 'beers', delta: 2 });
+    expect(visitor.status).toBe(200);
+    expect(visitor.body.box.homeBeers + visitor.body.box.awayBeers).toBe(3);
+
+    const floor = await player
+      .post(`/api/games/${ownGame.id}/scorelog/stat`)
+      .send({ side: ownSide, stat: 'beers', delta: -8 });
+    expect(floor.body.box[ownSide === 'home' ? 'homeBeers' : 'awayBeers']).toBe(0);
+
+    if (otherGame) {
+      const otherTeam = await player
+        .post(`/api/games/${otherGame.id}/scorelog/stat`)
+        .send({ side: 'home', stat: 'beers', delta: 1 });
+      expect(otherTeam.status).toBe(403);
+    }
+
+    const anon = await request(app).get(`/api/games/${ownGame.id}`);
+    expect(anon.status).toBe(200);
+    expect(anon.body.scoring.canScore).toBe(false);
+    expect(anon.body.box.homeBeers + anon.body.box.awayBeers).toBe(2);
   });
 
   it('blocks a manager from scoring a locked past game until an admin starts it', async () => {
