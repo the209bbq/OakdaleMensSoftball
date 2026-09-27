@@ -209,6 +209,69 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 
+  it('shows a signed-in player their team, next game, field, time, and check-in', async () => {
+    const playerUser = {
+      id: 'u1',
+      email: 'pat@example.com',
+      name: 'Pat Shortstop',
+      role: 'player' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    let patCheckIn: 'in' | 'out' | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: playerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) {
+          return jsonOk(scheduleGames[0]);
+        }
+        if (url.includes('/api/checkin')) {
+          const body = JSON.parse(String(init?.body ?? '{}')) as { week: number; status: 'in' | 'out' | null };
+          patCheckIn = body.status;
+          return jsonOk({ ok: true, week: body.week, status: body.status });
+        }
+        if (url.includes('/roster')) {
+          return jsonOk({
+            ...rosterPayload,
+            members: rosterPayload.members.map((m) =>
+              m.id === 'u1' ? { ...m, checkIn: patCheckIn } : m,
+            ),
+          });
+        }
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Oakdale Tigers' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('Hey Pat')).toBeInTheDocument();
+    expect(screen.getByText('Next game')).toBeInTheDocument();
+    expect(screen.getByText('vs Da Beers')).toBeInTheDocument();
+    expect(screen.getByText('Field 1')).toBeInTheDocument();
+    expect(screen.getByText('6:00 PM')).toBeInTheDocument();
+    expect(screen.queryByText('Welcome to the Oakdale Mens Softball League')).not.toBeInTheDocument();
+
+    const checkOut = screen.getByRole('button', { name: /can't make it/i });
+    expect(checkOut).toHaveTextContent('🚫');
+    fireEvent.click(checkOut);
+    await waitFor(() => {
+      expect(checkOut).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /open next game vs da beers/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Da Beers at Oakdale Tigers' })).toBeInTheDocument();
+    });
+  });
+
   it('lets an admin open the landing editor', async () => {
     const adminUser = {
       id: 'u-admin',
@@ -280,8 +343,8 @@ describe('App', () => {
     expect(screen.getByText('Field 1')).toBeInTheDocument();
     expect(screen.getByText('6:00 PM')).toBeInTheDocument();
     const attLines = screen.getAllByText((_, node) => node?.classList.contains('game-att-line') ?? false);
-    expect(attLines[0].textContent).toMatch(/Da Beers:\s*🥎 1 · 💩 1 · — 0/);
-    expect(attLines[1].textContent).toMatch(/Oakdale Tigers:\s*🥎 0 · 💩 0 · — 0/);
+    expect(attLines[0].textContent).toMatch(/Da Beers:\s*🥎 1 · 🚫 1 · — 0/);
+    expect(attLines[1].textContent).toMatch(/Oakdale Tigers:\s*🥎 0 · 🚫 0 · — 0/);
     expect(screen.getByLabelText('Live box score')).toBeInTheDocument();
     expect(screen.getByLabelText('Line score')).toBeInTheDocument();
     expect(screen.getByText('UPCOMING')).toBeInTheDocument();
@@ -521,7 +584,7 @@ describe('App', () => {
     expect(screen.getByText('Manager: Coach')).toBeInTheDocument();
     expect(screen.getByText('Manager')).toBeInTheDocument();
     expect(screen.getByText(/Check-in — Week 1 · Wed May 6/)).toBeInTheDocument();
-    expect(screen.getByText(/🥎 1 · 💩 0 · — 1/)).toBeInTheDocument();
+    expect(screen.getByText(/🥎 1 · 🚫 0 · — 1/)).toBeInTheDocument();
     expect(screen.getByLabelText('Coach is in')).toHaveTextContent('🥎');
     expect(screen.getByLabelText("Pat Shortstop hasn't checked in")).toHaveTextContent('—');
     expect(screen.queryByRole('button', { name: /i'm there/i })).not.toBeInTheDocument();
@@ -602,7 +665,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: /team chat/i })).toBeInTheDocument();
     });
-    expect(screen.getByText('Oakdale Tigers')).toBeInTheDocument();
+    expect(screen.getAllByText('Oakdale Tigers').length).toBeGreaterThan(0);
     expect(screen.getByText('Bring water')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'On my way' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -681,7 +744,7 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /can't make it/i }));
     await waitFor(() => {
-      expect(screen.getByLabelText("Pat Shortstop can't make it")).toHaveTextContent('💩');
+      expect(screen.getByLabelText("Pat Shortstop can't make it")).toHaveTextContent('🚫');
     });
     expect(screen.getByRole('button', { name: /can't make it/i })).toHaveAttribute('aria-pressed', 'true');
   });

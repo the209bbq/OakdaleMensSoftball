@@ -1718,6 +1718,107 @@ body {
   padding: 1rem;
 }
 
+.player-home {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.player-home-card {
+  padding: 1.15rem 1.1rem 1.2rem;
+}
+
+.player-home-hello {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.player-home-team {
+  margin: 0.2rem 0 0.85rem;
+  color: var(--heading);
+  font-size: 1.65rem;
+  line-height: 1.15;
+}
+
+.player-home-empty {
+  padding: 0;
+  margin: 0;
+}
+
+.player-next-game {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 2px solid var(--border);
+  background: var(--bg);
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  color: inherit;
+  cursor: pointer;
+}
+
+.player-next-game:hover,
+.player-next-game:focus-visible {
+  border-color: var(--accent);
+}
+
+.player-next-kicker {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.player-next-matchup {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--heading);
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.player-next-when {
+  display: block;
+  margin: 0.15rem 0 0.7rem;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.player-next-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.player-next-meta dt {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.player-next-meta dd {
+  margin: 0.1rem 0 0;
+  color: var(--heading);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.player-home-checkin {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
 .checkin-panel {
   margin: 0 0 1rem;
   padding: 0.9rem;

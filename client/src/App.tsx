@@ -139,7 +139,7 @@ export default function App() {
       </header>
 
       <main className="app-content">
-        {tab === 'home' && <LandingPage />}
+        {tab === 'home' && <HomePage onOpenGame={(id) => navigate(pathForGame(id))} />}
         {tab === 'standings' && <Standings />}
         {tab === 'schedule' && route.gameId && (
           <GamePage gameId={route.gameId} onBack={() => navigate(pathForTab('schedule'))} />
@@ -456,7 +456,202 @@ function TabButton({
   );
 }
 
-function LandingPage() {
+const IN_MARK = '🥎';
+const OUT_MARK = '🚫';
+
+function checkInMark(status: 'in' | 'out' | null | undefined): string {
+  if (status === 'in') return IN_MARK;
+  if (status === 'out') return OUT_MARK;
+  return '—';
+}
+
+function nextGameForTeam(games: Game[], teamId: string): Game | null {
+  const upcoming = games
+    .filter((g) => (g.homeTeamId === teamId || g.awayTeamId === teamId) && !g.played)
+    .slice()
+    .sort((a, b) => `${a.date} ${a.time ?? ''}`.localeCompare(`${b.date} ${b.time ?? ''}`));
+  if (upcoming.length === 0) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  return upcoming.find((g) => g.date >= today) ?? upcoming[0];
+}
+
+function HomePage({ onOpenGame }: { onOpenGame: (id: string) => void }) {
+  const { user } = useAuth();
+  if (user && (user.role === 'player' || user.role === 'manager')) {
+    return <PlayerHome onOpenGame={onOpenGame} />;
+  }
+  return <LeagueLanding />;
+}
+
+function PlayerHome({ onOpenGame }: { onOpenGame: (id: string) => void }) {
+  const { user } = useAuth();
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [games, setGames] = useState<Game[]>([]);
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
+  const [checkingIn, setCheckingIn] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const teamId = user?.teamId ?? null;
+  const team = teams.find((t) => t.id === teamId) ?? null;
+  const nextGame = teamId ? nextGameForTeam(games, teamId) : null;
+  const playsOnTeam = Boolean(
+    teamId && (user?.role === 'player' || (user?.role === 'manager' && user.onRoster !== false)),
+  );
+  const checkWeek = nextGame?.week ?? currentWeek?.week ?? null;
+  const checkDate = nextGame?.date ?? currentWeek?.date ?? null;
+  const myCheckIn = members.find((m) => m.id === user?.id)?.checkIn ?? null;
+  const checkInCounts = {
+    in: members.filter((m) => m.checkIn === 'in').length,
+    out: members.filter((m) => m.checkIn === 'out').length,
+    none: members.filter((m) => m.checkIn !== 'in' && m.checkIn !== 'out').length,
+  };
+
+  function loadRoster(id: string) {
+    api
+      .getRoster(id)
+      .then((r) => {
+        setMembers(r.members ?? []);
+        setCurrentWeek(r.currentWeek ?? null);
+        setTeams((prev) => {
+          const next = prev.map((t) => (t.id === r.team.id ? r.team : t));
+          return next.some((t) => t.id === r.team.id) ? next : [...next, r.team];
+        });
+      })
+      .catch((e) => setError((e as Error).message));
+  }
+
+  useEffect(() => {
+    api.getTeams().then(setTeams).catch((e) => setError((e as Error).message));
+    api.getSchedule().then(setGames).catch((e) => setError((e as Error).message));
+  }, []);
+
+  useEffect(() => {
+    if (!teamId) {
+      setMembers([]);
+      setCurrentWeek(null);
+      return;
+    }
+    loadRoster(teamId);
+  }, [teamId]);
+
+  async function handleCheckIn(status: 'in' | 'out') {
+    if (checkWeek == null) return;
+    const next = myCheckIn === status ? null : status;
+    setError(null);
+    setCheckingIn(true);
+    try {
+      await api.checkIn(checkWeek, next);
+      if (teamId) loadRoster(teamId);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setCheckingIn(false);
+    }
+  }
+
+  const opponent = nextGame
+    ? nextGame.homeTeamId === teamId
+      ? nextGame.awayTeamName
+      : nextGame.homeTeamName
+    : null;
+  const vsLabel = nextGame
+    ? nextGame.homeTeamId === teamId
+      ? `vs ${opponent}`
+      : `at ${opponent}`
+    : null;
+
+  return (
+    <div className="landing player-home">
+      <section className="card player-home-card">
+        <p className="player-home-hello">Hey {user?.name?.split(' ')[0] || 'there'}</p>
+        <h1 className="player-home-team">{team?.name ?? 'No team yet'}</h1>
+        {!teamId && (
+          <p className="muted-copy player-home-empty">
+            Join a team from Rosters to see your next game and check in.
+          </p>
+        )}
+        {teamId && !nextGame && (
+          <p className="muted-copy player-home-empty">No upcoming games on the schedule.</p>
+        )}
+        {nextGame && (
+          <button
+            type="button"
+            className="player-next-game"
+            onClick={() => onOpenGame(nextGame.id)}
+            aria-label={`Open next game ${vsLabel} on ${formatGameDate(nextGame.date)}`}
+          >
+            <span className="player-next-kicker">Next game</span>
+            <span className="player-next-matchup">{vsLabel}</span>
+            <span className="player-next-when">{formatGameDate(nextGame.date)}</span>
+            <dl className="player-next-meta">
+              <div>
+                <dt>Field</dt>
+                <dd>{nextGame.field || 'TBD'}</dd>
+              </div>
+              <div>
+                <dt>Time</dt>
+                <dd>{nextGame.time || 'TBD'}</dd>
+              </div>
+            </dl>
+          </button>
+        )}
+      </section>
+
+      {teamId && checkWeek != null && checkDate && (
+        <section className="card">
+          <div className="checkin-panel player-home-checkin">
+            <h2 className="checkin-heading">
+              Check-in — Week {checkWeek} · {formatGameDate(checkDate)}
+            </h2>
+            {members.length > 0 && (
+              <p className="checkin-summary">
+                {IN_MARK} {checkInCounts.in} · {OUT_MARK} {checkInCounts.out} · — {checkInCounts.none}
+              </p>
+            )}
+            {playsOnTeam ? (
+              <div className="checkin-actions">
+                <button
+                  type="button"
+                  className={`checkin-btn${myCheckIn === 'in' ? ' active-in' : ''}`}
+                  aria-pressed={myCheckIn === 'in'}
+                  aria-label="I'm there"
+                  disabled={checkingIn}
+                  onClick={() => handleCheckIn('in')}
+                >
+                  <span className="checkin-emoji" aria-hidden="true">
+                    {IN_MARK}
+                  </span>
+                  I&apos;m there
+                </button>
+                <button
+                  type="button"
+                  className={`checkin-btn${myCheckIn === 'out' ? ' active-out' : ''}`}
+                  aria-pressed={myCheckIn === 'out'}
+                  aria-label="Can't make it"
+                  disabled={checkingIn}
+                  onClick={() => handleCheckIn('out')}
+                >
+                  <span className="checkin-emoji" aria-hidden="true">
+                    {OUT_MARK}
+                  </span>
+                  Can&apos;t make it
+                </button>
+              </div>
+            ) : (
+              <p className="theme-help">Manager-only accounts do not check in.</p>
+            )}
+            {error && <p className="error inline-error">{error}</p>}
+          </div>
+        </section>
+      )}
+
+      <SuggestionsBox />
+    </div>
+  );
+}
+
+function LeagueLanding() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [landing, setLanding] = useState<Landing | null>(null);
@@ -996,6 +1191,7 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function formatGameDate(iso: string): string {
+  if (!iso) return '';
   const [y, m, d] = iso.split('-').map(Number);
   if (!y || !m || !d) return iso;
   const date = new Date(Date.UTC(y, m - 1, d));
@@ -1132,7 +1328,7 @@ function AttendanceBreakdown({ name, attendance }: { name: string; attendance?: 
   const shortHanded = a.total > 0 && a.in < 8;
   return (
     <p className="game-att-line">
-      <span className="game-att-name">{name}:</span> 🥎 {a.in} · 💩 {a.out} · — {a.none}
+      <span className="game-att-name">{name}:</span> {IN_MARK} {a.in} · {OUT_MARK} {a.out} · — {a.none}
       {shortHanded ? <span className="att-short"> short-handed</span> : null}
     </p>
   );
@@ -2231,7 +2427,7 @@ function Rosters() {
           </h3>
           {members.length > 0 && (
             <p className="checkin-summary">
-              🥎 {checkInCounts.in} · 💩 {checkInCounts.out} · — {checkInCounts.none}
+              {IN_MARK} {checkInCounts.in} · {OUT_MARK} {checkInCounts.out} · — {checkInCounts.none}
             </p>
           )}
           {canCheckIn && (
@@ -2245,7 +2441,7 @@ function Rosters() {
                 onClick={() => handleCheckIn('in')}
               >
                 <span className="checkin-emoji" aria-hidden="true">
-                  🥎
+                  {IN_MARK}
                 </span>
                 I&apos;m there
               </button>
@@ -2258,7 +2454,7 @@ function Rosters() {
                 onClick={() => handleCheckIn('out')}
               >
                 <span className="checkin-emoji" aria-hidden="true">
-                  💩
+                  {OUT_MARK}
                 </span>
                 Can&apos;t make it
               </button>
@@ -2332,7 +2528,7 @@ function Rosters() {
                         : `${m.name} hasn't checked in`
                   }
                 >
-                  {m.checkIn === 'in' ? '🥎' : m.checkIn === 'out' ? '💩' : '—'}
+                  {checkInMark(m.checkIn)}
                 </span>
               )}
               {canEdit && !m.isManager && (
