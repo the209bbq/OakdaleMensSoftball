@@ -190,6 +190,8 @@ export default function App() {
           <HomePage
             onOpenGame={(id) => navigate(pathForGame(id))}
             onOpenTeam={(id) => navigate(pathForTeam(id))}
+            onOpenPlayer={(id) => navigate(pathForPlayer(id))}
+            onSignUp={() => openAuth('register')}
           />
         )}
         {tab === 'standings' && <Standings onOpenTeam={(id) => navigate(pathForTeam(id))} />}
@@ -202,16 +204,12 @@ export default function App() {
         {tab === 'teams' && route.playerId && (
           <PlayerProfilePage
             playerId={route.playerId}
-            onBack={() => navigate(pathForTab('teams'))}
+            onBack={() => navigate(historyBackPath())}
             onOpenTeam={(id) => navigate(pathForTeam(id))}
           />
         )}
         {tab === 'teams' && !route.teamId && !route.playerId && (
-          <TeamsBoard
-            onOpenTeam={(id) => navigate(pathForTeam(id))}
-            onOpenPlayer={(id) => navigate(pathForPlayer(id))}
-            onSignUp={() => openAuth('register')}
-          />
+          <TeamsBoard onOpenTeam={(id) => navigate(pathForTeam(id))} />
         )}
         {tab === 'teams' && route.teamId && !route.playerId && (
           <TeamPage
@@ -629,23 +627,29 @@ function nextGameForTeam(games: Game[], teamId: string): Game | null {
 function HomePage({
   onOpenGame,
   onOpenTeam,
+  onOpenPlayer,
+  onSignUp,
 }: {
   onOpenGame: (id: string) => void;
   onOpenTeam: (teamId: string) => void;
+  onOpenPlayer: (playerId: string) => void;
+  onSignUp: () => void;
 }) {
   const { user } = useAuth();
   if (user && (user.role === 'player' || user.role === 'manager')) {
-    return <PlayerHome onOpenGame={onOpenGame} onOpenTeam={onOpenTeam} />;
+    return <PlayerHome onOpenGame={onOpenGame} onOpenTeam={onOpenTeam} onOpenPlayer={onOpenPlayer} />;
   }
-  return <LeagueLanding />;
+  return <LeagueLanding onOpenPlayer={onOpenPlayer} onSignUp={onSignUp} />;
 }
 
 function PlayerHome({
   onOpenGame,
   onOpenTeam,
+  onOpenPlayer,
 }: {
   onOpenGame: (id: string) => void;
   onOpenTeam: (teamId: string) => void;
+  onOpenPlayer: (playerId: string) => void;
 }) {
   const { user } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
@@ -748,7 +752,7 @@ function PlayerHome({
         )}
         {!teamId && ready && (
           <p className="muted-copy player-home-empty">
-            Join a team from Teams to see your next game and check in.
+            Open Free agency below to join a team.
           </p>
         )}
         {teamId && ready && !nextGame && (
@@ -826,12 +830,19 @@ function PlayerHome({
         </section>
       )}
 
+      <FreeAgencyPanel onOpenPlayer={onOpenPlayer} />
       <SuggestionsBox />
     </div>
   );
 }
 
-function LeagueLanding() {
+function LeagueLanding({
+  onOpenPlayer,
+  onSignUp,
+}: {
+  onOpenPlayer: (playerId: string) => void;
+  onSignUp: () => void;
+}) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [landing, setLanding] = useState<Landing | null>(null);
@@ -1008,6 +1019,7 @@ function LeagueLanding() {
         )}
       </section>
 
+      <FreeAgencyPanel onOpenPlayer={onOpenPlayer} onSignUp={onSignUp} />
       <SuggestionsBox />
     </div>
   );
@@ -2631,14 +2643,16 @@ function lineupBadge(row: TeamBoardRow, fullLineupSize: number) {
   );
 }
 
-function TeamsBoard({
-  onOpenTeam,
+function isTeamBoard(value: unknown): value is TeamBoard {
+  return Boolean(value && typeof value === 'object' && Array.isArray((value as TeamBoard).teams));
+}
+
+function FreeAgencyPanel({
   onOpenPlayer,
   onSignUp,
 }: {
-  onOpenTeam: (teamId: string) => void;
   onOpenPlayer: (playerId: string) => void;
-  onSignUp: () => void;
+  onSignUp?: () => void;
 }) {
   const { user, refresh } = useAuth();
   const [board, setBoard] = useState<TeamBoard | null>(null);
@@ -2646,12 +2660,20 @@ function TeamsBoard({
   const [joinPick, setJoinPick] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [openedForInvite, setOpenedForInvite] = useState(false);
 
   const loadBoard = useCallback(() => {
-    api.getTeamBoard().then((next) => {
-      setBoard(next);
-      setJoinPick((prev) => prev || user?.teamId || next.teams[0]?.id || '');
-    });
+    api
+      .getTeamBoard()
+      .then((next) => {
+        if (!isTeamBoard(next)) return;
+        setBoard(next);
+        setJoinPick((prev) => prev || user?.teamId || next.teams[0]?.id || '');
+      })
+      .catch(() => {
+        /* keep last good snapshot */
+      });
     if (user) {
       api.listFaInvites().then(setInvites).catch(() => setInvites([]));
     } else {
@@ -2661,9 +2683,22 @@ function TeamsBoard({
 
   useEffect(() => {
     loadBoard();
+  }, [loadBoard]);
+
+  useEffect(() => {
+    if (!open) return;
     const timer = window.setInterval(loadBoard, 8000);
     return () => window.clearInterval(timer);
-  }, [loadBoard]);
+  }, [open, loadBoard]);
+
+  const incoming = invites.filter((inv) => inv.status === 'pending' && inv.toUserId === user?.id);
+
+  useEffect(() => {
+    if (incoming.length > 0 && !openedForInvite) {
+      setOpen(true);
+      setOpenedForInvite(true);
+    }
+  }, [incoming.length, openedForInvite]);
 
   async function handleJoin(e: React.FormEvent) {
     e.preventDefault();
@@ -2728,8 +2763,166 @@ function TeamsBoard({
 
   const playerTeam = board?.teams.find((t) => t.id === user?.teamId) ?? null;
   const canUseFreeAgency = Boolean(board?.freeAgencyOpen && user?.role === 'player');
-  const incoming = invites.filter((inv) => inv.status === 'pending' && inv.toUserId === user?.id);
   const canInvite = user?.role === 'manager' && Boolean(user.teamId);
+  const agentCount = board?.freeAgents.length ?? 0;
+  const summary = !board
+    ? ''
+    : incoming.length > 0
+      ? `${incoming.length} invite${incoming.length === 1 ? '' : 's'}`
+      : !board.freeAgencyOpen
+        ? 'Closed'
+        : user?.role === 'player' && !user.teamId
+          ? 'Join a team'
+          : agentCount === 0
+            ? 'None available'
+            : `${agentCount} available`;
+
+  return (
+    <section className="card free-agency-card">
+      <button
+        type="button"
+        className="free-agency-toggle"
+        aria-expanded={open}
+        aria-controls="free-agency-panel"
+        aria-label={summary ? `Free agency, ${summary}` : 'Free agency'}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="free-agency-toggle-text">
+          <span className="free-agency-title">Free agency</span>
+          {summary ? <span className="free-agency-summary">{summary}</span> : null}
+        </span>
+        <span className={`game-chevron${open ? ' is-open' : ''}`} aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </span>
+      </button>
+      {open && (
+        <div className="free-agency-body" id="free-agency-panel">
+          {board && !board.freeAgencyOpen ? (
+            <p className="muted-copy">
+              Free agency closed — playoffs have started. Managers can still invite a guy for a game.
+            </p>
+          ) : (
+            <>
+              <p className="muted-copy">Sign up as a free agent and join a team until the regular season ends.</p>
+              {!user && onSignUp && (
+                <button type="button" className="primary-btn" onClick={onSignUp}>
+                  Sign up as a free agent
+                </button>
+              )}
+              {user && canUseFreeAgency && !user.teamId && board && (
+                <form className="add-row" onSubmit={handleJoin}>
+                  <label className="field inline">
+                    Join a team:{' '}
+                    <select
+                      aria-label="Join a team"
+                      value={joinPick}
+                      onChange={(e) => setJoinPick(e.target.value)}
+                    >
+                      {board.teams.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button type="submit" disabled={busy || !joinPick}>
+                    Join
+                  </button>
+                </form>
+              )}
+              {user && canUseFreeAgency && user.teamId && playerTeam && (
+                <div className="join-bar">
+                  <p className="join-status">You&apos;re on {playerTeam.name}</p>
+                  <button type="button" className="link-btn danger" onClick={handleLeave} disabled={busy}>
+                    Leave and become a free agent
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          {incoming.length > 0 && (
+            <ul className="invite-list">
+              {incoming.map((inv) => (
+                <li key={inv.id} className="invite-row">
+                  <span>
+                    {inv.teamName} wants you this week
+                    {inv.time || inv.field ? ` · ${[inv.field, inv.time].filter(Boolean).join(' · ')}` : ''}
+                  </span>
+                  <span className="invite-actions">
+                    <button type="button" disabled={busy} onClick={() => handleInviteRespond(inv.id, true)}>
+                      Accept
+                    </button>
+                    <button type="button" className="link-btn" disabled={busy} onClick={() => handleInviteRespond(inv.id, false)}>
+                      Decline
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {board && board.freeAgents.length === 0 ? (
+            <p className="member-empty">No free agents right now.</p>
+          ) : (
+            <ul className="free-agent-cards">
+              {(board?.freeAgents ?? []).map((agent) => (
+                <li key={agent.id} className="fa-card">
+                  <button type="button" className="fa-card-main" onClick={() => onOpenPlayer(agent.id)}>
+                    {agent.photoUrl ? (
+                      <img className="avatar member-avatar" src={agent.photoUrl} alt="" />
+                    ) : (
+                      <span className="avatar avatar-initials member-avatar">{initials(agent.name)}</span>
+                    )}
+                    <span className="member-info">
+                      <span className="member-name">{agent.name}</span>
+                      <span className="member-meta">
+                        {[agent.number != null ? `#${agent.number}` : null, agent.position, skillLabel(agent.skillLevel)]
+                          .filter(Boolean)
+                          .join(' · ') || 'Free agent'}
+                      </span>
+                    </span>
+                  </button>
+                  {canInvite && (
+                    <button
+                      type="button"
+                      className="link-btn"
+                      disabled={busy || agent.invitedByMe}
+                      onClick={() => handleInvite(agent.id)}
+                    >
+                      {agent.invitedByMe ? 'Invited' : 'Invite for this week'}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {message && <p className="message">{message}</p>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TeamsBoard({ onOpenTeam }: { onOpenTeam: (teamId: string) => void }) {
+  const [board, setBoard] = useState<TeamBoard | null>(null);
+
+  const loadBoard = useCallback(() => {
+    api
+      .getTeamBoard()
+      .then((next) => {
+        if (isTeamBoard(next)) setBoard(next);
+      })
+      .catch(() => {
+        /* keep last good snapshot */
+      });
+  }, []);
+
+  useEffect(() => {
+    loadBoard();
+    const timer = window.setInterval(loadBoard, 8000);
+    return () => window.clearInterval(timer);
+  }, [loadBoard]);
 
   return (
     <section className="card">
@@ -2737,109 +2930,6 @@ function TeamsBoard({
       <p className="muted-copy">
         Live lineup for this week. Click a team to see who&apos;s checked in.
       </p>
-
-      <div className="free-agency">
-        <h3>Free agency</h3>
-        {board && !board.freeAgencyOpen ? (
-          <p className="muted-copy">Free agency closed — playoffs have started. Managers can still invite a guy for a game.</p>
-        ) : (
-          <>
-            <p className="muted-copy">
-              Sign up as a free agent and join a team until the regular season ends.
-            </p>
-            {!user && (
-              <button type="button" className="primary-btn" onClick={onSignUp}>
-                Sign up as a free agent
-              </button>
-            )}
-            {user && canUseFreeAgency && !user.teamId && board && (
-              <form className="add-row" onSubmit={handleJoin}>
-                <label className="field inline">
-                  Join a team:{' '}
-                  <select
-                    aria-label="Join a team"
-                    value={joinPick}
-                    onChange={(e) => setJoinPick(e.target.value)}
-                  >
-                    {board.teams.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button type="submit" disabled={busy || !joinPick}>
-                  Join
-                </button>
-              </form>
-            )}
-            {user && canUseFreeAgency && user.teamId && playerTeam && (
-              <div className="join-bar">
-                <p className="join-status">You&apos;re on {playerTeam.name}</p>
-                <button type="button" className="link-btn danger" onClick={handleLeave} disabled={busy}>
-                  Leave and become a free agent
-                </button>
-              </div>
-            )}
-          </>
-        )}
-            {incoming.length > 0 && (
-              <ul className="invite-list">
-                {incoming.map((inv) => (
-                  <li key={inv.id} className="invite-row">
-                    <span>
-                      {inv.teamName} wants you this week
-                      {inv.time || inv.field ? ` · ${[inv.field, inv.time].filter(Boolean).join(' · ')}` : ''}
-                    </span>
-                    <span className="invite-actions">
-                      <button type="button" disabled={busy} onClick={() => handleInviteRespond(inv.id, true)}>
-                        Accept
-                      </button>
-                      <button type="button" className="link-btn" disabled={busy} onClick={() => handleInviteRespond(inv.id, false)}>
-                        Decline
-                      </button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {board && board.freeAgents.length === 0 ? (
-              <p className="member-empty">No free agents right now.</p>
-            ) : (
-              <ul className="free-agent-cards">
-                {(board?.freeAgents ?? []).map((agent) => (
-                  <li key={agent.id} className="fa-card">
-                    <button type="button" className="fa-card-main" onClick={() => onOpenPlayer(agent.id)}>
-                      {agent.photoUrl ? (
-                        <img className="avatar member-avatar" src={agent.photoUrl} alt="" />
-                      ) : (
-                        <span className="avatar avatar-initials member-avatar">{initials(agent.name)}</span>
-                      )}
-                      <span className="member-info">
-                        <span className="member-name">{agent.name}</span>
-                        <span className="member-meta">
-                          {[agent.number != null ? `#${agent.number}` : null, agent.position, skillLabel(agent.skillLevel)]
-                            .filter(Boolean)
-                            .join(' · ') || 'Free agent'}
-                        </span>
-                      </span>
-                    </button>
-                    {canInvite && (
-                      <button
-                        type="button"
-                        className="link-btn"
-                        disabled={busy || agent.invitedByMe}
-                        onClick={() => handleInvite(agent.id)}
-                      >
-                        {agent.invitedByMe ? 'Invited' : 'Invite for this week'}
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-        {message && <p className="message">{message}</p>}
-      </div>
 
       {!board ? (
         <p className="muted-copy">Loading teams…</p>
@@ -2955,7 +3045,7 @@ function PlayerProfilePage({
     return (
       <section className="card">
         <button type="button" className="link-btn back-link" onClick={onBack}>
-          ← Teams
+          {historyBackLabel()}
         </button>
         <p className="error">{error}</p>
       </section>
@@ -2976,7 +3066,7 @@ function PlayerProfilePage({
   return (
     <section className="card player-profile">
       <button type="button" className="link-btn back-link" onClick={onBack}>
-        ← Teams
+        {historyBackLabel()}
       </button>
       <div className="player-hero">
         {profile.photoUrl ? (

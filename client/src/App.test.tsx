@@ -398,6 +398,7 @@ describe('App', () => {
         if (url.includes('/api/landing')) return jsonOk(landing);
         if (url.includes('/api/standings')) return jsonOk(standings);
         if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/team-board')) return jsonOk(teamBoard);
         if (url.includes('/api/teams')) return jsonOk(teams);
         return jsonOk([]);
       }),
@@ -408,7 +409,8 @@ describe('App', () => {
       expect(screen.getByRole('heading', { name: 'No team' })).toBeInTheDocument();
     });
     expect(screen.queryByRole('button', { name: /open /i })).not.toBeInTheDocument();
-    expect(screen.getByText(/join a team from teams/i)).toBeInTheDocument();
+    expect(screen.getByText(/open free agency below to join a team/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /free agency, join a team/i })).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('lets an admin open the landing editor', async () => {
@@ -966,12 +968,9 @@ describe('App', () => {
     expect(screen.getByText('3/15 roster')).toBeInTheDocument();
     expect(screen.getByText('3/15 spots')).toBeInTheDocument();
     expect(screen.getByText(/vs Da Beers · Field 1 · 6:00 PM/)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Free agency' })).toBeInTheDocument();
-    expect(screen.getByText('Free Agent Joe')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign up as a free agent/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /sign up as a free agent/i }));
-    expect(screen.getByLabelText('Full name')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('button', { name: /free agency/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Free Agent Joe')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sign up as a free agent/i })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Oakdale Tigers' }));
     await waitFor(() => {
@@ -1003,7 +1002,10 @@ describe('App', () => {
 
   it('opens a player profile with a stat line from the free-agent list', async () => {
     renderApp();
-    fireEvent.click(screen.getByRole('tab', { name: 'Teams' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /free agency/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /free agency/i }));
     await waitFor(() => {
       expect(screen.getByText('Free Agent Joe')).toBeInTheDocument();
     });
@@ -1011,6 +1013,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Free Agent Joe' })).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: '← Home' })).toBeInTheDocument();
     expect(screen.getByText('#7')).toBeInTheDocument();
     expect(screen.getByText(/OF · Regular/)).toBeInTheDocument();
     expect(screen.getByText('GP')).toBeInTheDocument();
@@ -1051,13 +1054,31 @@ describe('App', () => {
     );
 
     renderApp();
-    fireEvent.click(screen.getByRole('tab', { name: 'Teams' }));
     await waitFor(() => {
-      expect(screen.getByText('Full lineup')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /free agency, closed/i })).toBeInTheDocument();
     });
-    expect(screen.getByText(/Free agency closed — playoffs have started/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sign up as a free agent/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /free agency, closed/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Free agency closed — playoffs have started/)).toBeInTheDocument();
+    });
     expect(screen.queryByRole('button', { name: /sign up as a free agent/i })).not.toBeInTheDocument();
     expect(screen.queryByText('Free Agent Joe')).not.toBeInTheDocument();
+  });
+
+  it('keeps free agency collapsed on Home until tapped', async () => {
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /free agency, 1 available/i })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /free agency, 1 available/i })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Free Agent Joe')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /free agency, 1 available/i }));
+    expect(screen.getByRole('button', { name: /free agency, 1 available/i })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Free Agent Joe')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign up as a free agent/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /sign up as a free agent/i }));
+    expect(screen.getByLabelText('Full name')).toBeInTheDocument();
   });
 
   it('shows a public suggestions box and hides the team-chat button when logged out', async () => {
