@@ -124,7 +124,7 @@ export function groupPlayersByTeam(
     }
   }
 
-  const sections = teams.map((team) => ({
+  const sections: TeamStatsSection[] = teams.map((team) => ({
     teamId: team.id,
     teamName: team.name,
     players: sortPlayers(byTeam.get(team.id) ?? []).map(toSheetPlayerRow),
