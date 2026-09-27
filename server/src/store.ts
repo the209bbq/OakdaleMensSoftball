@@ -44,7 +44,22 @@ import {
   type SheetsSettings,
 } from './playerStatsSheet.js';
 import { createSeedData } from './seed.js';
-import { DEFAULT_LOCATION, generateRoundRobin, type GenerateOptions } from './schedule.js';
+import { DEFAULT_LOCATION, DEFAULT_WEEKS, generateRoundRobin, type GenerateOptions } from './schedule.js';
+import {
+  SIM_FREE_AGENT_COUNT,
+  SIM_GUESTS_PER_TEAM,
+  pickSimHit,
+  pickSimOut,
+  rotateLineup,
+  simGuestName,
+  simJersey,
+  simPhone,
+  simPhotoUrl,
+  simPosition,
+  simSharePhone,
+  simSkill,
+  simWaiver,
+} from './simSeason.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import {
   DEFAULT_THEME_INPUT,
@@ -101,16 +116,18 @@ export const FULL_LINEUP_SIZE = 10;
 /** Guest accounts created by the admin Test Data simulator. Easy to find/remove. */
 export const SIM_EMAIL_DOMAIN = '@sim.local';
 export const SIM_GUEST_PASSWORD = 'guestpass1';
-export const SIM_GUEST_COUNT = 72;
-export const SIM_GUESTS_PER_TEAM = 9;
+export { SIM_FREE_AGENT_COUNT, SIM_GUESTS_PER_TEAM } from './simSeason.js';
 const SIM_RNG_SEED = 20260922;
 
 export interface TestDataGenerateSummary {
   alreadySeeded: boolean;
   guestsCreated: number;
+  rosteredPlayers: number;
+  freeAgents: number;
   checkIns: number;
   messages: number;
   gamesPlayed: number;
+  invites: number;
 }
 
 export interface TestDataClearSummary {
@@ -829,8 +846,10 @@ export class LeagueStore {
   private insertUserRow(user: User): void {
     this.db
       .prepare(
-        `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, onRoster, createdAt)
-         VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @onRoster, @createdAt)`,
+        `INSERT INTO users (id, email, name, role, teamId, passwordHash, position, number, photoUrl, onRoster, createdAt,
+           skillLevel, phone, sharePhone, waiverUrl, waiverStatus, waiverReviewedBy, waiverReviewedAt)
+         VALUES (@id, @email, @name, @role, @teamId, @passwordHash, @position, @number, @photoUrl, @onRoster, @createdAt,
+           @skillLevel, @phone, @sharePhone, @waiverUrl, @waiverStatus, @waiverReviewedBy, @waiverReviewedAt)`,
       )
       .run({
         id: user.id,
@@ -844,6 +863,13 @@ export class LeagueStore {
         photoUrl: user.photoUrl ?? null,
         onRoster: user.onRoster === false ? 0 : 1,
         createdAt: user.createdAt,
+        skillLevel: user.skillLevel ?? null,
+        phone: user.phone ?? null,
+        sharePhone: user.sharePhone ? 1 : 0,
+        waiverUrl: user.waiverUrl ?? null,
+        waiverStatus: user.waiverStatus ?? 'none',
+        waiverReviewedBy: user.waiverReviewedBy ?? null,
+        waiverReviewedAt: user.waiverReviewedAt ?? null,
       });
   }
 
@@ -2839,59 +2865,151 @@ export class LeagueStore {
     return rows.map(userFromRow).filter((u) => u.email.endsWith(SIM_EMAIL_DOMAIN));
   }
 
-  private seedSimPlateAppearances(
-    gameId: string,
-    guests: User[],
+  private emptyGenerateSummary(alreadySeeded: boolean): TestDataGenerateSummary {
+    return {
+      alreadySeeded,
+      guestsCreated: 0,
+      rosteredPlayers: 0,
+      freeAgents: 0,
+      checkIns: 0,
+      messages: 0,
+      gamesPlayed: 0,
+      invites: 0,
+    };
+  }
+
+  private seedSimGame(
+    game: Game,
+    guestsByTeam: Map<string, User[]>,
     homeScore: number,
     awayScore: number,
     rng: () => number,
+    actorId: string,
   ): void {
-    const game = this.getGame(gameId);
-    if (!game) return;
+    this.ensureGameLog(game.id);
+    const lineups = new Map<string, User[]>();
     for (const side of ['home', 'away'] as const) {
       const teamId = side === 'home' ? game.homeTeamId : game.awayTeamId;
-      const players = guests.filter((guest) => guest.teamId === teamId);
+      const players = guestsByTeam.get(teamId) ?? [];
       if (players.length === 0) continue;
+      const lineup = rotateLineup(players, game.week, FULL_LINEUP_SIZE);
       this.setGameLineup(
-        gameId,
+        game.id,
         teamId,
-        players.map((player) => player.id),
-        players[0].id,
+        lineup.map((player) => player.id),
+        actorId,
       );
-      const score = side === 'home' ? homeScore : awayScore;
-      const hits = Math.max(score, 1) + Math.floor(rng() * 3);
-      const walks = Math.floor(rng() * 3);
-      const outs = 21;
-      for (let i = 0; i < hits; i += 1) {
-        const kind: StoredPlayResult =
-          i % 7 === 0 ? 'homer' : i % 5 === 0 ? 'triple' : i % 3 === 0 ? 'double' : 'single';
-        this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, kind);
-      }
-      for (let i = 0; i < walks; i += 1) {
-        this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, 'walk');
-      }
-      for (let i = 0; i < outs; i += 1) {
-        const kind: StoredPlayResult = i % 4 === 0 ? 'strikeout' : 'out';
-        this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, kind);
-      }
-      const hitsCol = side === 'home' ? 'homeHits' : 'awayHits';
-      const walksCol = side === 'home' ? 'homeWalks' : 'awayWalks';
-      const outsCol = side === 'home' ? 'homeOuts' : 'awayOuts';
-      this.db
-        .prepare(`UPDATE game_logs SET ${hitsCol} = ?, ${walksCol} = ?, ${outsCol} = ? WHERE gameId = ?`)
-        .run(hits, walks, outs, gameId);
+      lineups.set(teamId, lineup);
     }
+    this.startLiveGame(game.id, actorId);
+
+    const tally = {
+      home: { hits: 0, walks: 0, outs: 0 },
+      away: { hits: 0, walks: 0, outs: 0 },
+    };
+    for (let inning = 1; inning <= 7; inning += 1) {
+      for (const half of ['top', 'bottom'] as const) {
+        const side = half === 'top' ? 'away' : 'home';
+        const teamId = side === 'home' ? game.homeTeamId : game.awayTeamId;
+        const lineup = lineups.get(teamId) ?? [];
+        if (lineup.length === 0) continue;
+        const score = side === 'home' ? homeScore : awayScore;
+        const targetHits = Math.max(1, Math.round(score / 7) + (rng() < 0.4 ? 1 : 0));
+        let hits = 0;
+        let outs = 0;
+        let batter = (inning - 1) * 3;
+        while (outs < 3) {
+          const roll = rng();
+          let result: StoredPlayResult;
+          if (hits < targetHits && roll < 0.38) {
+            result = pickSimHit(rng);
+            hits += 1;
+            tally[side].hits += 1;
+          } else if (roll < 0.46) {
+            result = 'walk';
+            tally[side].walks += 1;
+          } else {
+            result = pickSimOut(rng);
+            outs += 1;
+            tally[side].outs += 1;
+          }
+          this.recordPlateAppearance(
+            game.id,
+            lineup[batter % lineup.length].id,
+            teamId,
+            side,
+            result,
+            inning,
+            half,
+          );
+          batter += 1;
+        }
+      }
+    }
+
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE game_logs SET homeHits = ?, awayHits = ?, homeWalks = ?, awayWalks = ?,
+         homeOuts = ?, awayOuts = ?, currentInning = 8, currentHalf = 'top', currentOuts = 0,
+         liveStartedAt = COALESCE(liveStartedAt, ?), updatedAt = ?, updatedByUserId = ?
+         WHERE gameId = ?`,
+      )
+      .run(
+        tally.home.hits,
+        tally.away.hits,
+        tally.home.walks,
+        tally.away.walks,
+        tally.home.outs,
+        tally.away.outs,
+        now,
+        now,
+        actorId,
+        game.id,
+      );
+  }
+
+  private seedSimInvites(guests: User[]): number {
+    const freeAgents = guests.filter((guest) => !guest.teamId);
+    if (freeAgents.length === 0) return 0;
+    const managers = this.listUsers().filter((user) => user.role === 'manager' && user.teamId);
+    if (managers.length === 0) return 0;
+    const week = this.getCurrentWeek();
+    const weekGames = this.weekGamesByTeam();
+    const insert = this.db.prepare(
+      `INSERT INTO fa_invites (id, fromUserId, teamId, toUserId, gameId, week, status, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const statuses: Array<'pending' | 'declined' | 'cancelled'> = ['pending', 'declined', 'cancelled'];
+    let invites = 0;
+    for (let i = 0; i < freeAgents.length; i += 1) {
+      const manager = managers[i % managers.length];
+      if (!manager.teamId) continue;
+      const weekGame = weekGames.get(manager.teamId) ?? null;
+      insert.run(
+        `inv-sim-${i + 1}`,
+        manager.id,
+        manager.teamId,
+        freeAgents[i].id,
+        weekGame?.id ?? null,
+        week?.week ?? null,
+        statuses[i % statuses.length],
+        new Date().toISOString(),
+      );
+      invites += 1;
+    }
+    return invites;
   }
 
   /**
-   * Seed a realistic full league of guest players, current-week check-ins,
-   * team chat, and season scores. Idempotent: if any @sim.local guests already
-   * exist, nothing is duplicated.
+   * Seed a full 11-week season: 15-man rosters, free agents, profiles,
+   * weekly check-ins/lineups, chat, FA invites, and scored play-by-play.
+   * Idempotent: if any @sim.local guests already exist, nothing is duplicated.
    */
   generateTestData(): TestDataGenerateSummary {
     const existing = this.listSimUsers();
     if (existing.length > 0) {
-      return { alreadySeeded: true, guestsCreated: 0, checkIns: 0, messages: 0, gamesPlayed: 0 };
+      return this.emptyGenerateSummary(true);
     }
 
     const teams = this.getTeams();
@@ -2905,47 +3023,87 @@ export class LeagueStore {
 
     const run = this.db.transaction(() => {
       if (this.getSchedule().length === 0) {
-        this.generateSchedule();
+        this.generateSchedule({ weeks: DEFAULT_WEEKS });
       }
 
+      const reviewer =
+        this.listUsers().find((user) => user.role === 'admin') ??
+        this.listUsers().find((user) => user.role === 'manager') ??
+        null;
+
       const guests: User[] = [];
-      const maxGuests = Math.min(SIM_GUEST_COUNT, teams.length * SIM_GUESTS_PER_TEAM);
-      for (let i = 1; i <= maxGuests; i++) {
-        const teamIndex = Math.floor((i - 1) / SIM_GUESTS_PER_TEAM);
-        if (teamIndex >= teams.length) break;
+      let nextGuest = 1;
+      const addGuest = (teamId: string | null, slotOnTeam: number): User => {
+        const i = nextGuest;
+        nextGuest += 1;
+        const waiver = simWaiver(i);
+        const phone = simPhone(i);
+        const reviewed = waiver.waiverStatus === 'approved' || waiver.waiverStatus === 'rejected';
         const user: User = {
           id: `u-sim-guest-${i}`,
           email: `guest${i}${SIM_EMAIL_DOMAIN}`,
-          name: `Guest ${i}`,
+          name: simGuestName(i - 1),
           role: 'player',
-          teamId: teams[teamIndex].id,
+          teamId,
           onRoster: true,
           passwordHash,
           createdAt,
-          sharePhone: false,
-          waiverStatus: 'none',
+          position: simPosition(slotOnTeam),
+          number: simJersey(slotOnTeam),
+          photoUrl: simPhotoUrl(i),
+          skillLevel: simSkill(i),
+          phone,
+          sharePhone: simSharePhone(i, phone),
+          waiverUrl: waiver.waiverUrl,
+          waiverStatus: waiver.waiverStatus,
+          waiverReviewedBy: reviewed ? reviewer?.id ?? null : null,
+          waiverReviewedAt: reviewed ? createdAt : null,
         };
         this.insertUserRow(user);
         guests.push(user);
+        return user;
+      };
+
+      const alreadyOnRoster = this.accountMemberIdsByTeam();
+      for (const team of teams) {
+        const already = (alreadyOnRoster.get(team.id) ?? []).length;
+        const need = Math.max(0, SIM_GUESTS_PER_TEAM - already);
+        for (let slot = 0; slot < need; slot += 1) {
+          addGuest(team.id, already + slot);
+        }
+      }
+      for (let slot = 0; slot < SIM_FREE_AGENT_COUNT; slot += 1) {
+        addGuest(null, slot);
+      }
+      const rosteredCount = guests.filter((guest) => guest.teamId).length;
+
+      const guestsByTeam = new Map<string, User[]>();
+      for (const team of teams) {
+        guestsByTeam.set(
+          team.id,
+          guests.filter((guest) => guest.teamId === team.id),
+        );
       }
 
       let checkIns = 0;
-      const current = this.getCurrentWeek();
-      if (current) {
-        for (let i = 0; i < guests.length; i++) {
-          // ~75% in, ~25% out (every 4th guest is out).
-          const status: CheckInStatus = (i + 1) % 4 === 0 ? 'out' : 'in';
-          this.setCheckIn(guests[i].id, current.week, status);
-          checkIns += 1;
+      const weeks = [...new Set(this.getSchedule().map((game) => game.week))].sort((a, b) => a - b);
+      for (const week of weeks) {
+        for (const team of teams) {
+          const roster = guestsByTeam.get(team.id) ?? [];
+          const lineupIds = new Set(rotateLineup(roster, week, FULL_LINEUP_SIZE).map((player) => player.id));
+          for (const player of roster) {
+            this.setCheckIn(player.id, week, lineupIds.has(player.id) ? 'in' : 'out');
+            checkIns += 1;
+          }
         }
       }
 
       let messages = 0;
       for (const team of teams) {
-        const teamGuests = guests.filter((g) => g.teamId === team.id);
+        const teamGuests = guestsByTeam.get(team.id) ?? [];
         if (teamGuests.length === 0) continue;
-        const count = 3 + Math.floor(rng() * 3); // 3–5
-        for (let m = 0; m < count; m++) {
+        const count = 4 + Math.floor(rng() * 4); // 4–7
+        for (let m = 0; m < count; m += 1) {
           const author = teamGuests[m % teamGuests.length];
           const text = SIM_CHAT_LINES[Math.floor(rng() * SIM_CHAT_LINES.length)];
           this.addTeamMessage({
@@ -2959,6 +3117,7 @@ export class LeagueStore {
       }
 
       const skill = new Map(teams.map((team, index) => [team.id, teams.length - index]));
+      const actorId = reviewer?.id ?? guests[0]?.id ?? 'u-sim-guest-1';
       let gamesPlayed = 0;
       for (const game of this.getSchedule()) {
         const homeSkill = skill.get(game.homeTeamId) ?? 4;
@@ -2970,17 +3129,22 @@ export class LeagueStore {
         } else if (homeScore === awayScore) {
           homeScore += 1;
         }
-        this.recordResult(game.id, homeScore, awayScore);
-        this.seedSimPlateAppearances(game.id, guests, homeScore, awayScore, rng);
+        this.recordResult(game.id, homeScore, awayScore, actorId);
+        this.seedSimGame(game, guestsByTeam, homeScore, awayScore, rng, actorId);
         gamesPlayed += 1;
       }
+
+      const invites = this.seedSimInvites(guests);
 
       return {
         alreadySeeded: false,
         guestsCreated: guests.length,
+        rosteredPlayers: rosteredCount,
+        freeAgents: SIM_FREE_AGENT_COUNT,
         checkIns,
         messages,
         gamesPlayed,
+        invites,
       } satisfies TestDataGenerateSummary;
     });
 
@@ -3008,6 +3172,9 @@ export class LeagueStore {
           .prepare(`DELETE FROM messages WHERE userId IN (${placeholders})`)
           .run(...ids).changes;
         this.db.prepare(`DELETE FROM game_plate_appearances WHERE playerId IN (${placeholders})`).run(...ids);
+        this.db
+          .prepare(`DELETE FROM fa_invites WHERE fromUserId IN (${placeholders}) OR toUserId IN (${placeholders})`)
+          .run(...ids, ...ids);
         this.db.prepare(`DELETE FROM users WHERE id IN (${placeholders})`).run(...ids);
       }
 
