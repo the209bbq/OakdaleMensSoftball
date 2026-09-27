@@ -31,7 +31,18 @@ export interface Game {
   week: number;
 }
 
-export type { GameBoxScore, ScoreSide, ScoreStat, ScoringPhase, ScoringWindow } from './gameScoring.js';
+import type { PlayerBattingLine } from './gameScoring.js';
+
+export type {
+  GameBoxScore,
+  GamePlay,
+  PlayerBattingLine,
+  PlayResult,
+  ScoreSide,
+  ScoreStat,
+  ScoringPhase,
+  ScoringWindow,
+} from './gameScoring.js';
 
 /** One batter in a game lineup (account member or unregistered roster row). */
 export interface LineupPlayer {
@@ -39,6 +50,7 @@ export interface LineupPlayer {
   name: string;
   number: number | null;
   position?: string;
+  stats?: PlayerBattingLine;
 }
 
 export interface GameLineup {
@@ -77,13 +89,7 @@ export type SkillLevel = (typeof SKILL_LEVELS)[number];
 
 export type WaiverStatus = 'none' | 'pending' | 'approved' | 'rejected';
 
-export interface PlayerStats {
-  gamesPlayed: number;
-  hits: number;
-  atBats: number;
-  /** Batting average as `.333` / `1.000`. */
-  average: string;
-}
+export type PlayerStats = import('./gameScoring.js').PlayerBattingLine;
 
 export interface TeamWeekGame {
   id: string;

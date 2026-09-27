@@ -672,6 +672,52 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
+  api.post('/games/:id/scorelog/play', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      if (!canScoreGame(req.user, game, store)) {
+        const owns = canManageGame(req.user, game);
+        res.status(403).json({
+          error: owns
+            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
+            : 'You can only keep score for your own games',
+        });
+        return;
+      }
+      store.recordPlay(game.id, req.body?.result, req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  api.post('/games/:id/scorelog/play/undo', requireAuth, (req: Request, res: Response) => {
+    try {
+      const game = store.getGame(req.params.id);
+      if (!game) {
+        res.status(404).json({ error: 'Game not found' });
+        return;
+      }
+      if (!canScoreGame(req.user, game, store)) {
+        const owns = canManageGame(req.user, game);
+        res.status(403).json({
+          error: owns
+            ? 'Scoring is closed for this game. Managers can keep score during the game and for 24 hours after.'
+            : 'You can only keep score for your own games',
+        });
+        return;
+      }
+      store.undoLastPlay(game.id, req.user!.id);
+      res.json(decorateGame(store, store.getGame(game.id)!, req.user));
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   api.post('/games/:id/scorelog/outs', requireAuth, (req: Request, res: Response) => {
     try {
       const game = store.getGame(req.params.id);
@@ -988,10 +1034,16 @@ function decorateGame(store: LeagueStore, game: Game, user?: PublicUser, attenda
     homeAttendance: attendance?.get(`${game.homeTeamId}:${game.week}`) ?? EMPTY_ATTENDANCE,
     awayAttendance: attendance?.get(`${game.awayTeamId}:${game.week}`) ?? EMPTY_ATTENDANCE,
     box: store.getGameBox(game, log),
-    lineups: {
-      away: store.buildGameLineup(game, game.awayTeamId, user),
-      home: store.buildGameLineup(game, game.homeTeamId, user),
-    },
+    plays: store.listGamePlays(game.id),
+    lineups: (() => {
+      const awayIds = store.getLineupSlots(game.id, game.awayTeamId).slots.map((slot) => slot.id);
+      const homeIds = store.getLineupSlots(game.id, game.homeTeamId).slots.map((slot) => slot.id);
+      const stats = store.getPlayerStatsMap([...awayIds, ...homeIds]);
+      return {
+        away: store.buildGameLineup(game, game.awayTeamId, user, Date.now(), stats),
+        home: store.buildGameLineup(game, game.homeTeamId, user, Date.now(), stats),
+      };
+    })(),
     scoring: {
       phase: window.phase,
       open: window.open,

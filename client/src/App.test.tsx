@@ -54,25 +54,26 @@ const scheduleGames = [
       away: {
         teamId: 'beers',
         slots: [
-          { id: 'u-pat', name: 'Pat Lead', number: 1 },
-          { id: 'u-chris', name: 'Chris Deck', number: 2 },
+          { id: 'u-pat', name: 'Pat Lead', number: 1, stats: { gamesPlayed: 1, hits: 1, atBats: 2, average: '.500', singles: 1, doubles: 0, triples: 0, homers: 0, strikeouts: 0, outs: 1 } },
+          { id: 'u-chris', name: 'Chris Deck', number: 2, stats: { gamesPlayed: 1, hits: 0, atBats: 1, average: '.000', singles: 0, doubles: 0, triples: 0, homers: 0, strikeouts: 1, outs: 0 } },
         ],
-        atBat: { id: 'u-pat', name: 'Pat Lead', number: 1 },
-        onDeck: { id: 'u-chris', name: 'Chris Deck', number: 2 },
+        atBat: { id: 'u-pat', name: 'Pat Lead', number: 1, stats: { gamesPlayed: 1, hits: 1, atBats: 2, average: '.500', singles: 1, doubles: 0, triples: 0, homers: 0, strikeouts: 0, outs: 1 } },
+        onDeck: { id: 'u-chris', name: 'Chris Deck', number: 2, stats: { gamesPlayed: 1, hits: 0, atBats: 1, average: '.000', singles: 0, doubles: 0, triples: 0, homers: 0, strikeouts: 1, outs: 0 } },
         canEdit: false,
         locksAt: '2026-05-05T18:00:00.000Z',
         saved: true,
       },
       home: {
         teamId: 'tigers',
-        slots: [{ id: 'u-david', name: 'David', number: 11 }],
-        atBat: { id: 'u-david', name: 'David', number: 11 },
-        onDeck: { id: 'u-david', name: 'David', number: 11 },
+        slots: [{ id: 'u-david', name: 'David', number: 11, stats: { gamesPlayed: 0, hits: 0, atBats: 0, average: '.000', singles: 0, doubles: 0, triples: 0, homers: 0, strikeouts: 0, outs: 0 } }],
+        atBat: { id: 'u-david', name: 'David', number: 11, stats: { gamesPlayed: 0, hits: 0, atBats: 0, average: '.000', singles: 0, doubles: 0, triples: 0, homers: 0, strikeouts: 0, outs: 0 } },
+        onDeck: { id: 'u-david', name: 'David', number: 11, stats: { gamesPlayed: 0, hits: 0, atBats: 0, average: '.000', singles: 0, doubles: 0, triples: 0, homers: 0, strikeouts: 0, outs: 0 } },
         canEdit: false,
         locksAt: '2026-05-05T18:00:00.000Z',
         saved: true,
       },
     },
+    plays: [],
   },
 ];
 
@@ -166,7 +167,7 @@ const playerProfile = {
   phone: null,
   sharePhone: false,
   canSeePhone: false,
-  stats: { gamesPlayed: 2, hits: 5, atBats: 12, average: '.417' },
+  stats: { gamesPlayed: 2, hits: 5, atBats: 12, average: '.417', singles: 3, doubles: 1, triples: 0, homers: 1, strikeouts: 2, outs: 5 },
 };
 
 function jsonOk(data: unknown) {
@@ -508,6 +509,102 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Live box score')).toHaveTextContent(/0\s*LIVE\s*1/);
     });
+    expect(screen.getByRole('button', { name: 'Record Single' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Record Double' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Record Triple' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Record HR' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Record Out' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Record K' })).toBeInTheDocument();
+  });
+
+  it('records a play, appends it to the log, and shows lineup stat lines', async () => {
+    const managerUser = {
+      id: 'u-mgr',
+      email: 'manager@oakdale.local',
+      name: 'David',
+      role: 'manager' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const liveGame = {
+      ...scheduleGames[0],
+      scoring: {
+        ...scheduleGames[0].scoring!,
+        phase: 'live' as const,
+        open: true,
+        liveStartedAt: '2026-09-26T19:00:00.000Z',
+        canStart: false,
+        canScore: true,
+      },
+    };
+    const afterSingle = {
+      ...liveGame,
+      box: { ...liveGame.box!, awayHits: 1 },
+      plays: [
+        {
+          id: 1,
+          playerId: 'u-pat',
+          name: 'Pat Lead',
+          result: 'single' as const,
+          side: 'away' as const,
+          inning: 1,
+          half: 'top' as const,
+          createdAt: '2026-09-26T19:01:00.000Z',
+        },
+      ],
+      lineups: {
+        ...liveGame.lineups!,
+        away: {
+          ...liveGame.lineups!.away,
+          atBat: liveGame.lineups!.away.slots[1],
+          onDeck: liveGame.lineups!.away.slots[0],
+          slots: [
+            {
+              ...liveGame.lineups!.away.slots[0],
+              stats: { gamesPlayed: 1, hits: 2, atBats: 3, average: '.667', singles: 2, doubles: 0, triples: 0, homers: 0, strikeouts: 0, outs: 1 },
+            },
+            liveGame.lineups!.away.slots[1],
+          ],
+        },
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: managerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/scorelog/play') && init?.method === 'POST') return jsonOk(afterSingle);
+        if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) return jsonOk(liveGame);
+        if (url.includes('/api/schedule')) return jsonOk([liveGame]);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/messages')) return jsonOk([]);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Week 1 — Wed May 6/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /open game: da beers at oakdale tigers/i })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Record Single' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('No plays yet. Tap a result to add it to the log.')).toBeInTheDocument();
+    expect(screen.getAllByText('GP 1 · H 1 · AB 2 · .500').length).toBeGreaterThan(0);
+    expect(screen.getByText('1B 1 · 2B 0 · 3B 0 · HR 0 · K 0 · Out 1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Record Single' }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Play by play')).toHaveTextContent('Pat Lead');
+    });
+    expect(screen.getByLabelText('Play by play')).toHaveTextContent('Single');
+    expect(screen.getByLabelText('Play by play')).toHaveTextContent('Top 1');
+    expect(screen.getByText('GP 1 · H 2 · AB 3 · .667')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Undo last play' })).toBeEnabled();
   });
 
   it('lets a manager reorder and save their lineup', async () => {

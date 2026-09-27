@@ -154,7 +154,18 @@ describe('Player profiles, phone, waivers, and invites', () => {
     expect(guest.status).toBe(200);
     expect(guest.body.phone).toBeNull();
     expect(guest.body.canSeePhone).toBe(false);
-    expect(guest.body.stats).toEqual({ gamesPlayed: 0, hits: 0, atBats: 0, average: '.000' });
+    expect(guest.body.stats).toEqual({
+      gamesPlayed: 0,
+      hits: 0,
+      atBats: 0,
+      average: '.000',
+      singles: 0,
+      doubles: 0,
+      triples: 0,
+      homers: 0,
+      strikeouts: 0,
+      outs: 0,
+    });
 
     const asOther = await loginAs(app, 'q@b.com', 'longenough');
     const hidden = await asOther.get(`/api/players/${player.id}`);
@@ -2373,12 +2384,126 @@ describe('Game lineups', () => {
 
     const patStats = (await admin.get(`/api/players/${pat.id}`)).body.stats;
     const chrisStats = (await admin.get(`/api/players/${chris.id}`)).body.stats;
-    expect(patStats).toEqual({ gamesPlayed: 1, hits: 2, atBats: 2, average: '1.000' });
-    expect(chrisStats).toEqual({ gamesPlayed: 1, hits: 0, atBats: 1, average: '.000' });
+    expect(patStats).toEqual({
+      gamesPlayed: 1,
+      hits: 2,
+      atBats: 2,
+      average: '1.000',
+      singles: 2,
+      doubles: 0,
+      triples: 0,
+      homers: 0,
+      strikeouts: 0,
+      outs: 0,
+    });
+    expect(chrisStats).toEqual({
+      gamesPlayed: 1,
+      hits: 0,
+      atBats: 1,
+      average: '.000',
+      singles: 0,
+      doubles: 0,
+      triples: 0,
+      homers: 0,
+      strikeouts: 0,
+      outs: 1,
+    });
 
     await admin.post(`/api/games/${ownGame.id}/scorelog/stat`).send({ side, stat: 'hits', delta: -1 });
     const afterUndo = (await admin.get(`/api/players/${pat.id}`)).body.stats;
-    expect(afterUndo).toEqual({ gamesPlayed: 1, hits: 1, atBats: 1, average: '1.000' });
+    expect(afterUndo).toEqual({
+      gamesPlayed: 1,
+      hits: 1,
+      atBats: 1,
+      average: '1.000',
+      singles: 1,
+      doubles: 0,
+      triples: 0,
+      homers: 0,
+      strikeouts: 0,
+      outs: 0,
+    });
+  });
+
+  it('records each play type, undoes the last play, and updates lineup stat lines', async () => {
+    const { app, store } = makeApp();
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+    const gen = await admin.post('/api/schedule/generate').send({ startDate: '2027-05-05' });
+    const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
+    const ownGame = games.find((g) => g.awayTeamId === TEAM_OWN || g.homeTeamId === TEAM_OWN)!;
+    store.registerUser({ email: 'log.1@b.com', name: 'Ada Lead', password: 'longenough' });
+    store.registerUser({ email: 'log.2@b.com', name: 'Beau Deck', password: 'longenough' });
+    const ada = store.getUserByEmail('log.1@b.com')!;
+    const beau = store.getUserByEmail('log.2@b.com')!;
+    store.setUserTeam(ada.id, TEAM_OWN);
+    store.setUserTeam(beau.id, TEAM_OWN);
+    await admin.put(`/api/games/${ownGame.id}/lineups/${TEAM_OWN}`).send({ playerIds: [ada.id, beau.id] });
+    await admin.post(`/api/games/${ownGame.id}/scorelog/start`);
+    const side = ownGame.awayTeamId === TEAM_OWN ? 'away' : 'home';
+    if (side === 'home') {
+      await admin.post(`/api/games/${ownGame.id}/scorelog/outs`).send({ delta: 3 });
+    }
+
+    const results = ['single', 'double', 'triple', 'homer', 'out', 'strikeout'] as const;
+    let last = await admin.get(`/api/games/${ownGame.id}`);
+    for (const result of results) {
+      last = await admin.post(`/api/games/${ownGame.id}/scorelog/play`).send({ result });
+      expect(last.status).toBe(200);
+    }
+
+    const scored = last.body.plays.filter((play: { side: string }) => play.side === side);
+    expect(scored).toHaveLength(6);
+    expect(scored.map((play: { result: string }) => play.result)).toEqual([...results]);
+    expect(scored[0]).toMatchObject({
+      playerId: ada.id,
+      name: 'Ada Lead',
+      result: 'single',
+      side,
+    });
+    expect(scored[0].inning).toBeGreaterThanOrEqual(1);
+    expect(scored[0].half).toMatch(/top|bottom/);
+
+    const boxHits = side === 'home' ? last.body.box.homeHits : last.body.box.awayHits;
+    expect(boxHits).toBe(4);
+    expect(last.body.lineups[side].atBat.name).toBe('Ada Lead');
+
+    const adaLine = last.body.lineups[side].slots.find((slot: { id: string }) => slot.id === ada.id).stats;
+    const beauLine = last.body.lineups[side].slots.find((slot: { id: string }) => slot.id === beau.id).stats;
+    expect(adaLine).toMatchObject({
+      gamesPlayed: 1,
+      hits: 2,
+      atBats: 3,
+      average: '.667',
+      singles: 1,
+      doubles: 0,
+      triples: 1,
+      homers: 0,
+      outs: 1,
+    });
+    expect(beauLine).toMatchObject({
+      gamesPlayed: 1,
+      hits: 2,
+      atBats: 3,
+      average: '.667',
+      doubles: 1,
+      homers: 1,
+      strikeouts: 1,
+    });
+
+    const profile = (await admin.get(`/api/players/${ada.id}`)).body.stats;
+    expect(profile).toMatchObject({ gamesPlayed: 1, hits: 2, atBats: 3, average: '.667', singles: 1, triples: 1, outs: 1 });
+
+    const undone = await admin.post(`/api/games/${ownGame.id}/scorelog/play/undo`);
+    expect(undone.status).toBe(200);
+    expect(undone.body.plays.filter((play: { side: string }) => play.side === side)).toHaveLength(5);
+    expect(undone.body.lineups[side].atBat.name).toBe('Beau Deck');
+    const beauAfter = undone.body.lineups[side].slots.find((slot: { id: string }) => slot.id === beau.id).stats;
+    expect(beauAfter).toMatchObject({ hits: 2, atBats: 2, average: '1.000', strikeouts: 0, homers: 1 });
+    const afterUndoHits = side === 'home' ? undone.body.box.homeHits : undone.body.box.awayHits;
+    expect(afterUndoHits).toBe(4);
+
+    const bad = await admin.post(`/api/games/${ownGame.id}/scorelog/play`).send({ result: 'walk' });
+    expect(bad.status).toBe(400);
   });
 });
 

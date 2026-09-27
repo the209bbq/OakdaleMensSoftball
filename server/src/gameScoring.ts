@@ -9,6 +9,34 @@ export type ScoringPhase = 'upcoming' | 'live' | 'grace' | 'locked';
 export type ScoreSide = 'home' | 'away';
 export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs';
 export type InningHalf = 'top' | 'bottom';
+export const PLAY_RESULTS = ['single', 'double', 'triple', 'homer', 'out', 'strikeout'] as const;
+export type PlayResult = (typeof PLAY_RESULTS)[number];
+/** Walk stays on the board as a non-AB; `hit` is a legacy alias for a single. */
+export type StoredPlayResult = PlayResult | 'walk';
+
+export interface PlayerBattingLine {
+  gamesPlayed: number;
+  hits: number;
+  atBats: number;
+  average: string;
+  singles: number;
+  doubles: number;
+  triples: number;
+  homers: number;
+  strikeouts: number;
+  outs: number;
+}
+
+export interface GamePlay {
+  id: number;
+  playerId: string;
+  name: string;
+  result: StoredPlayResult;
+  side: ScoreSide;
+  inning: number | null;
+  half: InningHalf | null;
+  createdAt: string;
+}
 
 /** Men's softball is seven innings; extras are appended as the game continues. */
 export const REGULATION_INNINGS = 7;
@@ -320,6 +348,110 @@ export function formatBattingAverage(hits: number, atBats: number): string {
   const avg = h / ab;
   if (avg >= 1) return avg.toFixed(3);
   return `.${Math.round(avg * 1000).toString().padStart(3, '0')}`;
+}
+
+export function emptyBattingLine(): PlayerBattingLine {
+  return {
+    gamesPlayed: 0,
+    hits: 0,
+    atBats: 0,
+    average: '.000',
+    singles: 0,
+    doubles: 0,
+    triples: 0,
+    homers: 0,
+    strikeouts: 0,
+    outs: 0,
+  };
+}
+
+export function normalizePlayResult(raw: unknown): StoredPlayResult | null {
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+  if (value === 'single' || value === '1b' || value === 'hit') return 'single';
+  if (value === 'double' || value === '2b') return 'double';
+  if (value === 'triple' || value === '3b') return 'triple';
+  if (value === 'homer' || value === 'hr' || value === 'homerun') return 'homer';
+  if (value === 'out') return 'out';
+  if (value === 'strikeout' || value === 'k' || value === 'so') return 'strikeout';
+  if (value === 'walk' || value === 'bb') return 'walk';
+  return null;
+}
+
+export function isLivePlayResult(result: string): result is PlayResult {
+  return (PLAY_RESULTS as readonly string[]).includes(result);
+}
+
+export function isHitResult(result: string): boolean {
+  return result === 'single' || result === 'double' || result === 'triple' || result === 'homer' || result === 'hit';
+}
+
+export function isOutResult(result: string): boolean {
+  return result === 'out' || result === 'strikeout';
+}
+
+export function isAtBatResult(result: string): boolean {
+  return isHitResult(result) || isOutResult(result);
+}
+
+export function tallyBattingLine(
+  rows: Array<{ gameId: string; result: string }>,
+): PlayerBattingLine {
+  const games = new Set<string>();
+  const line = emptyBattingLine();
+  for (const row of rows) {
+    const result = normalizePlayResult(row.result) ?? row.result;
+    if (result === 'walk') {
+      games.add(row.gameId);
+      continue;
+    }
+    if (!isAtBatResult(result)) continue;
+    games.add(row.gameId);
+    line.atBats += 1;
+    if (result === 'single') {
+      line.singles += 1;
+      line.hits += 1;
+    } else if (result === 'double') {
+      line.doubles += 1;
+      line.hits += 1;
+    } else if (result === 'triple') {
+      line.triples += 1;
+      line.hits += 1;
+    } else if (result === 'homer') {
+      line.homers += 1;
+      line.hits += 1;
+    } else if (result === 'strikeout') {
+      line.strikeouts += 1;
+    } else if (result === 'out') {
+      line.outs += 1;
+    }
+  }
+  line.gamesPlayed = games.size;
+  line.average = formatBattingAverage(line.hits, line.atBats);
+  return line;
+}
+
+export function playLabel(result: string): string {
+  switch (normalizePlayResult(result)) {
+    case 'single':
+      return 'Single';
+    case 'double':
+      return 'Double';
+    case 'triple':
+      return 'Triple';
+    case 'homer':
+      return 'Home run';
+    case 'out':
+      return 'Out';
+    case 'strikeout':
+      return 'Strikeout';
+    case 'walk':
+      return 'Walk';
+    default:
+      return String(result ?? '');
+  }
 }
 
 export function lineupLocksAtMs(scheduledMs: number | null): number | null {

@@ -25,11 +25,39 @@ export type ScoreSide = 'home' | 'away';
 export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs';
 export type InningHalf = 'top' | 'bottom';
 
+export interface PlayerBattingLine {
+  gamesPlayed: number;
+  hits: number;
+  atBats: number;
+  average: string;
+  singles?: number;
+  doubles?: number;
+  triples?: number;
+  homers?: number;
+  strikeouts?: number;
+  outs?: number;
+}
+
+export type PlayResult = 'single' | 'double' | 'triple' | 'homer' | 'out' | 'strikeout';
+export type StoredPlayResult = PlayResult | 'walk';
+
+export interface GamePlay {
+  id: number;
+  playerId: string;
+  name: string;
+  result: StoredPlayResult;
+  side: ScoreSide;
+  inning: number | null;
+  half: InningHalf | null;
+  createdAt: string;
+}
+
 export interface LineupPlayer {
   id: string;
   name: string;
   number: number | null;
   position?: string;
+  stats?: PlayerBattingLine;
 }
 
 export interface GameLineup {
@@ -89,6 +117,7 @@ export interface Game {
   box?: GameBoxScore;
   scoring?: GameScoring;
   lineups?: { away: GameLineup; home: GameLineup };
+  plays?: GamePlay[];
 }
 
 export interface StandingRow {
@@ -139,12 +168,7 @@ export const WAIVER_STATUS_LABELS: Record<WaiverStatus, string> = {
   rejected: 'Needs a new waiver',
 };
 
-export interface PlayerStats {
-  gamesPlayed: number;
-  hits: number;
-  atBats: number;
-  average: string;
-}
+export type PlayerStats = PlayerBattingLine;
 
 export interface TeamWeekGame {
   id: string;
@@ -374,6 +398,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ side, inning, delta }),
     }),
+  recordPlay: (gameId: string, result: PlayResult) =>
+    request<Game>(`/api/games/${gameId}/scorelog/play`, {
+      method: 'POST',
+      body: JSON.stringify({ result }),
+    }),
+  undoLastPlay: (gameId: string) =>
+    request<Game>(`/api/games/${gameId}/scorelog/play/undo`, { method: 'POST' }),
   saveLineup: (gameId: string, teamId: string, playerIds: string[]) =>
     request<Game>(`/api/games/${gameId}/lineups/${teamId}`, {
       method: 'PUT',

@@ -16,6 +16,7 @@ import type {
   ManagerAuthorization,
   Player,
   PlayerAccount,
+  PlayerBattingLine,
   PlayerStats,
   PublicPlayerProfile,
   PublicUser,
@@ -33,6 +34,14 @@ import type {
   WaiverStatus,
 } from './types.js';
 import { SKILL_LEVELS } from './types.js';
+import {
+  buildPlayerStatsWorkbook,
+  envSpreadsheetId,
+  parseSheetsSettings,
+  type PlayerStatsWorkbook,
+  type SheetPlayerInput,
+  type SheetsSettings,
+} from './playerStatsSheet.js';
 import { createSeedData } from './seed.js';
 import { DEFAULT_LOCATION, generateRoundRobin, type GenerateOptions } from './schedule.js';
 import { hashPassword, verifyPassword } from './auth.js';
@@ -51,10 +60,14 @@ import {
   canEditLineup,
   clampStat,
   combineGameDateTime,
+  emptyBattingLine,
   emptyLine,
-  formatBattingAverage,
+  isHitResult,
+  isLivePlayResult,
+  isOutResult,
   lineForDisplay,
   lineupLocksAt,
+  normalizePlayResult,
   parseHalf,
   parseLine,
   parsePlayerIds,
@@ -62,11 +75,14 @@ import {
   stepBatterIndex,
   stepHalfInning,
   sumLine,
+  tallyBattingLine,
   wrapBatterIndex,
   type GameBoxScore,
+  type GamePlay,
   type InningHalf,
   type ScoreSide,
   type ScoreStat,
+  type StoredPlayResult,
 } from './gameScoring.js';
 
 export { combineGameDateTime };
@@ -230,7 +246,9 @@ CREATE TABLE IF NOT EXISTS game_plate_appearances (
   playerId TEXT NOT NULL,
   teamId TEXT NOT NULL,
   side TEXT NOT NULL,
-  result TEXT NOT NULL CHECK (result IN ('hit', 'walk', 'out')),
+  result TEXT NOT NULL,
+  inning INTEGER,
+  half TEXT,
   createdAt TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pa_player ON game_plate_appearances (playerId);
@@ -1077,6 +1095,93 @@ export class LeagueStore {
     return this.getTheme();
   }
 
+  getSheetsSettings(): SheetsSettings {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'sheets'").get() as
+      | { value: string }
+      | undefined;
+    return parseSheetsSettings(row?.value, envSpreadsheetId());
+  }
+
+  setSheetsSettings(partial: Partial<SheetsSettings>): SheetsSettings {
+    const next = { ...this.getSheetsSettings(), ...partial };
+    if (partial.spreadsheetId !== undefined) {
+      const id = String(partial.spreadsheetId ?? '').trim();
+      next.spreadsheetId = id || envSpreadsheetId();
+    }
+    this.db
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('sheets', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(JSON.stringify(next));
+    return next;
+  }
+
+  /**
+   * Account members on a roster, unregistered `players` rows, and free agents.
+   * Manager-only accounts and admins are omitted.
+   */
+  collectSheetPlayers(): SheetPlayerInput[] {
+    const teams = this.getTeams();
+    const seen = new Set<string>();
+    const players: SheetPlayerInput[] = [];
+
+    for (const team of teams) {
+      for (const member of this.getTeamMembers(team.id)) {
+        if (seen.has(member.id)) continue;
+        seen.add(member.id);
+        players.push({
+          id: member.id,
+          name: member.name,
+          number: member.number,
+          position: member.position,
+          teamId: team.id,
+          teamName: team.name,
+        });
+      }
+      for (const roster of this.getRoster(team.id)) {
+        if (seen.has(roster.id)) continue;
+        seen.add(roster.id);
+        players.push({
+          id: roster.id,
+          name: roster.name,
+          number: roster.number,
+          position: roster.position,
+          teamId: team.id,
+          teamName: team.name,
+        });
+      }
+    }
+
+    for (const agent of this.getFreeAgents()) {
+      if (seen.has(agent.id)) continue;
+      seen.add(agent.id);
+      players.push({
+        id: agent.id,
+        name: agent.name,
+        number: agent.number ?? null,
+        position: agent.position,
+        teamId: null,
+        teamName: null,
+      });
+    }
+
+    const stats = this.getPlayerStatsMap(players.map((player) => player.id));
+    return players.map((player) => ({
+      ...player,
+      stats: stats.get(player.id) ?? emptyBattingLine(),
+    }));
+  }
+
+  buildPlayerStatsWorkbook(updatedAt = new Date().toISOString()): PlayerStatsWorkbook {
+    const settings = this.getSheetsSettings();
+    return buildPlayerStatsWorkbook({
+      teams: this.getTeams(),
+      players: this.collectSheetPlayers(),
+      spreadsheetId: settings.spreadsheetId,
+      updatedAt,
+    });
+  }
+
   /** Earliest scheduled game as a naive local datetime, or null if none. */
   private earliestGameDateTime(): string | null {
     const rows = this.db.prepare('SELECT date, time FROM games').all() as Array<{ date: string; time: string }>;
@@ -1217,8 +1322,18 @@ export class LeagueStore {
     return { slots: candidates, saved: false };
   }
 
-  buildGameLineup(game: Game, teamId: string, user?: PublicUser | null, nowMs = Date.now()): GameLineup {
-    const { slots, saved } = this.getLineupSlots(game.id, teamId);
+  buildGameLineup(
+    game: Game,
+    teamId: string,
+    user?: PublicUser | null,
+    nowMs = Date.now(),
+    statsByPlayer?: Map<string, PlayerBattingLine>,
+  ): GameLineup {
+    const { slots: rawSlots, saved } = this.getLineupSlots(game.id, teamId);
+    const slots = rawSlots.map((slot) => ({
+      ...slot,
+      stats: statsByPlayer?.get(slot.id) ?? emptyBattingLine(),
+    }));
     const log = this.getGameLog(game.id);
     const index =
       teamId === game.homeTeamId ? (log?.homeBatterIndex ?? 0) : teamId === game.awayTeamId ? (log?.awayBatterIndex ?? 0) : 0;
@@ -1367,11 +1482,11 @@ export class LeagueStore {
         if (stat === 'hits' || stat === 'walks') {
           const length = this.lineupLength(gameId, side === 'home' ? game.homeTeamId : game.awayTeamId);
           const indexCol = side === 'home' ? 'homeBatterIndex' : 'awayBatterIndex';
-          const paResult = stat === 'hits' ? 'hit' : 'walk';
+          const paResult: StoredPlayResult = stat === 'hits' ? 'single' : 'walk';
           let index = log[indexCol];
           if (step > 0) {
             for (let i = 0; i < step; i += 1) {
-              this.creditBatter(game, side, paResult, index);
+              this.creditBatter(game, side, paResult, index, log.currentInning, log.currentHalf);
               index = stepBatterIndex(index, length, 1);
             }
           } else {
@@ -1381,6 +1496,7 @@ export class LeagueStore {
           }
           const nextIndex = stepBatterIndex(log[indexCol], length, step);
           this.db.prepare(`UPDATE game_logs SET ${indexCol} = ? WHERE gameId = ?`).run(nextIndex, gameId);
+          if (stat === 'hits') this.syncHitsFromPlays(gameId);
         }
       }
       this.db
@@ -1414,7 +1530,7 @@ export class LeagueStore {
         let outs = log.currentOuts;
         for (let i = 0; i < step; i += 1) {
           const side = batterSide(half);
-          this.creditBatter(game, side, 'out', side === 'home' ? homeIndex : awayIndex);
+          this.creditBatter(game, side, 'out', side === 'home' ? homeIndex : awayIndex, inning, half);
           if (half === 'top') awayIndex = stepBatterIndex(awayIndex, awayLen, 1);
           else homeIndex = stepBatterIndex(homeIndex, homeLen, 1);
           const flipped = stepHalfInning(inning, half, outs, 1);
@@ -1552,9 +1668,48 @@ export class LeagueStore {
         playerId TEXT NOT NULL,
         teamId TEXT NOT NULL,
         side TEXT NOT NULL,
-        result TEXT NOT NULL CHECK (result IN ('hit', 'walk', 'out')),
+        result TEXT NOT NULL,
+        inning INTEGER,
+        half TEXT,
         createdAt TEXT NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS idx_pa_player ON game_plate_appearances (playerId);
+      CREATE INDEX IF NOT EXISTS idx_pa_game ON game_plate_appearances (gameId);
+    `);
+    const master = this.db
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'game_plate_appearances'`)
+      .get() as { sql: string } | undefined;
+    const cols = new Set(
+      (this.db.prepare('PRAGMA table_info(game_plate_appearances)').all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    const restrictive = Boolean(master?.sql?.includes('CHECK') && !master.sql.includes('single'));
+    if (restrictive || !cols.has('inning') || !cols.has('half')) {
+      this.rebuildPlateAppearancesTable();
+    } else {
+      this.db.prepare(`UPDATE game_plate_appearances SET result = 'single' WHERE result = 'hit'`).run();
+    }
+  }
+
+  private rebuildPlateAppearancesTable(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS game_plate_appearances_v2 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gameId TEXT NOT NULL,
+        playerId TEXT NOT NULL,
+        teamId TEXT NOT NULL,
+        side TEXT NOT NULL,
+        result TEXT NOT NULL,
+        inning INTEGER,
+        half TEXT,
+        createdAt TEXT NOT NULL
+      );
+      INSERT INTO game_plate_appearances_v2 (id, gameId, playerId, teamId, side, result, inning, half, createdAt)
+      SELECT id, gameId, playerId, teamId, side,
+        CASE result WHEN 'hit' THEN 'single' ELSE result END,
+        NULL, NULL, createdAt
+      FROM game_plate_appearances;
+      DROP TABLE game_plate_appearances;
+      ALTER TABLE game_plate_appearances_v2 RENAME TO game_plate_appearances;
       CREATE INDEX IF NOT EXISTS idx_pa_player ON game_plate_appearances (playerId);
       CREATE INDEX IF NOT EXISTS idx_pa_game ON game_plate_appearances (gameId);
     `);
@@ -1569,46 +1724,226 @@ export class LeagueStore {
     playerId: string,
     teamId: string,
     side: ScoreSide,
-    result: 'hit' | 'walk' | 'out',
+    result: StoredPlayResult,
+    inning?: number | null,
+    half?: InningHalf | null,
   ): void {
     this.db
       .prepare(
-        `INSERT INTO game_plate_appearances (gameId, playerId, teamId, side, result, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO game_plate_appearances (gameId, playerId, teamId, side, result, inning, half, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(gameId, playerId, teamId, side, result, new Date().toISOString());
+      .run(gameId, playerId, teamId, side, result, inning ?? null, half ?? null, new Date().toISOString());
   }
 
-  private popLastPlateAppearance(gameId: string, result: 'hit' | 'walk' | 'out', side?: ScoreSide): void {
+  private popLastPlateAppearance(gameId: string, result: StoredPlayResult, side?: ScoreSide): void {
+    const results =
+      result === 'single'
+        ? ['single', 'hit', 'double', 'triple', 'homer']
+        : result === 'out'
+          ? ['out', 'strikeout']
+          : [result];
+    const placeholders = results.map(() => '?').join(', ');
     const row = side
       ? (this.db
           .prepare(
             `SELECT id FROM game_plate_appearances
-             WHERE gameId = ? AND result = ? AND side = ?
+             WHERE gameId = ? AND result IN (${placeholders}) AND side = ?
              ORDER BY id DESC LIMIT 1`,
           )
-          .get(gameId, result, side) as { id: number } | undefined)
+          .get(gameId, ...results, side) as { id: number } | undefined)
       : (this.db
           .prepare(
             `SELECT id FROM game_plate_appearances
-             WHERE gameId = ? AND result = ?
+             WHERE gameId = ? AND result IN (${placeholders})
              ORDER BY id DESC LIMIT 1`,
           )
-          .get(gameId, result) as { id: number } | undefined);
+          .get(gameId, ...results) as { id: number } | undefined);
     if (row) this.db.prepare('DELETE FROM game_plate_appearances WHERE id = ?').run(row.id);
   }
 
   private creditBatter(
     game: Game,
     side: ScoreSide,
-    result: 'hit' | 'walk' | 'out',
+    result: StoredPlayResult,
     batterIndex: number,
+    inning?: number | null,
+    half?: InningHalf | null,
   ): void {
     const teamId = side === 'home' ? game.homeTeamId : game.awayTeamId;
     const slots = this.lineupSlots(game.id, teamId);
     if (slots.length === 0) return;
     const batter = slots[wrapBatterIndex(batterIndex, slots.length)];
-    if (batter) this.recordPlateAppearance(game.id, batter.id, teamId, side, result);
+    if (batter) this.recordPlateAppearance(game.id, batter.id, teamId, side, result, inning, half);
+  }
+
+  private syncHitsFromPlays(gameId: string): void {
+    const rows = this.db
+      .prepare(`SELECT side, result FROM game_plate_appearances WHERE gameId = ?`)
+      .all(gameId) as Array<{ side: string; result: string }>;
+    let homeHits = 0;
+    let awayHits = 0;
+    for (const row of rows) {
+      const result = normalizePlayResult(row.result) ?? row.result;
+      if (!isHitResult(result)) continue;
+      if (row.side === 'home') homeHits += 1;
+      else awayHits += 1;
+    }
+    this.db.prepare('UPDATE game_logs SET homeHits = ?, awayHits = ? WHERE gameId = ?').run(homeHits, awayHits, gameId);
+  }
+
+  listGamePlays(gameId: string): GamePlay[] {
+    const rows = this.db
+      .prepare(
+        `SELECT pa.id, pa.playerId, pa.teamId, pa.side, pa.result, pa.inning, pa.half, pa.createdAt,
+                COALESCE(u.name, p.name, 'Unknown') AS name
+         FROM game_plate_appearances pa
+         LEFT JOIN users u ON u.id = pa.playerId
+         LEFT JOIN players p ON p.id = pa.playerId
+         WHERE pa.gameId = ?
+         ORDER BY pa.id ASC`,
+      )
+      .all(gameId) as Array<{
+      id: number;
+      playerId: string;
+      teamId: string;
+      side: string;
+      result: string;
+      inning: number | null;
+      half: string | null;
+      createdAt: string;
+      name: string;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      playerId: row.playerId,
+      name: row.name,
+      result: (normalizePlayResult(row.result) ?? 'out') as StoredPlayResult,
+      side: row.side === 'home' ? 'home' : 'away',
+      inning: row.inning == null ? null : Math.max(1, clampStat(row.inning) || 1),
+      half: row.half === 'bottom' ? 'bottom' : row.half === 'top' ? 'top' : null,
+      createdAt: row.createdAt,
+    }));
+  }
+
+  recordPlay(gameId: string, rawResult: unknown, userId: string): Game {
+    const play = normalizePlayResult(rawResult);
+    if (!play || !isLivePlayResult(play)) {
+      throw new Error('Play must be single, double, triple, homer, out, or strikeout');
+    }
+    const game = this.getGame(gameId);
+    if (!game) throw new Error(`Unknown game: ${gameId}`);
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.ensureGameLog(gameId);
+      const log = this.getGameLog(gameId)!;
+      const side = batterSide(log.currentHalf);
+      const teamId = side === 'home' ? game.homeTeamId : game.awayTeamId;
+      const slots = this.lineupSlots(gameId, teamId);
+      if (slots.length === 0) {
+        throw new Error("Set the batting team's lineup before recording plays.");
+      }
+      const awayLen = this.lineupLength(gameId, game.awayTeamId);
+      const homeLen = this.lineupLength(gameId, game.homeTeamId);
+      const index = side === 'home' ? log.homeBatterIndex : log.awayBatterIndex;
+      this.creditBatter(game, side, play, index, log.currentInning, log.currentHalf);
+      if (isHitResult(play)) {
+        const length = side === 'home' ? homeLen : awayLen;
+        const indexCol = side === 'home' ? 'homeBatterIndex' : 'awayBatterIndex';
+        const nextIndex = stepBatterIndex(index, length, 1);
+        this.db
+          .prepare(`UPDATE game_logs SET ${indexCol} = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?`)
+          .run(nextIndex, now, userId, gameId);
+        this.syncHitsFromPlays(gameId);
+      } else {
+        const next = this.stepOutsAndBatters(log, awayLen, homeLen, 1);
+        const awayLine = lineForDisplay(log.awayLine, next.inning, log.homeLine);
+        const homeLine = lineForDisplay(log.homeLine, next.inning, awayLine);
+        this.db
+          .prepare(
+            `UPDATE game_logs SET currentOuts = ?, currentInning = ?, currentHalf = ?,
+             awayBatterIndex = ?, homeBatterIndex = ?,
+             awayLine = ?, homeLine = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?`,
+          )
+          .run(
+            next.outs,
+            next.inning,
+            next.half,
+            next.awayBatterIndex,
+            next.homeBatterIndex,
+            JSON.stringify(awayLine),
+            JSON.stringify(homeLine),
+            now,
+            userId,
+            gameId,
+          );
+      }
+    });
+    tx();
+    return this.getGame(gameId)!;
+  }
+
+  undoLastPlay(gameId: string, userId: string): Game {
+    const game = this.getGame(gameId);
+    if (!game) throw new Error(`Unknown game: ${gameId}`);
+    const last = this.db
+      .prepare(
+        `SELECT id, side, result FROM game_plate_appearances WHERE gameId = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get(gameId) as { id: number; side: string; result: string } | undefined;
+    if (!last) return game;
+    const result = normalizePlayResult(last.result) ?? last.result;
+    const side: ScoreSide = last.side === 'home' ? 'home' : 'away';
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.ensureGameLog(gameId);
+      this.db.prepare('DELETE FROM game_plate_appearances WHERE id = ?').run(last.id);
+      const log = this.getGameLog(gameId)!;
+      const awayLen = this.lineupLength(gameId, game.awayTeamId);
+      const homeLen = this.lineupLength(gameId, game.homeTeamId);
+      if (isOutResult(result)) {
+        const next = this.stepOutsAndBatters(log, awayLen, homeLen, -1);
+        const awayLine = lineForDisplay(log.awayLine, next.inning, log.homeLine);
+        const homeLine = lineForDisplay(log.homeLine, next.inning, awayLine);
+        this.db
+          .prepare(
+            `UPDATE game_logs SET currentOuts = ?, currentInning = ?, currentHalf = ?,
+             awayBatterIndex = ?, homeBatterIndex = ?,
+             awayLine = ?, homeLine = ?, updatedAt = ?, updatedByUserId = ? WHERE gameId = ?`,
+          )
+          .run(
+            next.outs,
+            next.inning,
+            next.half,
+            next.awayBatterIndex,
+            next.homeBatterIndex,
+            JSON.stringify(awayLine),
+            JSON.stringify(homeLine),
+            now,
+            userId,
+            gameId,
+          );
+      } else if (isHitResult(result) || result === 'walk') {
+        const length = side === 'home' ? homeLen : awayLen;
+        const indexCol = side === 'home' ? 'homeBatterIndex' : 'awayBatterIndex';
+        const nextIndex = stepBatterIndex(log[indexCol], length, -1);
+        if (result === 'walk') {
+          const walksCol = side === 'home' ? 'homeWalks' : 'awayWalks';
+          const nextWalks = clampStat(Number(log[walksCol]) - 1);
+          this.db
+            .prepare(`UPDATE game_logs SET ${walksCol} = ?, ${indexCol} = ? WHERE gameId = ?`)
+            .run(nextWalks, nextIndex, gameId);
+        } else {
+          this.db.prepare(`UPDATE game_logs SET ${indexCol} = ? WHERE gameId = ?`).run(nextIndex, gameId);
+        }
+        this.db
+          .prepare('UPDATE game_logs SET updatedAt = ?, updatedByUserId = ? WHERE gameId = ?')
+          .run(now, userId, gameId);
+      }
+      this.syncHitsFromPlays(gameId);
+    });
+    tx();
+    return this.getGame(gameId)!;
   }
 
   private ensureGameLogColumns(): void {
@@ -2193,29 +2528,30 @@ export class LeagueStore {
   }
 
   getPlayerStats(userId: string): PlayerStats {
+    return this.getPlayerStatsMap([userId]).get(userId) ?? emptyBattingLine();
+  }
+
+  getPlayerStatsMap(playerIds: string[]): Map<string, PlayerBattingLine> {
+    const unique = [...new Set(playerIds.filter(Boolean))];
+    const map = new Map<string, PlayerBattingLine>();
+    for (const id of unique) map.set(id, emptyBattingLine());
+    if (unique.length === 0) return map;
+    const placeholders = unique.map(() => '?').join(', ');
     const rows = this.db
       .prepare(
-        `SELECT gameId, result FROM game_plate_appearances WHERE playerId = ?`,
+        `SELECT playerId, gameId, result FROM game_plate_appearances WHERE playerId IN (${placeholders})`,
       )
-      .all(userId) as Array<{ gameId: string; result: string }>;
-    const games = new Set<string>();
-    let hits = 0;
-    let atBats = 0;
+      .all(...unique) as Array<{ playerId: string; gameId: string; result: string }>;
+    const byPlayer = new Map<string, Array<{ gameId: string; result: string }>>();
     for (const row of rows) {
-      games.add(row.gameId);
-      if (row.result === 'hit') {
-        hits += 1;
-        atBats += 1;
-      } else if (row.result === 'out') {
-        atBats += 1;
-      }
+      const list = byPlayer.get(row.playerId) ?? [];
+      list.push({ gameId: row.gameId, result: row.result });
+      byPlayer.set(row.playerId, list);
     }
-    return {
-      gamesPlayed: games.size,
-      hits,
-      atBats,
-      average: formatBattingAverage(hits, atBats),
-    };
+    for (const [id, list] of byPlayer) {
+      map.set(id, tallyBattingLine(list));
+    }
+    return map;
   }
 
   getPublicPlayer(userId: string, viewer?: PublicUser | null): PublicPlayerProfile | null {
@@ -2524,13 +2860,16 @@ export class LeagueStore {
       const walks = Math.floor(rng() * 3);
       const outs = 21;
       for (let i = 0; i < hits; i += 1) {
-        this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, 'hit');
+        const kind: StoredPlayResult =
+          i % 7 === 0 ? 'homer' : i % 5 === 0 ? 'triple' : i % 3 === 0 ? 'double' : 'single';
+        this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, kind);
       }
       for (let i = 0; i < walks; i += 1) {
         this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, 'walk');
       }
       for (let i = 0; i < outs; i += 1) {
-        this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, 'out');
+        const kind: StoredPlayResult = i % 4 === 0 ? 'strikeout' : 'out';
+        this.recordPlateAppearance(gameId, players[i % players.length].id, teamId, side, kind);
       }
       const hitsCol = side === 'home' ? 'homeHits' : 'awayHits';
       const walksCol = side === 'home' ? 'homeWalks' : 'awayWalks';

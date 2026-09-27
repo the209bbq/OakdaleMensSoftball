@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, SKILL_LEVEL_LABELS, SKILL_LEVELS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
+import { api, SKILL_LEVEL_LABELS, SKILL_LEVELS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl, fileToWaiverDataUrl } from './image';
 import { applyTheme } from './theme';
@@ -1845,6 +1845,9 @@ function LiveScoreboard({
           >
             <span className="mlb-outs-label">Batter up</span>
             <strong>{playerLabel(battingLineup(game, box)?.atBat) || battingTeamName(game, box)}</strong>
+            {battingLineup(game, box)?.atBat?.stats && (
+              <span className="batter-stats">{compactStatLine(battingLineup(game, box)?.atBat?.stats)}</span>
+            )}
           </p>
           <p
             className="batter-slot"
@@ -1858,6 +1861,14 @@ function LiveScoreboard({
           </span>
         </div>
       </div>
+      {canScore && (
+        <PlayLogPad
+          game={game}
+          busy={busy}
+          onRun={(action) => run(action)}
+        />
+      )}
+      {!canScore && (game.plays?.length ?? 0) > 0 && <PlayByPlayList plays={game.plays ?? []} />}
       {canStart && (
         <button
           type="button"
@@ -1888,11 +1899,122 @@ function playerLabel(player?: LineupPlayer | null): string {
   return player.number != null ? `#${player.number} ${player.name}` : player.name;
 }
 
+const PLAY_BUTTONS: Array<{ result: PlayResult; label: string }> = [
+  { result: 'single', label: 'Single' },
+  { result: 'double', label: 'Double' },
+  { result: 'triple', label: 'Triple' },
+  { result: 'homer', label: 'HR' },
+  { result: 'out', label: 'Out' },
+  { result: 'strikeout', label: 'K' },
+];
+
+function playLabel(result: string): string {
+  switch (result) {
+    case 'single':
+      return 'Single';
+    case 'double':
+      return 'Double';
+    case 'triple':
+      return 'Triple';
+    case 'homer':
+      return 'Home run';
+    case 'out':
+      return 'Out';
+    case 'strikeout':
+      return 'Strikeout';
+    case 'walk':
+      return 'Walk';
+    default:
+      return result;
+  }
+}
+
+function playHalfLabel(play: GamePlay): string {
+  const half = play.half === 'bottom' ? 'Bot' : play.half === 'top' ? 'Top' : '';
+  if (!half && play.inning == null) return '';
+  return `${half} ${play.inning ?? ''}`.trim();
+}
+
+function compactStatLine(stats?: PlayerBattingLine | null): string {
+  if (!stats) return 'GP 0 · H 0 · AB 0 · .000';
+  return `GP ${stats.gamesPlayed} · H ${stats.hits} · AB ${stats.atBats} · ${stats.average}`;
+}
+
+function compactExtraLine(stats?: PlayerBattingLine | null): string {
+  if (!stats) return '1B 0 · 2B 0 · 3B 0 · HR 0 · K 0 · Out 0';
+  return `1B ${stats.singles ?? 0} · 2B ${stats.doubles ?? 0} · 3B ${stats.triples ?? 0} · HR ${stats.homers ?? 0} · K ${stats.strikeouts ?? 0} · Out ${stats.outs ?? 0}`;
+}
+
 function formatLineupLock(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
   return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function PlayLogPad({
+  game,
+  busy,
+  onRun,
+}: {
+  game: Game;
+  busy: boolean;
+  onRun: (action: () => Promise<Game>) => void;
+}) {
+  const box = game.box;
+  const lineup = box ? battingLineup(game, box) : undefined;
+  const batter = lineup?.atBat;
+  const canTap = Boolean(batter);
+  return (
+    <div className="play-log-pad">
+      <p className="play-log-heading">
+        {batter ? `What did ${playerLabel(batter)} do?` : 'Set the batting lineup to start the game log.'}
+      </p>
+      <div className="play-buttons" role="group" aria-label="Record a play">
+        {PLAY_BUTTONS.map((button) => (
+          <button
+            key={button.result}
+            type="button"
+            className={`play-btn play-${button.result}`}
+            disabled={busy || !canTap}
+            aria-label={`Record ${button.label}`}
+            onClick={() => onRun(() => api.recordPlay(game.id, button.result))}
+          >
+            {button.label}
+          </button>
+        ))}
+      </div>
+      <PlayByPlayList plays={game.plays ?? []} />
+      <button
+        type="button"
+        className="play-undo"
+        disabled={busy || (game.plays?.length ?? 0) === 0}
+        aria-label="Undo last play"
+        onClick={() => onRun(() => api.undoLastPlay(game.id))}
+      >
+        Undo last play
+      </button>
+    </div>
+  );
+}
+
+function PlayByPlayList({ plays }: { plays: GamePlay[] }) {
+  if (plays.length === 0) {
+    return <p className="play-log-empty">No plays yet. Tap a result to add it to the log.</p>;
+  }
+  const newestFirst = [...plays].reverse();
+  return (
+    <ol className="play-log" aria-label="Play by play">
+      {newestFirst.map((play, index) => (
+        <li key={play.id} className="play-log-row">
+          <span className="play-log-index">{plays.length - index}</span>
+          <span className="play-log-when">{playHalfLabel(play) || '—'}</span>
+          <span className="play-log-who">{play.name}</span>
+          <span className={`play-log-result is-${play.result}`}>{playLabel(play.result)}</span>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 function GameLineups({
@@ -2006,7 +2128,11 @@ function LineupEditor({
           return (
             <li key={id} className="lineup-row">
               <span className="lineup-spot">{index + 1}</span>
-              <span className="lineup-name">{playerLabel(player)}</span>
+              <span className="lineup-player">
+                <span className="lineup-name">{playerLabel(player)}</span>
+                <span className="lineup-stats">{compactStatLine(player.stats)}</span>
+                <span className="lineup-extras">{compactExtraLine(player.stats)}</span>
+              </span>
               {lineup.canEdit && (
                 <span className="lineup-moves">
                   <button type="button" className="score-step tiny" disabled={busy || index === 0} aria-label={`Move ${player.name} up`} onClick={() => move(id, -1)}>
@@ -2634,6 +2760,32 @@ function PlayerProfilePage({
         <div>
           <dt title="Average">AVG</dt>
           <dd>{stats.average}</dd>
+        </div>
+      </dl>
+      <dl className="stat-line stat-line-extra" aria-label="Extra-base and out counts">
+        <div>
+          <dt title="Singles">1B</dt>
+          <dd>{stats.singles ?? 0}</dd>
+        </div>
+        <div>
+          <dt title="Doubles">2B</dt>
+          <dd>{stats.doubles ?? 0}</dd>
+        </div>
+        <div>
+          <dt title="Triples">3B</dt>
+          <dd>{stats.triples ?? 0}</dd>
+        </div>
+        <div>
+          <dt title="Home runs">HR</dt>
+          <dd>{stats.homers ?? 0}</dd>
+        </div>
+        <div>
+          <dt title="Strikeouts">K</dt>
+          <dd>{stats.strikeouts ?? 0}</dd>
+        </div>
+        <div>
+          <dt title="Outs">Out</dt>
+          <dd>{stats.outs ?? 0}</dd>
         </div>
       </dl>
 

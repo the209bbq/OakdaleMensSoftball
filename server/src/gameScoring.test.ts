@@ -9,9 +9,13 @@ import {
   canScoreLiveGame,
   canStartLiveGame,
   formatBattingAverage,
+  isAtBatResult,
+  isHitResult,
+  normalizePlayResult,
   scoringWindow,
   stepBatterIndex,
   stepHalfInning,
+  tallyBattingLine,
   wrapCurrentOuts,
 } from './gameScoring.js';
 
@@ -113,6 +117,37 @@ describe('formatBattingAverage', () => {
     expect(formatBattingAverage(1, 3)).toBe('.333');
     expect(formatBattingAverage(2, 3)).toBe('.667');
     expect(formatBattingAverage(5, 5)).toBe('1.000');
+  });
+});
+
+describe('play results', () => {
+  it('maps legacy hit rows to a single and treats all six plays as at-bats', () => {
+    expect(normalizePlayResult('hit')).toBe('single');
+    expect(normalizePlayResult('HR')).toBe('homer');
+    expect(normalizePlayResult('K')).toBe('strikeout');
+    expect(isHitResult('double')).toBe(true);
+    expect(isHitResult('walk')).toBe(false);
+    expect(isAtBatResult('strikeout')).toBe(true);
+    expect(isAtBatResult('walk')).toBe(false);
+  });
+
+  it('builds a batting line from mixed play types', () => {
+    const line = tallyBattingLine([
+      { gameId: 'g1', result: 'single' },
+      { gameId: 'g1', result: 'double' },
+      { gameId: 'g1', result: 'out' },
+      { gameId: 'g1', result: 'walk' },
+      { gameId: 'g2', result: 'hit' },
+    ]);
+    expect(line).toMatchObject({
+      gamesPlayed: 2,
+      hits: 3,
+      atBats: 4,
+      average: '.750',
+      singles: 2,
+      doubles: 1,
+      outs: 1,
+    });
   });
 });
 
