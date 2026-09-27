@@ -515,6 +515,16 @@ body {
   margin: 0.1rem 0;
 }
 
+.team-hero .player-hero-photo {
+  width: 104px;
+  height: 104px;
+  border-radius: 26px;
+}
+
+.team-week-game {
+  margin: 0 0 1rem;
+}
+
 .player-hero-meta {
   margin: 0;
   font-weight: 700;
@@ -556,6 +566,10 @@ body {
 
 .stat-line-extra dd {
   font-size: 1.05rem;
+}
+
+.stat-line-three {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .waiver-admin {
@@ -1041,6 +1055,27 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.team-cell-link {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.team-cell-link:hover,
+.team-cell-link:focus-visible {
+  color: var(--accent-dark);
+  outline: none;
 }
 
 .generate-bar {
@@ -2360,6 +2395,35 @@ body {
   color: var(--heading);
   font-size: 1.65rem;
   line-height: 1.15;
+}
+
+.player-home-team h1 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  line-height: inherit;
+}
+
+.player-home-team.is-link {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-home-team.is-link:hover,
+.player-home-team.is-link:focus-visible {
+  color: var(--accent-dark);
+  outline: none;
+}
+
+.player-home-team.is-empty {
+  color: var(--muted);
 }
 
 .player-home-empty {

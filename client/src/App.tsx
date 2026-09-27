@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { api, MANAGERS_PER_TEAM, SKILL_LEVEL_LABELS, SKILL_LEVELS, TEAM_ROSTER_SPOTS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PlayerStatsSheetStatus, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TeamManagerSummary, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
+import { api, MANAGERS_PER_TEAM, SKILL_LEVEL_LABELS, SKILL_LEVELS, TEAM_ROSTER_SPOTS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PlayerStatsSheetStatus, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TeamManagerSummary, type TeamWeekGame, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl, fileToWaiverDataUrl } from './image';
 import { applyTheme } from './theme';
@@ -52,6 +52,22 @@ function pathForPlayer(playerId: string): string {
   return `/players/${playerId}`;
 }
 
+function historyBackPath(fallback = pathForTab('teams')): string {
+  const from = (window.history.state as { from?: string } | null)?.from;
+  if (from && from !== window.location.pathname) return from;
+  return fallback;
+}
+
+function historyBackLabel(): string {
+  const from = (window.history.state as { from?: string } | null)?.from;
+  if (from === '/' || from === '') return '← Home';
+  if (from === '/standings') return '← Standings';
+  if (from === '/schedule') return '← Schedule';
+  if (from?.startsWith('/games/')) return '← Game';
+  if (from?.startsWith('/players/')) return '← Player';
+  return '← Teams';
+}
+
 function teamManagersOf(row?: { manager?: TeamManagerSummary | null; managers?: TeamManagerSummary[] } | null): TeamManagerSummary[] {
   if (!row) return [];
   if (row.managers && row.managers.length > 0) return row.managers;
@@ -76,7 +92,7 @@ function useRoute() {
   }, []);
   const navigate = useCallback((next: string) => {
     if (next === window.location.pathname) return;
-    window.history.pushState({}, '', next);
+    window.history.pushState({ from: window.location.pathname }, '', next);
     setPath(next);
   }, []);
   return { route: parseRoute(path), navigate };
@@ -169,8 +185,13 @@ export default function App() {
       </header>
 
       <main className="app-content">
-        {tab === 'home' && <HomePage onOpenGame={(id) => navigate(pathForGame(id))} />}
-        {tab === 'standings' && <Standings />}
+        {tab === 'home' && (
+          <HomePage
+            onOpenGame={(id) => navigate(pathForGame(id))}
+            onOpenTeam={(id) => navigate(pathForTeam(id))}
+          />
+        )}
+        {tab === 'standings' && <Standings onOpenTeam={(id) => navigate(pathForTeam(id))} />}
         {tab === 'schedule' && route.gameId && (
           <GamePage gameId={route.gameId} onBack={() => navigate(pathForTab('schedule'))} />
         )}
@@ -194,8 +215,9 @@ export default function App() {
         {tab === 'teams' && route.teamId && !route.playerId && (
           <TeamPage
             teamId={route.teamId}
-            onBack={() => navigate(pathForTab('teams'))}
+            onBack={() => navigate(historyBackPath())}
             onOpenPlayer={(id) => navigate(pathForPlayer(id))}
+            onOpenGame={(id) => navigate(pathForGame(id))}
           />
         )}
         {tab === 'rules' && <Rules />}
@@ -603,15 +625,27 @@ function nextGameForTeam(games: Game[], teamId: string): Game | null {
   return upcoming.find((g) => g.date >= today) ?? upcoming[0];
 }
 
-function HomePage({ onOpenGame }: { onOpenGame: (id: string) => void }) {
+function HomePage({
+  onOpenGame,
+  onOpenTeam,
+}: {
+  onOpenGame: (id: string) => void;
+  onOpenTeam: (teamId: string) => void;
+}) {
   const { user } = useAuth();
   if (user && (user.role === 'player' || user.role === 'manager')) {
-    return <PlayerHome onOpenGame={onOpenGame} />;
+    return <PlayerHome onOpenGame={onOpenGame} onOpenTeam={onOpenTeam} />;
   }
   return <LeagueLanding />;
 }
 
-function PlayerHome({ onOpenGame }: { onOpenGame: (id: string) => void }) {
+function PlayerHome({
+  onOpenGame,
+  onOpenTeam,
+}: {
+  onOpenGame: (id: string) => void;
+  onOpenTeam: (teamId: string) => void;
+}) {
   const { user } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
   const [games, setGames] = useState<Game[]>([]);
@@ -699,7 +733,18 @@ function PlayerHome({ onOpenGame }: { onOpenGame: (id: string) => void }) {
     <div className="landing player-home">
       <section className="card player-home-card">
         <p className="player-home-hello">Hey {user?.name?.split(' ')[0] || 'there'}</p>
-        <h1 className="player-home-team">{team?.name ?? (teamId ? (ready ? 'Your team' : 'Loading…') : 'No team yet')}</h1>
+        {teamId ? (
+          <button
+            type="button"
+            className="player-home-team is-link"
+            onClick={() => onOpenTeam(teamId)}
+            aria-label={`Open ${team?.name ?? 'your team'}`}
+          >
+            <h1>{team?.name ?? (ready ? 'Your team' : 'Loading…')}</h1>
+          </button>
+        ) : (
+          <h1 className="player-home-team is-empty">No team</h1>
+        )}
         {!teamId && ready && (
           <p className="muted-copy player-home-empty">
             Join a team from Teams to see your next game and check in.
@@ -1274,7 +1319,7 @@ function CountdownUnit({ value, unit }: { value: number | string; unit: string }
   );
 }
 
-function Standings() {
+function Standings({ onOpenTeam }: { onOpenTeam: (teamId: string) => void }) {
   const [rows, setRows] = useState<StandingRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -1317,7 +1362,11 @@ function Standings() {
           {rows.map((r, i) => (
             <tr key={r.teamId}>
               <td>{i + 1}</td>
-              <td className="team-cell">{r.teamName}</td>
+              <td className="team-cell">
+                <button type="button" className="team-cell-link" onClick={() => onOpenTeam(r.teamId)}>
+                  {r.teamName}
+                </button>
+              </td>
               <td>{r.wins}</td>
               <td>{r.losses}</td>
               <td>{r.ties}</td>
@@ -3037,10 +3086,12 @@ function TeamPage({
   teamId,
   onBack,
   onOpenPlayer,
+  onOpenGame,
 }: {
   teamId: string;
   onBack: () => void;
   onOpenPlayer: (playerId: string) => void;
+  onOpenGame?: (gameId: string) => void;
 }) {
   const { user, refresh } = useAuth();
   const [team, setTeam] = useState<Team | null>(null);
@@ -3059,6 +3110,8 @@ function TeamPage({
   const [message, setMessage] = useState<string | null>(null);
   const [teamNameDraft, setTeamNameDraft] = useState('');
   const [teamPhotoPreview, setTeamPhotoPreview] = useState<string | null>(null);
+  const [standing, setStanding] = useState<StandingRow | null>(null);
+  const [weekGame, setWeekGame] = useState<TeamWeekGame | null>(null);
 
   const canEdit = canManageTeam(user, teamId);
   const canManage = user?.role === 'admin' || (user?.role === 'manager' && user.teamId === teamId);
@@ -3081,6 +3134,26 @@ function TeamPage({
     const timer = window.setInterval(loadRoster, 8000);
     return () => window.clearInterval(timer);
   }, [loadRoster]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([api.getStandings(), api.getTeamBoard()])
+      .then(([rows, board]) => {
+        if (cancelled) return;
+        setStanding(rows.find((row) => row.teamId === teamId) ?? null);
+        const row = board.teams.find((item) => item.id === teamId);
+        setWeekGame(row?.weekGame ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStanding(null);
+          setWeekGame(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [teamId]);
 
   useEffect(() => {
     if (!canManage) return;
@@ -3231,12 +3304,97 @@ function TeamPage({
   const playerCanLeave = Boolean(freeAgencyOpen && user?.role === 'player' && user.teamId === teamId);
   const showAddRegistered = canEdit && (user?.role === 'admin' || freeAgencyOpen);
 
+  const recordDiff = standing ? standing.runsFor - standing.runsAgainst : 0;
+
   return (
-    <section className="card">
-      <button type="button" className="link-btn back-link" onClick={onBack}>
-        ← Teams
+    <section className="card team-profile">
+      <button type="button" className="link-btn back-link" onClick={onBack} aria-label="Back">
+        {historyBackLabel()}
       </button>
-      <h2>{team?.name ?? 'Team'}</h2>
+
+      <div className="player-hero team-hero">
+        {team?.photoUrl ? (
+          <img className="player-hero-photo" src={team.photoUrl} alt="" />
+        ) : (
+          <span className="player-hero-photo player-hero-fallback">{initials(team?.name ?? 'Team')}</span>
+        )}
+        <div className="player-hero-text">
+          <p className="player-hero-number">Team</p>
+          <h2>{team?.name ?? 'Team'}</h2>
+          <p className="player-hero-meta">
+            Managers · {managers.length}/{managerSpots}
+            {managers.length > 0
+              ? ` · ${managers.map((m) => (m.onRoster === false ? `${m.name} (score only)` : m.name)).join(' · ')}`
+              : ' · open spots so someone can keep score'}
+          </p>
+        </div>
+      </div>
+
+      {standing && (
+        <dl className="stat-line" aria-label="Team record">
+          <div>
+            <dt title="Wins">W</dt>
+            <dd>{standing.wins}</dd>
+          </div>
+          <div>
+            <dt title="Losses">L</dt>
+            <dd>{standing.losses}</dd>
+          </div>
+          <div>
+            <dt title="Ties">T</dt>
+            <dd>{standing.ties}</dd>
+          </div>
+          <div>
+            <dt title="Games Played">GP</dt>
+            <dd>{standing.gamesPlayed}</dd>
+          </div>
+        </dl>
+      )}
+      {standing && (
+        <dl className="stat-line stat-line-three" aria-label="Team run totals">
+          <div>
+            <dt title="Runs scored">Runs</dt>
+            <dd>{standing.runsFor}</dd>
+          </div>
+          <div>
+            <dt title="Runs allowed">RA</dt>
+            <dd>{standing.runsAgainst}</dd>
+          </div>
+          <div>
+            <dt title="Run differential">Diff</dt>
+            <dd>
+              {recordDiff >= 0 ? '+' : ''}
+              {recordDiff}
+            </dd>
+          </div>
+        </dl>
+      )}
+
+      {weekGame && (
+        <button
+          type="button"
+          className="player-next-game team-week-game"
+          onClick={() => (onOpenGame && weekGame.id ? onOpenGame(weekGame.id) : undefined)}
+          disabled={!onOpenGame || !weekGame.id}
+          aria-label={`Open this week's game ${weekGame.home ? 'vs' : 'at'} ${weekGame.opponentName}`}
+        >
+          <span className="player-next-kicker">This week</span>
+          <span className="player-next-matchup">
+            {weekGame.home ? 'vs' : 'at'} {weekGame.opponentName}
+          </span>
+          <span className="player-next-when">{formatGameDate(weekGame.date)}</span>
+          <dl className="player-next-meta">
+            <div>
+              <dt>Field</dt>
+              <dd>{weekGame.field || 'TBD'}</dd>
+            </div>
+            <div>
+              <dt>Time</dt>
+              <dd>{weekGame.time || 'TBD'}</dd>
+            </div>
+          </dl>
+        </button>
+      )}
 
       {playerCanJoin && (
         <div className="join-bar">
@@ -3251,27 +3409,6 @@ function TeamPage({
           <button type="button" className="link-btn danger" onClick={handleLeave}>
             Leave
           </button>
-        </div>
-      )}
-
-      {team && (
-        <div className="roster-team-header">
-          {team.photoUrl ? (
-            <img className="team-logo" src={team.photoUrl} alt="" />
-          ) : (
-            <span className="team-logo team-logo-placeholder" aria-hidden="true">
-              {initials(team.name)}
-            </span>
-          )}
-          <div>
-            <h3 className="roster-team-name">{team.name}</h3>
-            <p className="roster-manager">
-              Managers · {managers.length}/{managerSpots}
-              {managers.length > 0
-                ? ` · ${managers.map((m) => (m.onRoster === false ? `${m.name} (score only)` : m.name)).join(' · ')}`
-                : ' · open spots so someone can keep score'}
-            </p>
-          </div>
         </div>
       )}
 
