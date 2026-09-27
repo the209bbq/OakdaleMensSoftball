@@ -275,6 +275,8 @@ export interface RosterResponse {
 }
 
 export type LineupStatus = 'need_guys' | 'full_lineup';
+/** Open roster lines shown on each team in the app and the stats sheet. */
+export const TEAM_ROSTER_SPOTS = 15;
 
 export interface FreeAgent {
   id: string;
@@ -289,6 +291,7 @@ export interface FreeAgent {
 
 export interface TeamBoardRow extends Team {
   memberCount: number;
+  rosterFilled: number;
   checkedInCount: number;
   lineupStatus: LineupStatus;
   manager: TeamManagerSummary | null;
@@ -298,6 +301,7 @@ export interface TeamBoardRow extends Team {
 export interface TeamBoard {
   currentWeek: CurrentWeek | null;
   fullLineupSize: number;
+  rosterSpots: number;
   freeAgencyOpen: boolean;
   lastRegularSeasonDate: string | null;
   freeAgents: FreeAgent[];

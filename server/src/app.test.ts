@@ -123,6 +123,7 @@ describe('Public read endpoints', () => {
     const res = await request(app).get('/api/team-board');
     expect(res.status).toBe(200);
     expect(res.body.fullLineupSize).toBe(10);
+    expect(res.body.rosterSpots).toBe(15);
     expect(res.body.freeAgencyOpen).toBe(true);
     expect(res.body.freeAgents[0]).toMatchObject({
       id: free.id,
@@ -133,6 +134,7 @@ describe('Public read endpoints', () => {
     expect(own.lineupStatus).toBe('need_guys');
     expect(own.checkedInCount).toBe(1);
     expect(own.memberCount).toBe(1);
+    expect(own.rosterFilled).toBeGreaterThanOrEqual(1);
     expect(own.weekGame).toMatchObject({
       field: expect.any(String),
       time: expect.any(String),

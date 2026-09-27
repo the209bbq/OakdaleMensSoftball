@@ -127,6 +127,7 @@ const rosterPayload = {
 const teamBoard = {
   currentWeek: { week: 1, date: '2026-05-06' },
   fullLineupSize: 10,
+  rosterSpots: 15,
   freeAgencyOpen: true,
   lastRegularSeasonDate: '2026-05-06',
   freeAgents: [{ id: 'u-fa', name: 'Free Agent Joe' }],
@@ -135,6 +136,7 @@ const teamBoard = {
       id: 'tigers',
       name: 'Oakdale Tigers',
       memberCount: 2,
+      rosterFilled: 3,
       checkedInCount: 1,
       lineupStatus: 'need_guys' as const,
       manager: { name: 'Coach' },
@@ -730,6 +732,8 @@ describe('App', () => {
     });
     expect(screen.getByText('Need guys')).toBeInTheDocument();
     expect(screen.getByText('1/10 in')).toBeInTheDocument();
+    expect(screen.getByText('3/15 roster')).toBeInTheDocument();
+    expect(screen.getByText('3/15 spots')).toBeInTheDocument();
     expect(screen.getByText(/vs Da Beers · Field 1 · 6:00 PM/)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Free agency' })).toBeInTheDocument();
     expect(screen.getByText('Free Agent Joe')).toBeInTheDocument();
@@ -742,9 +746,10 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('Pat Shortstop')).toBeInTheDocument();
     });
-    expect(screen.getByText('Players')).toBeInTheDocument();
-    expect(screen.getByText('Unregistered')).toBeInTheDocument();
+    expect(screen.getByText('Roster · 3/15')).toBeInTheDocument();
     expect(screen.getByText('Placeholder Guy')).toBeInTheDocument();
+    expect(screen.getByText(/#9 · OF · Unregistered/)).toBeInTheDocument();
+    expect(screen.getAllByText('Open spot').length).toBe(12);
     expect(screen.getByText('#12 · SS')).toBeInTheDocument();
     expect(screen.getAllByText('Manager: Coach').length).toBeGreaterThan(0);
     expect(screen.getByText('Manager')).toBeInTheDocument();

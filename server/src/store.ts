@@ -35,6 +35,7 @@ import type {
 } from './types.js';
 import { SKILL_LEVELS } from './types.js';
 import {
+  TEAM_ROSTER_SPOTS,
   buildPlayerStatsWorkbook,
   envSpreadsheetId,
   parseSheetsSettings,
@@ -971,6 +972,7 @@ export class LeagueStore {
     return {
       currentWeek: current,
       fullLineupSize: FULL_LINEUP_SIZE,
+      rosterSpots: TEAM_ROSTER_SPOTS,
       freeAgencyOpen: this.isFreeAgencyOpen(),
       lastRegularSeasonDate: this.getLastRegularSeasonDate(),
       freeAgents: this.getFreeAgents(viewer),
@@ -980,6 +982,7 @@ export class LeagueStore {
         return {
           ...team,
           memberCount: memberIds.length,
+          rosterFilled: memberIds.length + this.getRoster(team.id).length,
           checkedInCount,
           lineupStatus: checkedInCount >= FULL_LINEUP_SIZE ? 'full_lineup' : 'need_guys',
           manager: this.getTeamManager(team.id),
