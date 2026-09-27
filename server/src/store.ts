@@ -531,15 +531,15 @@ function userFromRow(row: UserRow): User {
     onRoster: row.onRoster !== 0,
     passwordHash: row.passwordHash,
     createdAt: row.createdAt,
+    sharePhone: row.sharePhone === 1,
+    waiverStatus: normalizeWaiverStatus(row.waiverStatus),
   };
   if (row.position) user.position = row.position;
   if (row.number != null) user.number = row.number;
   if (row.photoUrl) user.photoUrl = row.photoUrl;
   user.skillLevel = normalizeSkillLevel(row.skillLevel);
   user.phone = row.phone ?? null;
-  user.sharePhone = row.sharePhone === 1;
   user.waiverUrl = row.waiverUrl ?? null;
-  user.waiverStatus = normalizeWaiverStatus(row.waiverStatus);
   user.waiverReviewedBy = row.waiverReviewedBy ?? null;
   user.waiverReviewedAt = row.waiverReviewedAt ?? null;
   return user;
@@ -2411,6 +2411,8 @@ export class LeagueStore {
           onRoster: true,
           passwordHash,
           createdAt,
+          sharePhone: false,
+          waiverStatus: 'none',
         };
         this.insertUserRow(user);
         guests.push(user);
