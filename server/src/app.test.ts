@@ -79,7 +79,7 @@ describe('Public read endpoints', () => {
       expect(row.gamesPlayed).toBe(0);
       expect(row.runsFor).toBe(0);
       expect(row.runsAgainst).toBe(0);
-      expect(row.beers).toBe(0);
+      expect(row.beers).toBeUndefined();
     }
   });
 
@@ -101,8 +101,8 @@ describe('Public read endpoints', () => {
     expect(home.gamesPlayed).toBe(1);
     expect(away.losses).toBe(1);
     expect(away.gamesPlayed).toBe(1);
-    expect(home.beers).toBe(0);
-    expect(away.beers).toBe(0);
+    expect(home.beers).toBeUndefined();
+    expect(away.beers).toBeUndefined();
   });
 
   it('returns a roster sorted by number', async () => {
@@ -673,59 +673,31 @@ describe('Live game log', () => {
     expect(anon.body.scoring.phase).toBe('live');
   });
 
-  it('tracks beers drank for each team and shows them to everyone', async () => {
+  it('rejects beer tally updates', async () => {
     const { app, store } = makeApp();
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
     const gen = await admin.post('/api/schedule/generate').send({ startDate: utcToday() });
     const games = gen.body as Array<{ id: string; homeTeamId: string; awayTeamId: string }>;
     const ownGame = games.find((g) => g.homeTeamId === TEAM_OWN || g.awayTeamId === TEAM_OWN)!;
-    const otherGame = games.find((g) => g.homeTeamId !== TEAM_OWN && g.awayTeamId !== TEAM_OWN)!;
     const ownSide = ownGame.homeTeamId === TEAM_OWN ? 'home' : 'away';
-    const otherSide = ownSide === 'home' ? 'away' : 'home';
 
-    store.registerUser({ email: 'beer.pat@b.com', name: 'Beer Pat', password: 'longenough' });
-    const pat = store.getUserByEmail('beer.pat@b.com')!;
+    store.registerUser({ email: 'pat@b.com', name: 'Pat', password: 'longenough' });
+    const pat = store.getUserByEmail('pat@b.com')!;
     store.setUserTeam(pat.id, TEAM_OWN);
-    store.setCheckIn(pat.id, ownGame.week, 'in');
-    const player = await loginAs(app, 'beer.pat@b.com', 'longenough');
+    const player = await loginAs(app, 'pat@b.com', 'longenough');
 
     const started = await admin.post(`/api/games/${ownGame.id}/scorelog/start`);
     expect(started.status).toBe(200);
 
-    const first = await player
+    const bump = await player
       .post(`/api/games/${ownGame.id}/scorelog/stat`)
       .send({ side: ownSide, stat: 'beers', delta: 1 });
-    expect(first.status).toBe(200);
-    expect(first.body.box[ownSide === 'home' ? 'homeBeers' : 'awayBeers']).toBe(1);
-
-    const visitor = await player
-      .post(`/api/games/${ownGame.id}/scorelog/stat`)
-      .send({ side: otherSide, stat: 'beers', delta: 2 });
-    expect(visitor.status).toBe(200);
-    expect(visitor.body.box.homeBeers + visitor.body.box.awayBeers).toBe(3);
-
-    const floor = await player
-      .post(`/api/games/${ownGame.id}/scorelog/stat`)
-      .send({ side: ownSide, stat: 'beers', delta: -8 });
-    expect(floor.body.box[ownSide === 'home' ? 'homeBeers' : 'awayBeers']).toBe(0);
-
-    if (otherGame) {
-      const otherTeam = await player
-        .post(`/api/games/${otherGame.id}/scorelog/stat`)
-        .send({ side: 'home', stat: 'beers', delta: 1 });
-      expect(otherTeam.status).toBe(403);
-    }
-
-    const anon = await request(app).get(`/api/games/${ownGame.id}`);
-    expect(anon.status).toBe(200);
-    expect(anon.body.scoring.canScore).toBe(false);
-    expect(anon.body.box.homeBeers + anon.body.box.awayBeers).toBe(2);
+    expect(bump.status).toBe(400);
+    expect(bump.body.error).toMatch(/runs, hits, walks, or outs/i);
 
     const standings = await request(app).get('/api/standings');
     const ownRow = standings.body.find((r: { teamId: string }) => r.teamId === TEAM_OWN);
-    expect(ownRow.beers).toBe(0);
-    const otherRow = standings.body.find((r: { teamId: string }) => r.teamId !== TEAM_OWN && (r.teamId === ownGame.homeTeamId || r.teamId === ownGame.awayTeamId));
-    expect(ownRow.beers + otherRow.beers).toBe(2);
+    expect(ownRow.beers).toBeUndefined();
   });
 
   it('blocks a manager from scoring a locked past game until an admin starts it', async () => {
@@ -972,8 +944,10 @@ describe('League rules', () => {
     expect(res.status).toBe(200);
     expect(typeof res.body.rules).toBe('string');
     expect(res.body.rules.length).toBeGreaterThan(0);
-    expect(res.body.rules).toMatch(/beer league/i);
-    expect(res.body.rules).toMatch(/cooler/i);
+    expect(res.body.rules).toMatch(/league rules/i);
+    expect(res.body.rules).not.toMatch(/beer/i);
+    expect(res.body.rules).not.toMatch(/cooler/i);
+    expect(res.body.rules).not.toMatch(/keg/i);
   });
 
   it('blocks anonymous rule edits', async () => {
@@ -1020,9 +994,9 @@ describe('Landing page', () => {
     const { app } = makeApp();
     const res = await request(app).get('/api/landing');
     expect(res.status).toBe(200);
-    expect(res.body.headline).toBe('Oakdale beer league softball');
+    expect(res.body.headline).toBe('Oakdale Mens Softball');
     expect(res.body.body).toMatch(/kerr park/i);
-    expect(res.body.body).toMatch(/tap beers/i);
+    expect(res.body.body).not.toMatch(/beer/i);
     expect(res.body.imageUrl).toBeNull();
     expect(res.body.countdownLabel).toBe('Opening Day');
     expect(res.body.countdownTarget).toBeNull();
@@ -1397,8 +1371,8 @@ describe('LeagueStore SQLite persistence and JSON import', () => {
     }
   });
 
-  it('upgrades leftover placeholder landing and rules to beer-league copy', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'oakdale-beer-copy-'));
+  it('upgrades leftover placeholder landing and rules to current league copy', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oakdale-league-copy-'));
     try {
       const store = new LeagueStore(dir);
       store.setLanding({
@@ -1411,10 +1385,48 @@ describe('LeagueStore SQLite persistence and JSON import', () => {
       store.close();
 
       const reopened = new LeagueStore(dir);
-      expect(reopened.getLanding().headline).toBe('Oakdale beer league softball');
+      expect(reopened.getLanding().headline).toBe('Oakdale Mens Softball');
       expect(reopened.getLanding().body).toMatch(/kerr park/i);
-      expect(reopened.getRules()).toMatch(/beer league/i);
+      expect(reopened.getLanding().body).not.toMatch(/beer/i);
+      expect(reopened.getRules()).toMatch(/league rules/i);
+      expect(reopened.getRules()).not.toMatch(/beer/i);
       expect(reopened.getRules()).not.toMatch(/TODO: Replace this entire section/);
+      reopened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('replaces stored beer-league landing and rules with softball copy', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oakdale-strip-beer-copy-'));
+    try {
+      const store = new LeagueStore(dir);
+      store.setLanding({
+        headline: 'Oakdale beer league softball',
+        body: 'Wednesday nights at Kerr Park. Check in from Home, keep the live book if you are at the field, and tap beers for your dugout. Fifteen spots a team, two managers, one public scoreboard.',
+      });
+      store.setRules([
+        "OAKDALE MEN'S SOFTBALL — BEER LEAGUE RULES",
+        '',
+        'We play rec softball. The record counts. So does the cooler.',
+        '',
+        '1. Ten in the field. Fifteen on the roster. Check in from Home if you are coming.',
+        '2. First pitch is the listed time. Managers set the batting order the day before.',
+        '3. Players on either team can keep the live book. One game, one scoreboard.',
+        '4. Tap beers for the dugout that drank them. The tally is public and updates live.',
+        '5. Home team brings a cooler. Visitors bring bats and a better excuse.',
+        '6. Disputes stay at the field. If it is still unclear, the next batter hits.',
+        '7. Rain, darkness, or an empty keg can end it after five if both managers agree.',
+        '8. Free agency stays open until playoffs. Join a team from Home.',
+        '9. Have fun, do not be a hero in the infield, and get your guy home.',
+      ].join('\n'));
+      store.close();
+
+      const reopened = new LeagueStore(dir);
+      expect(reopened.getLanding().headline).toBe('Oakdale Mens Softball');
+      expect(reopened.getLanding().body).not.toMatch(/beer/i);
+      expect(reopened.getRules()).not.toMatch(/beer/i);
+      expect(reopened.getRules()).not.toMatch(/keg/i);
       reopened.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

@@ -43,7 +43,7 @@ import {
   type SheetPlayerInput,
   type SheetsSettings,
 } from './playerStatsSheet.js';
-import { createSeedData } from './seed.js';
+import { createSeedData, LEGACY_BEER_LEAGUE_RULES } from './seed.js';
 import { DEFAULT_LOCATION, DEFAULT_WEEKS, generateRoundRobin, type GenerateOptions } from './schedule.js';
 import { leagueDateKey } from './leagueTime.js';
 import {
@@ -141,8 +141,8 @@ export interface TestDataClearSummary {
 }
 
 export const DEFAULT_LANDING: LandingContent = {
-  headline: 'Oakdale beer league softball',
-  body: 'Wednesday nights at Kerr Park. Check in from Home, keep the live book if you are at the field, and tap beers for your dugout. Fifteen spots a team, two managers, one public scoreboard.',
+  headline: 'Oakdale Mens Softball',
+  body: 'Wednesday nights at Kerr Park. Check in from Home and keep the live book if you are at the field. Fifteen spots a team, two managers, one public scoreboard.',
   imageUrl: null,
   countdownLabel: 'Opening Day',
   countdownTarget: null,
@@ -730,9 +730,10 @@ export class LeagueStore {
     this.seedIfEmpty();
     this.ensureMaintenanceSetting();
     this.upgradePlaceholderLeagueCopy();
+    this.upgradeBeerLeagueCopy();
   }
 
-  /** Replace leftover TODO landing/rules with beer-league copy. Custom text stays. */
+  /** Replace leftover TODO landing/rules with current league copy. Custom text stays. */
   private upgradePlaceholderLeagueCopy(): void {
     const landing = this.getLanding();
     if (landing.headline === PLACEHOLDER_LANDING_HEADLINE && landing.body === PLACEHOLDER_LANDING_BODY) {
@@ -740,6 +741,20 @@ export class LeagueStore {
     }
     const rules = this.getRules();
     if (rules.includes(PLACEHOLDER_RULES_MARKER)) {
+      this.setRules(createSeedData().rules);
+    }
+  }
+
+  /** Swap the old beer-league defaults for softball copy. Custom text stays unless it is the beer default. */
+  private upgradeBeerLeagueCopy(): void {
+    const landing = this.getLanding();
+    const nextHeadline = /beer/i.test(landing.headline) ? DEFAULT_LANDING.headline : landing.headline;
+    const nextBody = /beer/i.test(landing.body) ? DEFAULT_LANDING.body : landing.body;
+    if (nextHeadline !== landing.headline || nextBody !== landing.body) {
+      this.setLanding({ headline: nextHeadline, body: nextBody });
+    }
+    const rules = this.getRules();
+    if (rules === LEGACY_BEER_LEAGUE_RULES || /beer|keg|cooler/i.test(rules)) {
       this.setRules(createSeedData().rules);
     }
   }
@@ -1533,8 +1548,8 @@ export class LeagueStore {
     if (side !== 'home' && side !== 'away') {
       throw new Error('side must be home or away');
     }
-    if (stat !== 'runs' && stat !== 'hits' && stat !== 'walks' && stat !== 'outs' && stat !== 'beers') {
-      throw new Error('stat must be runs, hits, walks, outs, or beers');
+    if (stat !== 'runs' && stat !== 'hits' && stat !== 'walks' && stat !== 'outs') {
+      throw new Error('stat must be runs, hits, walks, or outs');
     }
     const step = Math.trunc(delta);
     if (!Number.isFinite(step) || step === 0) {
@@ -1556,13 +1571,9 @@ export class LeagueStore {
               ? side === 'home'
                 ? 'homeWalks'
                 : 'awayWalks'
-              : stat === 'outs'
-                ? side === 'home'
-                  ? 'homeOuts'
-                  : 'awayOuts'
-                : side === 'home'
-                  ? 'homeBeers'
-                  : 'awayBeers';
+            : side === 'home'
+              ? 'homeOuts'
+              : 'awayOuts';
         const log = this.getGameLog(gameId)!;
         const next = clampStat(Number(log[column]) + step);
         this.db.prepare(`UPDATE game_logs SET ${column} = ? WHERE gameId = ?`).run(next, gameId);
@@ -2078,29 +2089,7 @@ export class LeagueStore {
         runsFor: 0,
         runsAgainst: 0,
         gamesPlayed: 0,
-        beers: 0,
       });
-    }
-
-    const beerLogs = this.db
-      .prepare(
-        `SELECT g.homeTeamId, g.awayTeamId,
-                COALESCE(l.homeBeers, 0) AS homeBeers,
-                COALESCE(l.awayBeers, 0) AS awayBeers
-         FROM games g
-         LEFT JOIN game_logs l ON l.gameId = g.id`,
-      )
-      .all() as Array<{
-      homeTeamId: string;
-      awayTeamId: string;
-      homeBeers: number;
-      awayBeers: number;
-    }>;
-    for (const log of beerLogs) {
-      const home = rows.get(log.homeTeamId);
-      const away = rows.get(log.awayTeamId);
-      if (home) home.beers += Number(log.homeBeers) || 0;
-      if (away) away.beers += Number(log.awayBeers) || 0;
     }
 
     const games = this.db

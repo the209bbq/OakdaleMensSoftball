@@ -210,7 +210,7 @@ export default function App() {
           <img className="app-logo" src="/app-icon.svg" alt="" width="28" height="28" />
           <div className="app-bar-text">
             <span className="app-bar-title">Oakdale Mens Softball League</span>
-            <span className="app-bar-kicker">Beer league</span>
+            <span className="app-bar-kicker">Softball</span>
             <span className="app-bar-sub">{route.gameId ? 'Game' : route.playerId ? 'Player' : TAB_TITLES[tab]}</span>
           </div>
           <div className="app-bar-actions">
@@ -289,10 +289,10 @@ function MaintenancePage({ onSignIn }: { onSignIn: () => void }) {
     <div className="app-shell">
       <main className="maintenance-page">
         <img className="app-logo" src="/app-icon.svg" alt="" width="56" height="56" />
-        <p className="landing-league">Oakdale Mens Softball · Beer league</p>
+        <p className="landing-league">Oakdale Mens Softball</p>
         <h1>Down for maintenance</h1>
         <p>
-          The league app is being updated. Check back after the next keg — scores, standings,
+          The league app is being updated. Check back soon — scores, standings,
           check-in, and the dugout book will be here.
         </p>
         <button className="primary-btn" type="button" onClick={onSignIn}>
@@ -945,7 +945,7 @@ function PlayerHome({
         ) : (
           <h1 className="player-home-team is-empty">No team</h1>
         )}
-        <p className="player-home-blurb">Beer league night — check in, keep the book, tap the cooler.</p>
+        <p className="player-home-blurb">Wednesday night — check in and keep the book.</p>
         {!teamId && ready && (
           <p className="player-home-empty">Open Free agency below to join a team.</p>
         )}
@@ -1102,9 +1102,9 @@ function LeagueLanding({
     <div className="landing">
       <section className="landing-hero">
         <img className="landing-logo" src="/app-icon.svg" alt="" width="56" height="56" />
-        <p className="landing-league">Oakdale Mens Softball · Beer league</p>
+        <p className="landing-league">Oakdale Mens Softball</p>
         <h1 className="landing-headline">{landing.headline}</h1>
-        <p className="landing-hero-blurb">Wednesday nights at Kerr Park. Come play, keep the book, tap the cooler.</p>
+        <p className="landing-hero-blurb">Wednesday nights at Kerr Park. Come play and keep the book.</p>
         {!user && (
           <button className="landing-join-btn" type="button" onClick={onSignUp}>
             Join the league
@@ -1459,13 +1459,10 @@ function Standings({ onOpenTeam }: { onOpenTeam: (teamId: string) => void }) {
     <section className="card page-card standings-page">
       <div className="page-head">
         <div>
-          <p className="home-week-kicker">Wins and beers</p>
+          <p className="home-week-kicker">The league</p>
           <h2>League Standings</h2>
         </div>
       </div>
-      <p className="page-blurb beer-league-note">
-        Oakdale is a beer league. Wins still count. Beers are the unofficial standings.
-      </p>
       <div className="table-scroll">
       <table className="table standings-table">
         <colgroup>
@@ -1513,19 +1510,6 @@ function Standings({ onOpenTeam }: { onOpenTeam: (teamId: string) => void }) {
         </tbody>
       </table>
       </div>
-      <h3 className="beer-standings-heading">Beers this season</h3>
-      <ol className="beer-standings">
-        {[...rows]
-          .sort((a, b) => b.beers - a.beers || a.teamName.localeCompare(b.teamName))
-          .map((row) => (
-            <li key={row.teamId}>
-              <button type="button" className="team-cell-link" onClick={() => onOpenTeam(row.teamId)}>
-                {row.teamName}
-              </button>
-              <span>{row.beers}</span>
-            </li>
-          ))}
-      </ol>
     </section>
   );
 }
@@ -2198,16 +2182,6 @@ function LiveScoreboard({
         busy={busy}
         onRun={(action) => run(action)}
       />
-      <BeerTracker
-        gameId={game.id}
-        awayName={game.awayTeamName}
-        homeName={game.homeTeamName}
-        awayBeers={box.awayBeers}
-        homeBeers={box.homeBeers}
-        canScore={canScore}
-        busy={busy}
-        onRun={(action) => run(action)}
-      />
       <div className="inning-outs">
         <div className="inning-outs-copy">
           <span className="mlb-outs-label">Outs</span>
@@ -2794,58 +2768,6 @@ function LineScore({
   );
 }
 
-function BeerTracker({
-  gameId,
-  awayName,
-  homeName,
-  awayBeers,
-  homeBeers,
-  canScore,
-  busy,
-  onRun,
-}: {
-  gameId: string;
-  awayName: string;
-  homeName: string;
-  awayBeers: number;
-  homeBeers: number;
-  canScore: boolean;
-  busy: boolean;
-  onRun: (action: () => Promise<Game>) => void;
-}) {
-  return (
-    <div className="beer-tracker" aria-label="Beers drank">
-      <div className="beer-side">
-        <span className="beer-team">{teamAbbr(awayName)}</span>
-        <LineCell
-          value={awayBeers}
-          canScore={canScore}
-          busy={busy}
-          decreaseLabel={`Decrease ${awayName} beers`}
-          increaseLabel={`Increase ${awayName} beers`}
-          onMinus={() => onRun(() => api.bumpScoreStat(gameId, 'away', 'beers', -1))}
-          onPlus={() => onRun(() => api.bumpScoreStat(gameId, 'away', 'beers', 1))}
-        />
-      </div>
-      <span className="beer-label" title="Beer league tally for this game">
-        Beers
-      </span>
-      <div className="beer-side is-home">
-        <LineCell
-          value={homeBeers}
-          canScore={canScore}
-          busy={busy}
-          decreaseLabel={`Decrease ${homeName} beers`}
-          increaseLabel={`Increase ${homeName} beers`}
-          onMinus={() => onRun(() => api.bumpScoreStat(gameId, 'home', 'beers', -1))}
-          onPlus={() => onRun(() => api.bumpScoreStat(gameId, 'home', 'beers', 1))}
-        />
-        <span className="beer-team">{teamAbbr(homeName)}</span>
-      </div>
-    </div>
-  );
-}
-
 function lineupBadge(row: TeamBoardRow, fullLineupSize: number) {
   const full = row.lineupStatus === 'full_lineup';
   return (
@@ -3023,7 +2945,7 @@ function FreeAgencyPanel({
             </p>
           ) : (
             <>
-              <p className="muted-copy">Beer league free agency — join a team until the regular season ends.</p>
+              <p className="muted-copy">Free agency stays open until the regular season ends. Join a team from here.</p>
               {!user && onSignUp && (
                 <button type="button" className="primary-btn" onClick={onSignUp}>
                   Sign up as a free agent
@@ -3691,14 +3613,6 @@ function TeamPage({
               {recordDiff >= 0 ? '+' : ''}
               {recordDiff}
             </dd>
-          </div>
-        </dl>
-      )}
-      {standing && (
-        <dl className="stat-line" aria-label="Team beers">
-          <div>
-            <dt title="Beers drank this season">Beers</dt>
-            <dd>{standing.beers}</dd>
           </div>
         </dl>
       )}

@@ -1239,53 +1239,6 @@ body {
 .standings-col-runs { width: 2.2rem; }
 .standings-col-diff { width: 1.9rem; }
 
-.beer-league-note {
-  padding: 0;
-  margin: 0 0 0.9rem;
-}
-
-.beer-league-kicker {
-  margin: 0.35rem 0 0;
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
-.beer-standings-heading {
-  margin: 1.2rem 0 0.65rem;
-  color: var(--heading);
-  font-size: 1.05rem;
-}
-
-.beer-standings {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.beer-standings li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  min-height: 3.1rem;
-  padding: 0.75rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: linear-gradient(180deg, #fff 0%, var(--bg) 100%);
-  box-shadow: 0 6px 16px rgba(11, 37, 69, 0.06);
-  font-weight: 800;
-}
-
-.beer-standings li span {
-  color: var(--accent-dark);
-  font-variant-numeric: tabular-nums;
-  font-size: 1.15rem;
-}
-
 .table tbody tr:first-child td,
 .standings-table tbody tr.is-leader td {
   font-weight: 700;
@@ -1977,46 +1930,6 @@ body {
 .score-step:disabled {
   opacity: 0.22;
   cursor: default;
-}
-
-.beer-tracker {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 0.45rem;
-  margin-top: 0.7rem;
-  padding: 0.45rem 0.15rem 0.15rem;
-}
-
-.beer-side {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-}
-
-.beer-side.is-home {
-  justify-content: flex-end;
-}
-
-.beer-team {
-  color: #c9cdd3;
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
-
-.beer-label {
-  color: #f2a900;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.beer-tracker .scoreboard-value {
-  min-width: 1.4rem;
-  text-align: center;
 }
 
 .inning-outs {
