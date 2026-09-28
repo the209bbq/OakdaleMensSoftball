@@ -192,6 +192,7 @@ beforeEach(() => {
       if (url.includes('/api/landing')) return jsonOk(landing);
       if (url.includes('/api/standings')) return jsonOk(standings);
       if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+      if (url.includes('/api/current-week')) return jsonOk({ week: 1, date: '2026-05-06' });
       if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) {
         return jsonOk(scheduleGames[0]);
       }
@@ -258,12 +259,16 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Home' })).toHaveAttribute('aria-selected', 'true');
     await waitFor(() => {
       expect(screen.getByText('Welcome to the Oakdale Mens Softball League')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Games · Week 1' })).toBeInTheDocument();
     });
     expect(screen.getByText(/TODO: add real content/i)).toBeInTheDocument();
     expect(screen.getByText(/Oakdale Mens Softball · Beer league/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /league rules, collapsed/i })).toBeInTheDocument();
     expect(screen.queryByText('1. Ten on the field.')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: "This week's games" })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open game: da beers at oakdale tigers/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start game' })).not.toBeInTheDocument();
   });
 
   it('shows a full-screen maintenance page instead of the league app', async () => {
@@ -317,7 +322,7 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument();
   });
 
-  it('shows a signed-in player their team, next game, field, time, and check-in', async () => {
+  it('shows a signed-in player their team, this week’s games, field, time, and check-in', async () => {
     const playerUser = {
       id: 'u1',
       email: 'pat@example.com',
@@ -335,6 +340,7 @@ describe('App', () => {
         if (url.includes('/api/landing')) return jsonOk(landing);
         if (url.includes('/api/standings')) return jsonOk(standings);
         if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/current-week')) return jsonOk({ week: 1, date: '2026-05-06' });
         if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) {
           return jsonOk(scheduleGames[0]);
         }
@@ -359,6 +365,7 @@ describe('App', () => {
     renderApp();
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Oakdale Tigers' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Games · Week 1' })).toBeInTheDocument();
     });
     expect(screen.getByText('Hey Pat')).toBeInTheDocument();
     expect(screen.getByText(/beer league night/i)).toBeInTheDocument();
@@ -367,10 +374,10 @@ describe('App', () => {
     expect(screen.queryByText('Pat Shortstop')).not.toBeInTheDocument();
     expect(screen.queryByText('Player')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
-    expect(screen.getByText('Next game')).toBeInTheDocument();
-    expect(screen.getByText('vs Da Beers')).toBeInTheDocument();
-    expect(screen.getByText('Field 1')).toBeInTheDocument();
-    expect(screen.getByText('6:00 PM')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Games · Week 1' })).toBeInTheDocument();
+    expect(screen.getByText('Da Beers at Oakdale Tigers')).toBeInTheDocument();
+    expect(screen.getByText(/Wed May 6 · 6:00 PM · Field 1/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start game' })).not.toBeInTheDocument();
     expect(screen.queryByText('Welcome to the Oakdale Mens Softball League')).not.toBeInTheDocument();
 
     const checkOut = screen.getByRole('button', { name: /can't make it/i });
@@ -380,10 +387,133 @@ describe('App', () => {
       expect(checkOut).toHaveAttribute('aria-pressed', 'true');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /open next game vs da beers/i }));
+    fireEvent.click(screen.getByRole('button', { name: /open game: da beers at oakdale tigers/i }));
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Da Beers at Oakdale Tigers' })).toBeInTheDocument();
     });
+  });
+
+  it('lets a player start this week’s game from Home and opens dugout', async () => {
+    const playerUser = {
+      id: 'u1',
+      email: 'pat@example.com',
+      name: 'Pat Shortstop',
+      role: 'player' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const startable = {
+      ...scheduleGames[0],
+      scoring: { ...scheduleGames[0].scoring!, canStart: true, canScore: false },
+    };
+    const started = {
+      ...startable,
+      scoring: {
+        ...startable.scoring,
+        phase: 'live' as const,
+        open: true,
+        liveStartedAt: '2026-09-26T19:00:00.000Z',
+        canStart: false,
+        canScore: true,
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: playerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/scorelog/start') && init?.method === 'POST') return jsonOk(started);
+        if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) {
+          return jsonOk(started);
+        }
+        if (url.includes('/api/schedule')) return jsonOk([startable]);
+        if (url.includes('/api/current-week')) return jsonOk({ week: 1, date: '2026-05-06' });
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        if (url.includes('/messages')) return jsonOk([]);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Start game' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start game' }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Dugout scoreboard')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Exit dugout' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Record Single' })).toBeInTheDocument();
+  });
+
+  it('shows LIVE next to a started game on Home', async () => {
+    const playerUser = {
+      id: 'u1',
+      email: 'pat@example.com',
+      name: 'Pat Shortstop',
+      role: 'player' as const,
+      teamId: 'tigers',
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    const liveGame = {
+      ...scheduleGames[0],
+      scoring: {
+        ...scheduleGames[0].scoring!,
+        phase: 'live' as const,
+        open: true,
+        liveStartedAt: '2026-09-26T19:00:00.000Z',
+        canStart: false,
+        canScore: true,
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: playerUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/maintenance')) return jsonOk({ maintenance: false });
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/games/') && !url.includes('/scorelog') && !url.includes('/lineups')) return jsonOk(liveGame);
+        if (url.includes('/api/schedule')) return jsonOk([liveGame]);
+        if (url.includes('/api/current-week')) return jsonOk({ week: 1, date: '2026-05-06' });
+        if (url.includes('/roster')) return jsonOk(rosterPayload);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        if (url.includes('/messages')) return jsonOk([]);
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Live')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Dugout' })).toBeInTheDocument();
+  });
+
+  it('tells visitors this week’s games show up Thursday when the week has not flipped', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: null });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/maintenance')) return jsonOk({ maintenance: false });
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/current-week')) return jsonOk(null);
+        if (url.includes('/api/rules')) return jsonOk({ rules: '1. Ten on the field.\n2. Fifteen roster spots.' });
+        return jsonOk([]);
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByText(/thursday at 12:01 am/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /open game:/i })).not.toBeInTheDocument();
   });
 
   it('opens a team profile from the player home team name', async () => {
@@ -448,6 +578,7 @@ describe('App', () => {
         if (url.includes('/api/landing')) return jsonOk(landing);
         if (url.includes('/api/standings')) return jsonOk(standings);
         if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/current-week')) return jsonOk({ week: 1, date: '2026-05-06' });
         if (url.includes('/api/team-board')) return jsonOk(teamBoard);
         if (url.includes('/api/teams')) return jsonOk(teams);
         return jsonOk([]);
@@ -458,7 +589,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'No team' })).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: /open /i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open Oakdale Tigers' })).not.toBeInTheDocument();
     expect(screen.getByText(/open free agency below to join a team/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /free agency, join a team/i })).toHaveAttribute('aria-expanded', 'false');
   });
@@ -567,7 +698,7 @@ describe('App', () => {
     expect(screen.getByText(/Top 1 · Da Beers/)).toBeInTheDocument();
     expect(screen.getByLabelText('Da Beers lineup')).toBeInTheDocument();
     expect(screen.getByLabelText('Oakdale Tigers lineup')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /start live scorekeeping/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start game' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to schedule' }));
     await waitFor(() => {
@@ -587,7 +718,7 @@ describe('App', () => {
     expect(screen.getByLabelText('Live box score')).toBeInTheDocument();
   });
 
-  it('lets a manager start live scorekeeping and bump runs', async () => {
+  it('lets a manager start a game and bump runs', async () => {
     const managerUser = {
       id: 'u-mgr',
       email: 'manager@oakdale.local',
@@ -647,9 +778,9 @@ describe('App', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /open game: da beers at oakdale tigers/i }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /start live scorekeeping/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Start game' })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: /start live scorekeeping/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start game' }));
     await waitFor(() => {
       expect(screen.getByText('LIVE')).toBeInTheDocument();
     });
@@ -765,7 +896,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Undo last play' })).toBeEnabled();
   });
 
-  it('lets a checked-in player record a play on their team’s live game', async () => {
+  it('lets a player record a play on their team’s live game', async () => {
     const playerUser = {
       id: 'u1',
       email: 'pat@example.com',

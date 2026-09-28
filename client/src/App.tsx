@@ -680,14 +680,132 @@ function checkInMark(status: 'in' | 'out' | null | undefined): string {
   return '—';
 }
 
-function nextGameForTeam(games: Game[], teamId: string): Game | null {
-  const upcoming = games
-    .filter((g) => (g.homeTeamId === teamId || g.awayTeamId === teamId) && !g.played)
-    .slice()
-    .sort((a, b) => `${a.date} ${a.time ?? ''}`.localeCompare(`${b.date} ${b.time ?? ''}`));
-  if (upcoming.length === 0) return null;
-  const today = new Date().toISOString().slice(0, 10);
-  return upcoming.find((g) => g.date >= today) ?? upcoming[0];
+function asCurrentWeek(value: unknown): CurrentWeek | null {
+  if (!value || typeof value !== 'object') return null;
+  const week = (value as { week?: unknown }).week;
+  const date = (value as { date?: unknown }).date;
+  if (typeof week !== 'number' || !Number.isInteger(week) || typeof date !== 'string' || !date) return null;
+  return { week, date };
+}
+
+function HomeWeekGames({ onOpenGame }: { onOpenGame: (id: string) => void }) {
+  const { user } = useAuth();
+  const [games, setGames] = useState<Game[]>([]);
+  const [week, setWeek] = useState<CurrentWeek | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [startingId, setStartingId] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+
+  const load = useCallback(async () => {
+    const [schedule, current] = await Promise.all([api.getSchedule(), api.getCurrentWeek()]);
+    setGames(Array.isArray(schedule) ? schedule : []);
+    setWeek(asCurrentWeek(current));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    load()
+      .catch((e) => {
+        if (!cancelled) setError((e as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
+    const timer = window.setInterval(() => {
+      load().catch(() => {
+        /* keep last snapshot */
+      });
+    }, LIVE_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [load, user?.id, user?.role, user?.teamId]);
+
+  const weekGames = week ? games.filter((game) => game.week === week.week) : [];
+
+  async function startAndOpen(game: Game) {
+    setError(null);
+    setStartingId(game.id);
+    try {
+      if (game.scoring?.canStart) {
+        await api.startLiveGame(game.id);
+      }
+      writeDugoutOpen(game.id, true);
+      onOpenGame(game.id);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setStartingId(null);
+    }
+  }
+
+  function openDugout(game: Game) {
+    writeDugoutOpen(game.id, true);
+    onOpenGame(game.id);
+  }
+
+  return (
+    <section className="card home-week-games" aria-label="This week's games">
+      <h2>{week ? `Games · Week ${week.week}` : 'Games'}</h2>
+      {!ready && <p className="muted-copy home-week-empty">Loading games…</p>}
+      {ready && !week && (
+        <p className="muted-copy home-week-empty">This week&apos;s games show up Thursday at 12:01 AM.</p>
+      )}
+      {ready && week && weekGames.length === 0 && (
+        <p className="muted-copy home-week-empty">No games this week.</p>
+      )}
+      {error && <p className="error inline-error">{error}</p>}
+      {weekGames.length > 0 && (
+        <ul className="home-week-list">
+          {weekGames.map((game) => {
+            const live = game.scoring?.phase === 'live';
+            const canStart = Boolean(game.scoring?.canStart);
+            const canScore = Boolean(game.scoring?.canScore);
+            return (
+              <li key={game.id} className={`home-week-game${live ? ' is-live' : ''}`}>
+                <button
+                  type="button"
+                  className="home-week-open"
+                  onClick={() => onOpenGame(game.id)}
+                  aria-label={`Open game: ${game.awayTeamName} at ${game.homeTeamName}`}
+                >
+                  <span className="home-week-matchup">
+                    {game.awayTeamName} at {game.homeTeamName}
+                    {live && (
+                      <span className="live-pill" aria-label="Live">
+                        LIVE
+                      </span>
+                    )}
+                  </span>
+                  <span className="home-week-meta">
+                    {formatGameDate(game.date)}
+                    {game.time ? ` · ${game.time}` : ''}
+                    {game.field ? ` · ${game.field}` : ''}
+                  </span>
+                </button>
+                {canStart && (
+                  <button
+                    type="button"
+                    className="primary-btn home-start-btn"
+                    disabled={startingId === game.id}
+                    onClick={() => void startAndOpen(game)}
+                  >
+                    {startingId === game.id ? 'Starting…' : 'Start game'}
+                  </button>
+                )}
+                {!canStart && canScore && (
+                  <button type="button" className="primary-btn home-start-btn" onClick={() => openDugout(game)}>
+                    Dugout
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 function HomePage({
@@ -714,7 +832,14 @@ function HomePage({
       />
     );
   }
-  return <LeagueLanding onOpenPlayer={onOpenPlayer} onSignUp={onSignUp} openRules={openRules} />;
+  return (
+    <LeagueLanding
+      onOpenGame={onOpenGame}
+      onOpenPlayer={onOpenPlayer}
+      onSignUp={onSignUp}
+      openRules={openRules}
+    />
+  );
 }
 
 function PlayerHome({
@@ -730,7 +855,6 @@ function PlayerHome({
 }) {
   const { user } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
-  const [games, setGames] = useState<Game[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [currentWeek, setCurrentWeek] = useState<CurrentWeek | null>(null);
   const [checkingIn, setCheckingIn] = useState(false);
@@ -739,12 +863,11 @@ function PlayerHome({
 
   const teamId = user?.teamId ?? null;
   const team = teams.find((t) => t.id === teamId) ?? null;
-  const nextGame = teamId ? nextGameForTeam(games, teamId) : null;
   const playsOnTeam = Boolean(
     teamId && (user?.role === 'player' || (user?.role === 'manager' && user.onRoster !== false)),
   );
-  const checkWeek = nextGame?.week ?? currentWeek?.week ?? null;
-  const checkDate = nextGame?.date ?? currentWeek?.date ?? null;
+  const checkWeek = currentWeek?.week ?? null;
+  const checkDate = currentWeek?.date ?? null;
   const myCheckIn = members.find((m) => m.id === user?.id)?.checkIn ?? null;
   const checkInCounts = {
     in: members.filter((m) => m.checkIn === 'in').length,
@@ -767,11 +890,9 @@ function PlayerHome({
   }
 
   useEffect(() => {
-    Promise.all([api.getTeams(), api.getSchedule()])
-      .then(([nextTeams, nextGames]) => {
-        setTeams(nextTeams);
-        setGames(nextGames);
-      })
+    api
+      .getTeams()
+      .then(setTeams)
       .catch((e) => setError((e as Error).message))
       .finally(() => setReady(true));
   }, []);
@@ -800,17 +921,6 @@ function PlayerHome({
     }
   }
 
-  const opponent = nextGame
-    ? nextGame.homeTeamId === teamId
-      ? nextGame.awayTeamName
-      : nextGame.homeTeamName
-    : null;
-  const vsLabel = nextGame
-    ? nextGame.homeTeamId === teamId
-      ? `vs ${opponent}`
-      : `at ${opponent}`
-    : null;
-
   return (
     <div className="landing player-home">
       <section className="card player-home-card">
@@ -833,32 +943,9 @@ function PlayerHome({
             Open Free agency below to join a team.
           </p>
         )}
-        {teamId && ready && !nextGame && (
-          <p className="muted-copy player-home-empty">No upcoming games on the schedule.</p>
-        )}
-        {nextGame && (
-          <button
-            type="button"
-            className="player-next-game"
-            onClick={() => onOpenGame(nextGame.id)}
-            aria-label={`Open next game ${vsLabel} on ${formatGameDate(nextGame.date)}`}
-          >
-            <span className="player-next-kicker">Next game</span>
-            <span className="player-next-matchup">{vsLabel}</span>
-            <span className="player-next-when">{formatGameDate(nextGame.date)}</span>
-            <dl className="player-next-meta">
-              <div>
-                <dt>Field</dt>
-                <dd>{nextGame.field || 'TBD'}</dd>
-              </div>
-              <div>
-                <dt>Time</dt>
-                <dd>{nextGame.time || 'TBD'}</dd>
-              </div>
-            </dl>
-          </button>
-        )}
       </section>
+
+      <HomeWeekGames onOpenGame={onOpenGame} />
 
       {teamId && checkWeek != null && checkDate && (
         <section className="card">
@@ -915,10 +1002,12 @@ function PlayerHome({
 }
 
 function LeagueLanding({
+  onOpenGame,
   onOpenPlayer,
   onSignUp,
   openRules = false,
 }: {
+  onOpenGame: (id: string) => void;
   onOpenPlayer: (playerId: string) => void;
   onSignUp: () => void;
   openRules?: boolean;
@@ -1013,6 +1102,8 @@ function LeagueLanding({
       )}
 
       <CountdownCard label={landing.countdownLabel} target={landing.effectiveCountdownTarget} />
+
+      <HomeWeekGames onOpenGame={onOpenGame} />
 
       {isAdmin && (
         <section className="card">
@@ -2147,13 +2238,19 @@ function LiveScoreboard({
           type="button"
           className="start-live-btn"
           disabled={busy}
-          onClick={() => run(() => api.startLiveGame(game.id), 'Live scorekeeping started.')}
+          onClick={() =>
+            run(async () => {
+              const next = await api.startLiveGame(game.id);
+              setDugout(true);
+              return next;
+            }, 'Live scorekeeping started.')
+          }
         >
-          Start live scorekeeping
+          Start game
         </button>
       )}
       {!canScore && !canStart && phase === 'upcoming' && (
-        <p className="scoreboard-note">Checked-in players and team managers can keep score from 2 hours before first pitch through 24 hours after the game.</p>
+        <p className="scoreboard-note">Players on either team can start the game and keep score from 2 hours before first pitch through 24 hours after.</p>
       )}
     </div>
   );

@@ -620,11 +620,11 @@ describe('Live game log', () => {
     const playerBump = await player
       .post(`/api/games/${ownGame.id}/scorelog/stat`)
       .send({ side: ownSide, stat: 'runs', delta: 1 });
-    expect(playerBump.status).toBe(403);
-    expect(playerBump.body.error).toMatch(/check in/i);
+    expect(playerBump.status).toBe(200);
+    expect(playerBump.body.box[ownSide === 'home' ? 'homeRuns' : 'awayRuns']).toBe(3);
   });
 
-  it('lets a checked-in player score their own game and shows the update to everyone', async () => {
+  it('lets a player on the team start and score without checking in, and shows the update to everyone', async () => {
     const { app, store } = makeApp();
     const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
     const gen = await admin.post('/api/schedule/generate').send({ startDate: utcToday() });
@@ -642,15 +642,6 @@ describe('Live game log', () => {
 
     const player = await loginAs(app, 'live.p@b.com', 'longenough');
     const visitor = await loginAs(app, 'other.p@b.com', 'longenough');
-
-    const notIn = await player
-      .post(`/api/games/${ownGame.id}/scorelog/stat`)
-      .send({ side: ownSide, stat: 'runs', delta: 1 });
-    expect(notIn.status).toBe(403);
-    expect(notIn.body.error).toMatch(/check in/i);
-
-    store.setCheckIn(pat.id, ownGame.week, 'in');
-    store.setCheckIn(quinn.id, otherGame.week, 'in');
 
     const otherTeam = await player
       .post(`/api/games/${otherGame.id}/scorelog/stat`)
@@ -2023,6 +2014,23 @@ describe('Weekly check-in', () => {
     const last = after.getCurrentWeek();
     expect(last?.week).toBe(3);
     expect(last?.date).toBe(addUtcDays(today, -14));
+  });
+
+  it('flips the current week Thursday at 12:01 AM Pacific so Wednesday night stays up', () => {
+    const { store } = makeApp();
+    store.generateSchedule({ startDate: '2026-05-06', weeks: 2 });
+    expect(store.getCurrentWeek(new Date('2026-05-07T06:59:00.000Z'))).toEqual({
+      week: 1,
+      date: '2026-05-06',
+    });
+    expect(store.getCurrentWeek(new Date('2026-05-07T07:00:00.000Z'))).toEqual({
+      week: 1,
+      date: '2026-05-06',
+    });
+    expect(store.getCurrentWeek(new Date('2026-05-07T07:01:00.000Z'))).toEqual({
+      week: 2,
+      date: '2026-05-13',
+    });
   });
 
   it('GET /api/current-week is public and returns the store result', async () => {

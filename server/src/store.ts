@@ -45,6 +45,7 @@ import {
 } from './playerStatsSheet.js';
 import { createSeedData } from './seed.js';
 import { DEFAULT_LOCATION, DEFAULT_WEEKS, generateRoundRobin, type GenerateOptions } from './schedule.js';
+import { leagueDateKey } from './leagueTime.js';
 import {
   SIM_FREE_AGENT_COUNT,
   SIM_GUESTS_PER_TEAM,
@@ -2328,14 +2329,16 @@ export class LeagueStore {
 
   /**
    * Upcoming/in-progress week: smallest scheduled week whose game date is >=
-   * today's UTC date. After the season ends, returns the last week. No games → null.
+   * the Pacific league date. Weeks flip Thursday at 12:01 AM Pacific so
+   * Wednesday night games stay up until then. After the season ends, returns
+   * the last week. No games → null.
    */
-  getCurrentWeek(): CurrentWeek | null {
+  getCurrentWeek(now: Date = new Date()): CurrentWeek | null {
     const rows = this.db
       .prepare('SELECT week, MIN(date) AS date FROM games GROUP BY week ORDER BY week ASC')
       .all() as Array<{ week: number; date: string }>;
     if (rows.length === 0) return null;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = leagueDateKey(now);
     const upcoming = rows.find((row) => row.date >= today);
     if (upcoming) return { week: upcoming.week, date: upcoming.date };
     const last = rows[rows.length - 1];

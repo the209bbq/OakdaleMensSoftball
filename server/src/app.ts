@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { LeagueStore, MANAGERS_PER_TEAM } from './store.js';
-import type { CheckInStatus, Game, LandingContent, PublicUser, TeamAttendance } from './types.js';
+import type { Game, LandingContent, PublicUser, TeamAttendance } from './types.js';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_MS,
@@ -358,8 +358,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
       res.status(404).json({ error: 'Game not found' });
       return;
     }
-    const userCheckIns = req.user?.role === 'player' ? store.getUserCheckIns(req.user.id) : undefined;
-    res.json(decorateGame(store, game, req.user, undefined, userCheckIns));
+    res.json(decorateGame(store, game, req.user));
   });
 
   api.get('/current-week', (_req: Request, res: Response) => {
@@ -601,7 +600,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
-  // ---- Score reporting (admin, team managers, or checked-in players on either side) ----
+  // ---- Score reporting (admin, or any player/manager on either team) ----
 
   api.post('/games/:id/result', requireAuth, (req: Request, res: Response) => {
     try {
@@ -611,7 +610,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game) });
         return;
       }
       const { homeScore, awayScore } = req.body ?? {};
@@ -630,8 +629,8 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         res.status(404).json({ error: 'Game not found' });
         return;
       }
-      if (!canKeepScore(req.user, game, store)) {
-        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
+      if (!canKeepScore(req.user, game)) {
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game) });
         return;
       }
       if (!canStartGame(req.user, game, store)) {
@@ -655,7 +654,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game) });
         return;
       }
       const { side, stat, delta } = req.body ?? {};
@@ -674,7 +673,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game) });
         return;
       }
       store.recordPlay(game.id, req.body?.result, req.user!.id);
@@ -692,7 +691,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game) });
         return;
       }
       store.undoLastPlay(game.id, req.user!.id);
@@ -710,7 +709,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game) });
         return;
       }
       const { delta } = req.body ?? {};
@@ -759,7 +758,7 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
         return;
       }
       if (!canScoreGame(req.user, game, store)) {
-        res.status(403).json({ error: scoreDeniedMessage(req.user, game, store) });
+        res.status(403).json({ error: scoreDeniedMessage(req.user, game) });
         return;
       }
       const { side, inning, delta } = req.body ?? {};
@@ -976,27 +975,15 @@ function isOnGameTeam(user: PublicUser | undefined, game: Game): boolean {
   return Boolean(user?.teamId && (user.teamId === game.homeTeamId || user.teamId === game.awayTeamId));
 }
 
-function canKeepScore(
-  user: PublicUser | undefined,
-  game: Game,
-  store: LeagueStore,
-  userCheckIns?: Map<number, CheckInStatus>,
-): boolean {
+function canKeepScore(user: PublicUser | undefined, game: Game): boolean {
   if (!user) return false;
   if (user.role === 'admin') return true;
-  if (!isOnGameTeam(user, game)) return false;
-  if (user.role === 'manager') return true;
-  if (user.role !== 'player') return false;
-  const status = userCheckIns?.get(game.week) ?? store.getCheckInsForWeek(game.week).get(user.id);
-  return status === 'in';
+  return isOnGameTeam(user, game);
 }
 
-function scoreDeniedMessage(user: PublicUser | undefined, game: Game, store: LeagueStore): string {
-  if (canKeepScore(user, game, store)) {
-    return 'Scoring is closed for this game. Checked-in players and managers can keep score during the game and for 24 hours after.';
-  }
-  if (isOnGameTeam(user, game) && user?.role === 'player') {
-    return 'Check in for this week to keep score for your team.';
+function scoreDeniedMessage(user: PublicUser | undefined, game: Game): string {
+  if (canKeepScore(user, game)) {
+    return 'Scoring is closed for this game. Players on either team can keep score during the game and for 24 hours after.';
   }
   return 'You can only keep score for your own team\'s games';
 }
@@ -1010,13 +997,13 @@ function scoringFor(store: LeagueStore, game: Game, nowMs = Date.now()) {
 }
 
 function canStartGame(user: PublicUser | undefined, game: Game, store: LeagueStore, nowMs = Date.now()): boolean {
-  if (!canKeepScore(user, game, store)) return false;
+  if (!canKeepScore(user, game)) return false;
   const { scheduledMs, liveStartedAtMs } = scoringFor(store, game, nowMs);
   return canStartLiveGame(scheduledMs, liveStartedAtMs, nowMs, user?.role === 'admin');
 }
 
 function canScoreGame(user: PublicUser | undefined, game: Game, store: LeagueStore, nowMs = Date.now()): boolean {
-  if (!canKeepScore(user, game, store)) return false;
+  if (!canKeepScore(user, game)) return false;
   const { window } = scoringFor(store, game, nowMs);
   return canScoreLiveGame(window, user?.role === 'admin');
 }
@@ -1026,12 +1013,11 @@ function decorateGame(
   game: Game,
   user?: PublicUser,
   attendance?: Map<string, TeamAttendance>,
-  userCheckIns?: Map<number, CheckInStatus>,
 ) {
   const teams = new Map(store.getTeams().map((t) => [t.id, t.name]));
   const { log, window, scheduledMs, liveStartedAtMs } = scoringFor(store, game);
   const isAdmin = user?.role === 'admin';
-  const keeps = canKeepScore(user, game, store, userCheckIns);
+  const keeps = canKeepScore(user, game);
   return {
     ...game,
     homeTeamName: teams.get(game.homeTeamId) ?? game.homeTeamId,
@@ -1065,8 +1051,7 @@ function decorateGame(
 function withTeamNames(store: LeagueStore, user?: PublicUser) {
   const games = store.getSchedule();
   const attendance = store.getAttendanceForGames(games);
-  const userCheckIns = user?.role === 'player' ? store.getUserCheckIns(user.id) : undefined;
-  return games.map((g) => decorateGame(store, g, user, attendance, userCheckIns));
+  return games.map((g) => decorateGame(store, g, user, attendance));
 }
 
 /** Split a string or string[] of emails on commas / whitespace / newlines. */

@@ -2648,68 +2648,88 @@ body {
   margin: 0;
 }
 
-.player-next-game {
-  display: block;
-  width: 100%;
-  text-align: left;
+.home-week-games h2 {
+  margin: 0 0 0.7rem;
+  color: var(--heading);
+  font-size: 1.05rem;
+}
+
+.home-week-empty {
+  padding: 0;
+  margin: 0;
+}
+
+.home-week-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.home-week-game {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
   border: 2px solid var(--border);
   background: var(--bg);
   border-radius: 14px;
-  padding: 0.9rem 1rem;
+  padding: 0.8rem 0.9rem;
+}
+
+.home-week-game.is-live {
+  border-color: var(--accent);
+}
+
+.home-week-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
   color: inherit;
   cursor: pointer;
 }
 
-.player-next-game:hover,
-.player-next-game:focus-visible {
-  border-color: var(--accent);
+.home-week-open:hover .home-week-matchup,
+.home-week-open:focus-visible .home-week-matchup {
+  color: var(--accent-dark);
 }
 
-.player-next-kicker {
-  display: block;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.player-next-matchup {
-  display: block;
-  margin-top: 0.2rem;
-  color: var(--heading);
-  font-size: 1.2rem;
-  font-weight: 800;
-}
-
-.player-next-when {
-  display: block;
-  margin: 0.15rem 0 0.7rem;
-  color: var(--text);
-  font-weight: 600;
-}
-
-.player-next-meta {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.6rem;
-  margin: 0;
-}
-
-.player-next-meta dt {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.player-next-meta dd {
-  margin: 0.1rem 0 0;
+.home-week-matchup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.55rem;
   color: var(--heading);
   font-size: 1.05rem;
   font-weight: 800;
+}
+
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.home-week-meta {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.home-start-btn {
+  width: 100%;
 }
 
 .player-home-checkin {
