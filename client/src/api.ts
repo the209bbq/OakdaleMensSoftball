@@ -500,6 +500,12 @@ export const api = {
   getTheme: () => request<Theme>('/api/theme', { cache: 'no-store' }),
   updateTheme: (payload: ThemeUpdate) =>
     request<Theme>('/api/theme', { method: 'PUT', body: JSON.stringify(payload) }),
+  getMaintenance: () => request<{ maintenance: boolean }>('/api/maintenance', { cache: 'no-store' }),
+  setMaintenance: (on: boolean) =>
+    request<{ maintenance: boolean }>('/api/maintenance', {
+      method: 'PUT',
+      body: JSON.stringify({ on }),
+    }),
   getCurrentWeek: () => request<CurrentWeek | null>('/api/current-week'),
   checkIn: (week: number, status: CheckInStatus | null) =>
     request<{ ok: true; week: number; status: CheckInStatus | null }>('/api/checkin', {

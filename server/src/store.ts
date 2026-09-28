@@ -739,6 +739,7 @@ export class LeagueStore {
     this.ensurePlateAppearancesTable();
     if (sqlitePath) this.importLegacyJsonIfNeeded(sqlitePath);
     this.seedIfEmpty();
+    this.ensureMaintenanceSetting();
     this.upgradePlaceholderLeagueCopy();
   }
 
@@ -783,8 +784,23 @@ export class LeagueStore {
       this.db
         .prepare("INSERT INTO settings (key, value) VALUES ('theme', ?) ON CONFLICT(key) DO NOTHING")
         .run(JSON.stringify(DEFAULT_THEME_INPUT));
+      this.db
+        .prepare("INSERT INTO settings (key, value) VALUES ('maintenance', ?) ON CONFLICT(key) DO NOTHING")
+        .run('off');
     });
     tx();
+  }
+
+  /**
+   * Fresh seeds store maintenance=off so tests stay open. Existing league DBs
+   * that never had the key (live Fly) default on so visitors see the down page.
+   */
+  private ensureMaintenanceSetting(): void {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'maintenance'").get() as
+      | { value: string }
+      | undefined;
+    if (row) return;
+    this.db.prepare("INSERT INTO settings (key, value) VALUES ('maintenance', ?)").run('on');
   }
 
   private importLegacyJsonIfNeeded(sqlitePath: string): void {
@@ -1154,6 +1170,23 @@ export class LeagueStore {
       )
       .run(JSON.stringify(next));
     return this.getTheme();
+  }
+
+  isMaintenance(): boolean {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'maintenance'").get() as
+      | { value: string }
+      | undefined;
+    return row?.value === 'on';
+  }
+
+  setMaintenance(on: boolean): boolean {
+    const value = on ? 'on' : 'off';
+    this.db
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('maintenance', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      )
+      .run(value);
+    return on;
   }
 
   getSheetsSettings(): SheetsSettings {

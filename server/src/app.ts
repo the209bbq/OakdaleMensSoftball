@@ -133,6 +133,43 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     res.json({ status: 'ok', league: 'Oakdale Men\'s Softball' });
   });
 
+  api.get('/maintenance', (_req: Request, res: Response) => {
+    res.json({ maintenance: store.isMaintenance() });
+  });
+
+  api.put('/maintenance', requireAdmin, (req: Request, res: Response) => {
+    const raw = req.body?.on ?? req.body?.maintenance;
+    if (typeof raw !== 'boolean') {
+      res.status(400).json({ error: 'on must be a boolean' });
+      return;
+    }
+    res.json({ maintenance: store.setMaintenance(raw) });
+  });
+
+  // Visitors and signed-in players hit the down page; admin can still run the app.
+  // Health stays 200 so the host does not recycle the machine.
+  api.use((req: Request, res: Response, next: NextFunction) => {
+    if (!store.isMaintenance()) {
+      next();
+      return;
+    }
+    if (req.user?.role === 'admin') {
+      next();
+      return;
+    }
+    const path = req.path;
+    const openGet = req.method === 'GET' && (path === '/health' || path === '/theme' || path === '/maintenance');
+    const openAuth = path === '/auth/login' || path === '/auth/logout' || path === '/auth/me';
+    if (openGet || openAuth) {
+      next();
+      return;
+    }
+    res.status(503).json({
+      error: 'The league app is down for maintenance.',
+      maintenance: true,
+    });
+  });
+
   // ---- Auth --------------------------------------------------------------
 
   api.post('/auth/register', async (req: Request, res: Response) => {

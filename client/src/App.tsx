@@ -127,6 +127,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [profileOpen, setProfileOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [maintenance, setMaintenance] = useState(false);
 
   function openAuth(mode: 'login' | 'register' = 'login') {
     setAuthMode(mode);
@@ -160,8 +161,40 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMaintenance() {
+      try {
+        const status = await api.getMaintenance();
+        if (!cancelled) setMaintenance(status.maintenance === true);
+      } catch {
+        /* keep the last known flag */
+      }
+    }
+    void loadMaintenance();
+    const timer = window.setInterval(() => void loadMaintenance(), 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  if (maintenance && user?.role !== 'admin') {
+    return (
+      <>
+        <MaintenancePage onSignIn={() => openAuth('login')} />
+        {authOpen && <AuthModal onClose={() => setAuthOpen(false)} initialMode="login" loginOnly />}
+      </>
+    );
+  }
+
   return (
     <div className="app-shell">
+      {maintenance && user?.role === 'admin' && (
+        <div className="maintenance-banner" role="status">
+          Visitors see the Down for maintenance page. Turn it off in Admin when you are ready.
+        </div>
+      )}
       <header className="app-bar">
         <div className="app-bar-inner">
           <img className="app-logo" src="/app-icon.svg" alt="" width="28" height="28" />
@@ -242,6 +275,25 @@ export default function App() {
   );
 }
 
+function MaintenancePage({ onSignIn }: { onSignIn: () => void }) {
+  return (
+    <div className="app-shell">
+      <main className="maintenance-page">
+        <img className="app-logo" src="/app-icon.svg" alt="" width="56" height="56" />
+        <p className="landing-league">Oakdale Mens Softball · Beer league</p>
+        <h1>Down for maintenance</h1>
+        <p>
+          The league app is being updated. Check back after the next keg — scores, standings,
+          check-in, and the dugout book will be here.
+        </p>
+        <button className="primary-btn" type="button" onClick={onSignIn}>
+          Sign in
+        </button>
+      </main>
+    </div>
+  );
+}
+
 function AuthControl({ onSignIn, onEditProfile }: { onSignIn: () => void; onEditProfile: () => void }) {
   const { user } = useAuth();
   if (!user) {
@@ -266,12 +318,14 @@ function AuthControl({ onSignIn, onEditProfile }: { onSignIn: () => void; onEdit
 function AuthModal({
   onClose,
   initialMode = 'login',
+  loginOnly = false,
 }: {
   onClose: () => void;
   initialMode?: 'login' | 'register';
+  loginOnly?: boolean;
 }) {
   const { login, register } = useAuth();
-  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'register'>(loginOnly ? 'login' : initialMode);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -300,9 +354,11 @@ function AuthModal({
           <button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
             Sign in
           </button>
-          <button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>
-            Create account
-          </button>
+          {!loginOnly && (
+            <button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>
+              Create account
+            </button>
+          )}
         </div>
         <form onSubmit={submit} className="modal-form">
           {mode === 'register' && (
@@ -4062,6 +4118,8 @@ function Admin() {
   const [pendingWaivers, setPendingWaivers] = useState<PublicPlayerProfile[]>([]);
   const [sheetStatus, setSheetStatus] = useState<PlayerStatsSheetStatus | null>(null);
   const [sheetBusy, setSheetBusy] = useState<'sync' | 'preview' | 'csv' | null>(null);
+  const [maintenanceOn, setMaintenanceOn] = useState(false);
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
   const managerCountByTeam = useMemo(() => {
@@ -4112,8 +4170,31 @@ function Admin() {
         if (status && typeof status === 'object' && 'spreadsheetId' in status) setSheetStatus(status);
       })
       .catch((e) => setError(e.message));
+    api
+      .getMaintenance()
+      .then((status) => setMaintenanceOn(status.maintenance === true))
+      .catch((e) => setError(e.message));
   }
   useEffect(load, []);
+
+  async function toggleMaintenance() {
+    setError(null);
+    setMessage(null);
+    setMaintenanceBusy(true);
+    try {
+      const next = await api.setMaintenance(!maintenanceOn);
+      setMaintenanceOn(next.maintenance === true);
+      setMessage(
+        next.maintenance
+          ? 'App is down. Visitors see the maintenance page.'
+          : 'App is back online.',
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  }
 
   async function changeRole(u: User, role: Role, teamId: string | null, onRoster?: boolean) {
     setError(null);
@@ -4312,6 +4393,27 @@ function Admin() {
       <h2>League Admin</h2>
       {error && <p className="error inline-error">{error}</p>}
       {message && <p className="message">{message}</p>}
+
+      <div className="maintenance-admin">
+        <h3>Site maintenance</h3>
+        <p className="theme-help">
+          {maintenanceOn
+            ? 'The app is down. Everyone except you sees the Down for maintenance page. Health checks stay up.'
+            : 'Put the app down when you need to work on it. Visitors get a full-screen maintenance page instead of Home, scores, or standings.'}
+        </p>
+        <button
+          type="button"
+          className={maintenanceOn ? 'primary-btn' : 'primary-btn danger-btn'}
+          disabled={maintenanceBusy}
+          onClick={() => void toggleMaintenance()}
+        >
+          {maintenanceBusy
+            ? 'Updating…'
+            : maintenanceOn
+              ? 'Bring the app back online'
+              : 'Put the app down for maintenance'}
+        </button>
+      </div>
 
       <div className="waiver-admin">
         <h3>Waivers to approve</h3>
