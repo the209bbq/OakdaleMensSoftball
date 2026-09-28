@@ -1,40 +1,50 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { api, MANAGERS_PER_TEAM, SKILL_LEVEL_LABELS, SKILL_LEVELS, TEAM_ROSTER_SPOTS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PlayerStatsSheetStatus, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Suggestion, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TeamManagerSummary, type TeamWeekGame, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
+import { api, MANAGERS_PER_TEAM, SKILL_LEVEL_LABELS, SKILL_LEVELS, TEAM_ROSTER_SPOTS, WAIVER_STATUS_LABELS, type CurrentWeek, type FaInvite, type Game, type GameBoxScore, type GameLineup, type GamePlay, type InningHalf, type Landing, type LineupPlayer, type MailStatus, type ManagerAuthorization, type Player, type PlayerAccount, type PlayerBattingLine, type PlayResult, type PlayerStatsSheetStatus, type PublicPlayerProfile, type Role, type ScoreSide, type ScoringPhase, type SkillLevel, type StandingRow, type Team, type TeamAttendance, type TeamBoard, type TeamBoardRow, type TeamMember, type TeamMessage, type TeamManagerSummary, type TeamWeekGame, type TestDataClearResult, type TestDataGenerateResult, type Theme, type ThemeId, type User, type WaiverStatus } from './api';
 import { useAuth } from './auth';
 import { fileToBannerDataUrl, fileToSquareDataUrl, fileToWaiverDataUrl } from './image';
 import { applyTheme } from './theme';
 
-type Tab = 'home' | 'standings' | 'schedule' | 'teams' | 'rules' | 'admin';
+type Tab = 'home' | 'standings' | 'schedule' | 'teams' | 'admin';
 
 const TAB_TITLES: Record<Tab, string> = {
   home: 'Home',
   standings: 'Standings',
   schedule: 'Schedule',
   teams: 'Teams',
-  rules: 'Rules',
   admin: 'Admin',
 };
 
-const TABS = new Set<Tab>(['home', 'standings', 'schedule', 'teams', 'rules', 'admin']);
+const TABS = new Set<Tab>(['home', 'standings', 'schedule', 'teams', 'admin']);
 const LIVE_POLL_MS = 2000;
 
-type AppRoute = { tab: Tab; gameId: string | null; teamId: string | null; playerId: string | null };
+type AppRoute = {
+  tab: Tab;
+  gameId: string | null;
+  teamId: string | null;
+  playerId: string | null;
+  openRules: boolean;
+};
 
 function parseRoute(pathname: string): AppRoute {
   const parts = pathname.split('/').filter(Boolean);
   if (parts[0] === 'games' && parts[1]) {
-    return { tab: 'schedule', gameId: decodeURIComponent(parts[1]), teamId: null, playerId: null };
+    return { tab: 'schedule', gameId: decodeURIComponent(parts[1]), teamId: null, playerId: null, openRules: false };
   }
   if (parts[0] === 'players' && parts[1]) {
-    return { tab: 'teams', gameId: null, teamId: null, playerId: decodeURIComponent(parts[1]) };
+    return { tab: 'teams', gameId: null, teamId: null, playerId: decodeURIComponent(parts[1]), openRules: false };
   }
   const first = parts[0] === 'rosters' ? 'teams' : parts[0];
   if (first === 'teams' && parts[1]) {
-    return { tab: 'teams', gameId: null, teamId: decodeURIComponent(parts[1]), playerId: null };
+    return { tab: 'teams', gameId: null, teamId: decodeURIComponent(parts[1]), playerId: null, openRules: false };
   }
-  if (first && TABS.has(first as Tab)) return { tab: first as Tab, gameId: null, teamId: null, playerId: null };
-  return { tab: 'home', gameId: null, teamId: null, playerId: null };
+  if (first === 'rules') {
+    return { tab: 'home', gameId: null, teamId: null, playerId: null, openRules: true };
+  }
+  if (first && TABS.has(first as Tab)) {
+    return { tab: first as Tab, gameId: null, teamId: null, playerId: null, openRules: false };
+  }
+  return { tab: 'home', gameId: null, teamId: null, playerId: null, openRules: false };
 }
 
 function pathForTab(tab: Tab): string {
@@ -226,6 +236,7 @@ export default function App() {
             onOpenTeam={(id) => navigate(pathForTeam(id))}
             onOpenPlayer={(id) => navigate(pathForPlayer(id))}
             onSignUp={() => openAuth('register')}
+            openRules={route.openRules}
           />
         )}
         {tab === 'standings' && <Standings onOpenTeam={(id) => navigate(pathForTeam(id))} />}
@@ -253,16 +264,14 @@ export default function App() {
             onOpenGame={(id) => navigate(pathForGame(id))}
           />
         )}
-        {tab === 'rules' && <Rules />}
         {tab === 'admin' && user?.role === 'admin' && <Admin />}
       </main>
 
       <nav className="tab-bar" role="tablist" aria-label="Main navigation">
         <TabButton tab="home" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Home" icon={HomeIcon} />
-        <TabButton tab="standings" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Standings" icon={TrophyIcon} />
         <TabButton tab="schedule" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Schedule" icon={CalendarIcon} />
         <TabButton tab="teams" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Teams" icon={RosterIcon} />
-        <TabButton tab="rules" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Rules" icon={RulesIcon} />
+        <TabButton tab="standings" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Standings" icon={TrophyIcon} />
         {user?.role === 'admin' && (
           <TabButton tab="admin" current={tab} onSelect={(next) => navigate(pathForTab(next))} label="Admin" icon={GearIcon} />
         )}
@@ -686,27 +695,38 @@ function HomePage({
   onOpenTeam,
   onOpenPlayer,
   onSignUp,
+  openRules = false,
 }: {
   onOpenGame: (id: string) => void;
   onOpenTeam: (teamId: string) => void;
   onOpenPlayer: (playerId: string) => void;
   onSignUp: () => void;
+  openRules?: boolean;
 }) {
   const { user } = useAuth();
   if (user && (user.role === 'player' || user.role === 'manager')) {
-    return <PlayerHome onOpenGame={onOpenGame} onOpenTeam={onOpenTeam} onOpenPlayer={onOpenPlayer} />;
+    return (
+      <PlayerHome
+        onOpenGame={onOpenGame}
+        onOpenTeam={onOpenTeam}
+        onOpenPlayer={onOpenPlayer}
+        openRules={openRules}
+      />
+    );
   }
-  return <LeagueLanding onOpenPlayer={onOpenPlayer} onSignUp={onSignUp} />;
+  return <LeagueLanding onOpenPlayer={onOpenPlayer} onSignUp={onSignUp} openRules={openRules} />;
 }
 
 function PlayerHome({
   onOpenGame,
   onOpenTeam,
   onOpenPlayer,
+  openRules = false,
 }: {
   onOpenGame: (id: string) => void;
   onOpenTeam: (teamId: string) => void;
   onOpenPlayer: (playerId: string) => void;
+  openRules?: boolean;
 }) {
   const { user } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
@@ -889,7 +909,7 @@ function PlayerHome({
       )}
 
       <FreeAgencyPanel onOpenPlayer={onOpenPlayer} />
-      <SuggestionsBox />
+      <RulesPanel defaultOpen={openRules} />
     </div>
   );
 }
@@ -897,9 +917,11 @@ function PlayerHome({
 function LeagueLanding({
   onOpenPlayer,
   onSignUp,
+  openRules = false,
 }: {
   onOpenPlayer: (playerId: string) => void;
   onSignUp: () => void;
+  openRules?: boolean;
 }) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -1078,84 +1100,8 @@ function LeagueLanding({
       </section>
 
       <FreeAgencyPanel onOpenPlayer={onOpenPlayer} onSignUp={onSignUp} />
-      <SuggestionsBox />
+      <RulesPanel defaultOpen={openRules} />
     </div>
-  );
-}
-
-function SuggestionsBox() {
-  const { user } = useAuth();
-  const [text, setText] = useState('');
-  const [name, setName] = useState(user?.name ?? '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [thanks, setThanks] = useState(false);
-
-  useEffect(() => {
-    if (user?.name && !name) setName(user.name);
-  }, [user?.name, name]);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const payload: { text: string; name?: string } = { text };
-      const trimmedName = name.trim();
-      if (trimmedName) payload.name = trimmedName;
-      await api.submitSuggestion(payload);
-      setText('');
-      setName(user?.name ?? '');
-      setThanks(true);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="card landing-suggestions">
-      <h2>Suggestions</h2>
-      {/* Routing suggestions to an external place can be added later; for now admins view them in-app. */}
-      {thanks ? (
-        <div className="suggestions-thanks">
-          <p className="message">Thanks for the suggestion!</p>
-          <button className="link-btn" type="button" onClick={() => setThanks(false)}>
-            Send another
-          </button>
-        </div>
-      ) : (
-        <form className="suggestions-form" onSubmit={submit}>
-          <label className="field">
-            Suggestion
-            <textarea
-              aria-label="Suggestion"
-              placeholder="Ideas for the beer league, fields, kegs…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              rows={4}
-              maxLength={2000}
-              required
-            />
-          </label>
-          <label className="field">
-            Your name (optional)
-            <input
-              aria-label="Your name (optional)"
-              placeholder="Anonymous if left blank"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={80}
-            />
-          </label>
-          {error && <p className="error inline-error">{error}</p>}
-          <button className="primary-btn" type="submit" disabled={busy || !text.trim()}>
-            {busy ? 'Sending…' : 'Submit'}
-          </button>
-        </form>
-      )}
-    </section>
   );
 }
 
@@ -3901,9 +3847,10 @@ function TeamPage({
   );
 }
 
-function Rules() {
+function RulesPanel({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const [open, setOpen] = useState(defaultOpen);
   const [rules, setRules] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -3915,11 +3862,16 @@ function Rules() {
     api.getRules().then((r) => setRules(r.rules)).catch((e) => setError(e.message));
   }, []);
 
+  useEffect(() => {
+    if (defaultOpen) setOpen(true);
+  }, [defaultOpen]);
+
   function startEdit() {
     setDraft(rules);
     setMessage(null);
     setError(null);
     setEditing(true);
+    setOpen(true);
   }
 
   function cancelEdit() {
@@ -3943,42 +3895,62 @@ function Rules() {
     }
   }
 
-  if (error && !editing) return <p className="error">{error}</p>;
-
   return (
-    <section className="card">
-      <h2>League Rules</h2>
-      {editing ? (
-        <div className="rules-edit">
-          <textarea
-            className="rules-textarea"
-            aria-label="League rules"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={16}
-          />
-          {error && <p className="error inline-error">{error}</p>}
-          <div className="rules-actions">
-            <button className="primary-btn" onClick={save} disabled={saving}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button className="link-btn" onClick={cancelEdit} disabled={saving}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <>
-          {isAdmin && (
-            <div className="rules-toolbar">
-              <button className="mini-btn" onClick={startEdit}>
-                Edit rules
-              </button>
+    <section className="card free-agency-card">
+      <button
+        type="button"
+        className="free-agency-toggle"
+        aria-expanded={open}
+        aria-controls="league-rules-panel"
+        aria-label={open ? 'League rules, expanded' : 'League rules, collapsed'}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="free-agency-toggle-text">
+          <span className="free-agency-title">League rules</span>
+          <span className="free-agency-summary">{open ? 'Tap to hide' : 'Tap to read'}</span>
+        </span>
+        <span className={`game-chevron${open ? ' is-open' : ''}`} aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </span>
+      </button>
+      {open && (
+        <div className="free-agency-body" id="league-rules-panel">
+          {error && !editing && <p className="error inline-error">{error}</p>}
+          {editing ? (
+            <div className="rules-edit">
+              <textarea
+                className="rules-textarea"
+                aria-label="League rules"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={16}
+              />
+              {error && <p className="error inline-error">{error}</p>}
+              <div className="rules-actions">
+                <button className="primary-btn" type="button" onClick={() => void save()} disabled={saving}>
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button className="link-btn" type="button" onClick={cancelEdit} disabled={saving}>
+                  Cancel
+                </button>
+              </div>
             </div>
+          ) : (
+            <>
+              {isAdmin && (
+                <div className="rules-toolbar">
+                  <button className="mini-btn" type="button" onClick={startEdit}>
+                    Edit rules
+                  </button>
+                </div>
+              )}
+              {message && <p className="message">{message}</p>}
+              <div className="rules-text">{rules || 'Rules will show here once the commissioner posts them.'}</div>
+            </>
           )}
-          {message && <p className="message">{message}</p>}
-          <div className="rules-text">{rules}</div>
-        </>
+        </div>
       )}
     </section>
   );
@@ -4109,7 +4081,6 @@ function Admin() {
   const [mgrOnRoster, setMgrOnRoster] = useState(true);
   const [authorizations, setAuthorizations] = useState<ManagerAuthorization[]>([]);
   const [authorizing, setAuthorizing] = useState(false);
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [testDataConfirm, setTestDataConfirm] = useState<'generate' | 'clear' | null>(null);
   const [testDataBusy, setTestDataBusy] = useState(false);
   const [testDataSummary, setTestDataSummary] = useState<string | null>(null);
@@ -4156,7 +4127,6 @@ function Admin() {
       })
       .catch((e) => setError(e.message));
     api.listManagerEmails().then(setAuthorizations).catch((e) => setError(e.message));
-    api.listSuggestions().then(setSuggestions).catch((e) => setError(e.message));
     api
       .getMailStatus()
       .then((status) => {
@@ -4265,18 +4235,6 @@ function Admin() {
       await api.revokeManagerEmail(email);
       setMessage(`Removed ${email}.`);
       load();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function removeSuggestion(id: string) {
-    setError(null);
-    setMessage(null);
-    try {
-      await api.deleteSuggestion(id);
-      setSuggestions((prev) => prev.filter((s) => s.id !== id));
-      setMessage('Suggestion removed.');
     } catch (err) {
       setError((err as Error).message);
     }
@@ -4623,35 +4581,6 @@ function Admin() {
         )}
       </div>
 
-      <h3>Suggestions</h3>
-      {/* Routing suggestions to an external place can be added later; for now admins view them in-app. */}
-      {suggestions.length === 0 ? (
-        <p className="member-empty">No suggestions yet.</p>
-      ) : (
-        <ul className="suggestion-list">
-          {suggestions.map((s) => (
-            <li key={s.id} className="suggestion-row">
-              <div className="suggestion-main">
-                <p className="suggestion-text">{s.text}</p>
-                <p className="suggestion-meta">
-                  {s.authorName?.trim() || 'Anonymous'}
-                  {' · '}
-                  {formatSuggestionDate(s.createdAt)}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="link-btn danger"
-                onClick={() => removeSuggestion(s.id)}
-                aria-label={`Delete suggestion from ${s.authorName?.trim() || 'Anonymous'}`}
-              >
-                Delete
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
       <h3 className="admin-users-heading">Teams</h3>
       <ul className="user-list">
         {teams.map((t) => (
@@ -4832,18 +4761,6 @@ function Admin() {
   );
 }
 
-function formatSuggestionDate(iso: string): string {
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return iso;
-  return parsed.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
 function HomeIcon() {
   return (
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -4879,16 +4796,6 @@ function RosterIcon() {
       <circle cx="9" cy="8" r="3" />
       <path d="M3 20a6 6 0 0 1 12 0" />
       <path d="M16 6a3 3 0 0 1 0 6M18 20a6 6 0 0 0-3-5.2" />
-    </svg>
-  );
-}
-
-function RulesIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5z" />
-      <path d="M4 19a2 2 0 0 0 2 2h13" />
-      <path d="M8 7h7M8 11h7" />
     </svg>
   );
 }

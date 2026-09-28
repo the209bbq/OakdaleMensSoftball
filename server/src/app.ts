@@ -447,45 +447,6 @@ export function createApp(store: LeagueStore, options: AppOptions = {}): Express
     }
   });
 
-  // ---- Suggestions (public submit; admin-only reads).
-  // Routing suggestions to an external place (email/Slack) can be added later;
-  // for now admins view them in-app.
-  api.post('/suggestions', (req: Request, res: Response) => {
-    try {
-      const { text, name } = req.body ?? {};
-      let authorName: string | null | undefined;
-      if (typeof name === 'string') {
-        authorName = name;
-      } else if (req.user) {
-        authorName = req.user.name;
-      } else {
-        authorName = null;
-      }
-      const suggestion = store.addSuggestion({ text, authorName });
-      res.status(201).json(suggestion);
-    } catch (err) {
-      res.status(400).json({ error: (err as Error).message });
-    }
-  });
-
-  api.get('/suggestions', requireAdmin, (_req: Request, res: Response) => {
-    res.json(store.listSuggestions());
-  });
-
-  api.delete('/suggestions/:id', requireAdmin, (req: Request, res: Response) => {
-    try {
-      store.deleteSuggestion(req.params.id);
-      res.json({ ok: true });
-    } catch (err) {
-      const message = (err as Error).message;
-      if (message.startsWith('Unknown suggestion')) {
-        res.status(404).json({ error: 'Suggestion not found' });
-        return;
-      }
-      res.status(400).json({ error: message });
-    }
-  });
-
   // ---- Team group chat (team members + admins) --------------------------
 
   api.get('/teams/:id/messages', requireAuth, (req: Request, res: Response) => {

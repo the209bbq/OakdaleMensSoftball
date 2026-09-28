@@ -294,14 +294,6 @@ export interface Landing extends LandingContent {
 
 export type { Theme, ThemeId, ThemeInput } from './theme.js';
 
-/** Public suggestion submitted from the Home page. */
-export interface Suggestion {
-  id: string;
-  text: string;
-  authorName: string | null;
-  createdAt: string;
-}
-
 /** Team-scoped group-chat message. */
 export interface TeamMessage {
   id: string;
