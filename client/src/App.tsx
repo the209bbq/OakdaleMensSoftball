@@ -747,7 +747,13 @@ function HomeWeekGames({ onOpenGame }: { onOpenGame: (id: string) => void }) {
 
   return (
     <section className="card home-week-games" aria-label="This week's games">
-      <h2>{week ? `Games · Week ${week.week}` : 'Games'}</h2>
+      <div className="home-week-head">
+        <div>
+          <p className="home-week-kicker">Night at the park</p>
+          <h2>{week ? "This week's games" : 'Games'}</h2>
+        </div>
+        {week && <span className="home-week-badge">Week {week.week}</span>}
+      </div>
       {!ready && <p className="muted-copy home-week-empty">Loading games…</p>}
       {ready && !week && (
         <p className="muted-copy home-week-empty">This week&apos;s games show up Thursday at 12:01 AM.</p>
@@ -770,18 +776,20 @@ function HomeWeekGames({ onOpenGame }: { onOpenGame: (id: string) => void }) {
                   onClick={() => onOpenGame(game.id)}
                   aria-label={`Open game: ${game.awayTeamName} at ${game.homeTeamName}`}
                 >
-                  <span className="home-week-matchup">
-                    {game.awayTeamName} at {game.homeTeamName}
-                    {live && (
-                      <span className="live-pill" aria-label="Live">
-                        LIVE
-                      </span>
-                    )}
+                  {live && (
+                    <span className="live-pill" aria-label="Live">
+                      LIVE
+                    </span>
+                  )}
+                  <span className="home-week-names">
+                    <span className="home-week-away">{game.awayTeamName}</span>
+                    <span className="home-week-vs">at</span>
+                    <span className="home-week-home">{game.homeTeamName}</span>
                   </span>
-                  <span className="home-week-meta">
-                    {formatGameDate(game.date)}
-                    {game.time ? ` · ${game.time}` : ''}
-                    {game.field ? ` · ${game.field}` : ''}
+                  <span className="home-week-chips">
+                    <span className="home-week-chip">{formatGameDate(game.date)}</span>
+                    {game.time ? <span className="home-week-chip">{game.time}</span> : null}
+                    {game.field ? <span className="home-week-chip">{game.field}</span> : null}
                   </span>
                 </button>
                 {canStart && (
@@ -796,7 +804,7 @@ function HomeWeekGames({ onOpenGame }: { onOpenGame: (id: string) => void }) {
                 )}
                 {!canStart && canScore && (
                   <button type="button" className="primary-btn home-start-btn" onClick={() => openDugout(game)}>
-                    Dugout
+                    Open dugout
                   </button>
                 )}
               </li>
@@ -923,7 +931,7 @@ function PlayerHome({
 
   return (
     <div className="landing player-home">
-      <section className="card player-home-card">
+      <section className="player-home-hero">
         <p className="player-home-hello">Hey {user?.name?.split(' ')[0] || 'there'}</p>
         {teamId ? (
           <button
@@ -937,22 +945,23 @@ function PlayerHome({
         ) : (
           <h1 className="player-home-team is-empty">No team</h1>
         )}
-        <p className="beer-league-kicker">Beer league night — check in, keep the book, tap the cooler.</p>
+        <p className="player-home-blurb">Beer league night — check in, keep the book, tap the cooler.</p>
         {!teamId && ready && (
-          <p className="muted-copy player-home-empty">
-            Open Free agency below to join a team.
-          </p>
+          <p className="player-home-empty">Open Free agency below to join a team.</p>
         )}
       </section>
 
       <HomeWeekGames onOpenGame={onOpenGame} />
 
       {teamId && checkWeek != null && checkDate && (
-        <section className="card">
+        <section className="card home-checkin-card">
           <div className="checkin-panel player-home-checkin">
-            <h2 className="checkin-heading">
-              Check-in — Week {checkWeek} · {formatGameDate(checkDate)}
-            </h2>
+            <div className="home-checkin-head">
+              <h2 className="checkin-heading">You coming?</h2>
+              <p className="checkin-sub">
+                Week {checkWeek} · {formatGameDate(checkDate)}
+              </p>
+            </div>
             {members.length > 0 && (
               <p className="checkin-summary">
                 {IN_MARK} {checkInCounts.in} · {OUT_MARK} {checkInCounts.out} · — {checkInCounts.none}
@@ -1095,6 +1104,12 @@ function LeagueLanding({
         <img className="landing-logo" src="/app-icon.svg" alt="" width="56" height="56" />
         <p className="landing-league">Oakdale Mens Softball · Beer league</p>
         <h1 className="landing-headline">{landing.headline}</h1>
+        <p className="landing-hero-blurb">Wednesday nights at Kerr Park. Come play, keep the book, tap the cooler.</p>
+        {!user && (
+          <button className="landing-join-btn" type="button" onClick={onSignUp}>
+            Join the league
+          </button>
+        )}
       </section>
 
       {landing.imageUrl && (
@@ -1111,9 +1126,12 @@ function LeagueLanding({
         </section>
       )}
 
-      <section className="card landing-announcement">
+      <section className="card landing-announcement home-notes-card">
         <div className="landing-announcement-head">
-          <h2>Announcements</h2>
+          <div>
+            <p className="home-notes-kicker">From the league</p>
+            <h2>Announcements</h2>
+          </div>
           {isAdmin && !editing && (
             <button className="mini-btn" type="button" onClick={startEdit}>
               Edit
@@ -1381,7 +1399,7 @@ function CountdownCard({ label, target }: { label: string; target: string | null
   if (targetMs <= now) {
     return (
       <section className="card landing-countdown">
-        <p className="countdown-underway">The season is underway!</p>
+        <p className="countdown-underway">The season is underway — see this week&apos;s games below.</p>
       </section>
     );
   }
