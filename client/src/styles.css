@@ -2456,89 +2456,123 @@ body {
 .landing {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 1rem;
 }
 
 .landing-hero {
-  background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 80% at 100% -10%, rgba(242, 169, 0, 0.28), transparent 46%),
+    linear-gradient(160deg, var(--navy) 0%, var(--navy-light) 72%, #15263f 100%);
   color: #fff;
-  border-radius: 14px;
-  padding: 1.4rem 1.2rem 1.3rem;
+  border-radius: 20px;
+  padding: 1.45rem 1.2rem 1.4rem;
   text-align: center;
-  box-shadow: 0 4px 18px rgba(11, 37, 69, 0.18);
+  box-shadow: 0 12px 28px rgba(11, 37, 69, 0.22);
 }
 
 .landing-logo {
-  border-radius: 12px;
-  margin-bottom: 0.7rem;
+  border-radius: 14px;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
 }
 
 .landing-league {
   margin: 0;
   color: var(--accent);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .landing-headline {
-  margin: 0.35rem 0 0;
-  font-size: 1.35rem;
-  line-height: 1.25;
+  margin: 0.45rem 0 0;
+  font-size: 1.55rem;
+  line-height: 1.2;
   color: #fff;
+}
+
+.landing-hero-blurb {
+  margin: 0.55rem auto 0;
+  max-width: 22rem;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.landing-join-btn {
+  width: 100%;
+  margin-top: 1rem;
+  min-height: 3rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 1.05rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.landing-join-btn:hover,
+.landing-join-btn:focus-visible {
+  filter: brightness(1.05);
+  outline: none;
 }
 
 .landing-banner {
   width: 100%;
   max-height: 180px;
   object-fit: cover;
-  border-radius: 14px;
+  border-radius: 18px;
   display: block;
   background: var(--card);
-  box-shadow: 0 4px 18px rgba(11, 37, 69, 0.08);
+  box-shadow: 0 8px 20px rgba(11, 37, 69, 0.1);
 }
 
 .landing-countdown {
   text-align: center;
+  padding: 1.15rem 1rem 1.2rem;
 }
 
 .countdown-label {
-  margin: 0 0 0.7rem;
+  margin: 0 0 0.75rem;
   color: var(--heading);
-  font-weight: 700;
+  font-weight: 800;
   font-size: 0.95rem;
 }
 
 .countdown-units {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 0.45rem;
+  gap: 0.5rem;
 }
 
 .countdown-unit {
-  background: var(--bg);
-  border-radius: 10px;
-  padding: 0.55rem 0.2rem;
+  background: var(--navy);
+  color: #fff;
+  border-radius: 14px;
+  padding: 0.7rem 0.2rem 0.6rem;
 }
 
 .countdown-unit strong {
   display: block;
-  color: var(--heading);
-  font-size: 1.25rem;
+  color: #fff;
+  font-size: 1.35rem;
   line-height: 1.1;
 }
 
 .countdown-unit span {
-  color: var(--muted);
+  color: var(--accent);
   font-size: 0.68rem;
-  font-weight: 700;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 
 .countdown-phrase {
-  margin: 0.75rem 0 0;
+  margin: 0.8rem 0 0;
   color: var(--heading);
   font-weight: 700;
   font-size: 0.92rem;
@@ -2547,8 +2581,9 @@ body {
 .countdown-underway {
   margin: 0;
   color: var(--heading);
-  font-weight: 700;
+  font-weight: 800;
   font-size: 1.05rem;
+  line-height: 1.35;
 }
 
 .landing-announcement-head {
@@ -2561,6 +2596,15 @@ body {
 
 .landing-announcement-head h2 {
   margin: 0;
+}
+
+.home-notes-kicker {
+  margin: 0 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .landing-body {
@@ -2591,27 +2635,33 @@ body {
 .player-home {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 1rem;
 }
 
-.player-home-card {
-  padding: 1.15rem 1.1rem 1.2rem;
+.player-home-hero {
+  background:
+    radial-gradient(120% 80% at 0% -20%, rgba(242, 169, 0, 0.28), transparent 50%),
+    linear-gradient(160deg, var(--navy) 0%, var(--navy-light) 100%);
+  color: #fff;
+  border-radius: 20px;
+  padding: 1.25rem 1.15rem 1.3rem;
+  box-shadow: 0 12px 28px rgba(11, 37, 69, 0.2);
 }
 
 .player-home-hello {
   margin: 0;
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .player-home-team {
-  margin: 0.2rem 0 0.85rem;
-  color: var(--heading);
-  font-size: 1.65rem;
-  line-height: 1.15;
+  margin: 0.35rem 0 0.55rem;
+  color: #fff;
+  font-size: 1.7rem;
+  line-height: 1.12;
 }
 
 .player-home-team h1 {
@@ -2635,27 +2685,69 @@ body {
 
 .player-home-team.is-link:hover,
 .player-home-team.is-link:focus-visible {
-  color: var(--accent-dark);
+  color: var(--accent);
   outline: none;
 }
 
 .player-home-team.is-empty {
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.player-home-blurb,
+.player-home-empty {
+  margin: 0;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.95rem;
+  line-height: 1.4;
 }
 
 .player-home-empty {
-  padding: 0;
-  margin: 0;
+  margin-top: 0.45rem;
+  font-weight: 600;
+}
+
+.home-week-games {
+  padding: 1.15rem 1rem 1.1rem;
+}
+
+.home-week-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.home-week-kicker {
+  margin: 0 0 0.2rem;
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 
 .home-week-games h2 {
-  margin: 0 0 0.7rem;
+  margin: 0;
   color: var(--heading);
-  font-size: 1.05rem;
+  font-size: 1.28rem;
+  line-height: 1.15;
+}
+
+.home-week-badge {
+  flex: none;
+  margin-top: 0.15rem;
+  border-radius: 999px;
+  padding: 0.28rem 0.65rem;
+  background: var(--navy);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
 }
 
 .home-week-empty {
-  padding: 0;
+  padding: 0.15rem 0 0;
   margin: 0;
 }
 
@@ -2665,26 +2757,32 @@ body {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  gap: 0.75rem;
 }
 
 .home-week-game {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  border: 2px solid var(--border);
-  background: var(--bg);
-  border-radius: 14px;
-  padding: 0.8rem 0.9rem;
+  gap: 0.7rem;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #fff 0%, var(--bg) 100%);
+  border-radius: 16px;
+  padding: 0.95rem 0.95rem 0.9rem;
+  box-shadow: 0 6px 16px rgba(11, 37, 69, 0.06);
 }
 
 .home-week-game.is-live {
-  border-color: var(--accent);
+  border-color: #dc2626;
+  box-shadow: 0 8px 20px rgba(220, 38, 38, 0.12);
 }
 
 .home-week-open {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.55rem;
   width: 100%;
+  min-height: 4.5rem;
   padding: 0;
   border: none;
   background: none;
@@ -2693,43 +2791,99 @@ body {
   cursor: pointer;
 }
 
-.home-week-open:hover .home-week-matchup,
-.home-week-open:focus-visible .home-week-matchup {
-  color: var(--accent-dark);
+.home-week-names {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
 }
 
-.home-week-matchup {
+.home-week-away,
+.home-week-home {
+  color: var(--heading);
+  font-size: 1.12rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.home-week-vs {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.home-week-chips {
   display: flex;
   flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.home-week-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 0.45rem 0.55rem;
+  border-radius: 999px;
+  padding: 0.28rem 0.6rem;
+  background: #fff;
+  border: 1px solid var(--border);
   color: var(--heading);
-  font-size: 1.05rem;
-  font-weight: 800;
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .live-pill {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  padding: 0.12rem 0.5rem;
+  padding: 0.16rem 0.55rem;
   background: #dc2626;
   color: #ffffff;
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
+  animation: live-pulse 1.6s ease-in-out infinite;
 }
 
-.home-week-meta {
-  display: block;
-  margin-top: 0.25rem;
-  color: var(--muted);
-  font-size: 0.88rem;
-  font-weight: 600;
+@keyframes live-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 0.82;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-pill {
+    animation: none;
+  }
 }
 
 .home-start-btn {
   width: 100%;
+  min-height: 2.85rem;
+  margin: 0;
+  border-radius: 999px;
+  font-size: 1rem;
+}
+
+.home-checkin-card {
+  padding: 1.15rem 1rem 1.1rem;
+}
+
+.home-checkin-head {
+  margin-bottom: 0.75rem;
+}
+
+.checkin-sub {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
 }
 
 .player-home-checkin {
@@ -2746,9 +2900,9 @@ body {
 }
 
 .checkin-heading {
-  margin: 0 0 0.4rem;
+  margin: 0;
   color: var(--heading);
-  font-size: 1rem;
+  font-size: 1.28rem;
 }
 
 .checkin-summary {
@@ -2767,16 +2921,17 @@ body {
 .checkin-btn {
   border: 2px solid var(--border);
   background: #fff;
-  border-radius: 14px;
-  padding: 0.85rem 0.4rem 0.75rem;
-  font-size: 0.92rem;
-  font-weight: 700;
+  border-radius: 16px;
+  min-height: 5.4rem;
+  padding: 0.9rem 0.4rem 0.8rem;
+  font-size: 0.98rem;
+  font-weight: 800;
   color: var(--heading);
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.35rem;
 }
 
 .checkin-btn:disabled {

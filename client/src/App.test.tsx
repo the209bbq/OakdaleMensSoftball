@@ -259,7 +259,7 @@ describe('App', () => {
     expect(screen.getByRole('tab', { name: 'Home' })).toHaveAttribute('aria-selected', 'true');
     await waitFor(() => {
       expect(screen.getByText('Welcome to the Oakdale Mens Softball League')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Games · Week 1' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: "This week's games" })).toBeInTheDocument();
     });
     expect(screen.getByText(/TODO: add real content/i)).toBeInTheDocument();
     expect(screen.getByText(/Oakdale Mens Softball · Beer league/i)).toBeInTheDocument();
@@ -268,6 +268,7 @@ describe('App', () => {
     expect(screen.queryByText('1. Ten on the field.')).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: "This week's games" })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open game: da beers at oakdale tigers/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Join the league' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Start game' })).not.toBeInTheDocument();
   });
 
@@ -365,7 +366,7 @@ describe('App', () => {
     renderApp();
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Oakdale Tigers' })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Games · Week 1' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: "This week's games" })).toBeInTheDocument();
     });
     expect(screen.getByText('Hey Pat')).toBeInTheDocument();
     expect(screen.getByText(/beer league night/i)).toBeInTheDocument();
@@ -374,9 +375,13 @@ describe('App', () => {
     expect(screen.queryByText('Pat Shortstop')).not.toBeInTheDocument();
     expect(screen.queryByText('Player')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Games · Week 1' })).toBeInTheDocument();
-    expect(screen.getByText('Da Beers at Oakdale Tigers')).toBeInTheDocument();
-    expect(screen.getByText(/Wed May 6 · 6:00 PM · Field 1/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: "This week's games" })).toBeInTheDocument();
+    expect(screen.getByText('Da Beers')).toBeInTheDocument();
+    expect(screen.getAllByText('Oakdale Tigers').length).toBeGreaterThan(0);
+    expect(screen.getByText('Wed May 6')).toBeInTheDocument();
+    expect(screen.getByText('6:00 PM')).toBeInTheDocument();
+    expect(screen.getByText('Field 1')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'You coming?' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Start game' })).not.toBeInTheDocument();
     expect(screen.queryByText('Welcome to the Oakdale Mens Softball League')).not.toBeInTheDocument();
 
@@ -491,7 +496,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Live')).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Dugout' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open dugout' })).toBeInTheDocument();
   });
 
   it('tells visitors this week’s games show up Thursday when the week has not flipped', async () => {
@@ -1492,7 +1497,7 @@ describe('App', () => {
 
     renderApp();
     await waitFor(() => {
-      expect(screen.getByText('The season is underway!')).toBeInTheDocument();
+      expect(screen.getByText(/the season is underway/i)).toBeInTheDocument();
     });
   });
 
