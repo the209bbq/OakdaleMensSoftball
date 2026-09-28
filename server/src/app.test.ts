@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, beforeEach } from 'vitest';
+import Database from 'better-sqlite3';
 import request from 'supertest';
 import { createApp } from './app.js';
 import { LeagueStore, SIM_EMAIL_DOMAIN } from './store.js';
@@ -2805,5 +2806,93 @@ describe('Admin player stats Google Sheet export', () => {
     expect(csv.text).toContain('Pat Dinger,12,SS,1,1,2,.500,0,1,0,0,0,1');
     expect(csv.text).toContain('Free Agents (unattached)');
     expect(csv.text).toContain('Da Beers');
+  });
+});
+
+describe('Maintenance mode', () => {
+  it('starts off on a freshly seeded league', () => {
+    const store = new LeagueStore(null);
+    expect(store.isMaintenance()).toBe(false);
+    store.close();
+  });
+
+  it('turns an existing league DB without the setting down on reopen', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oakdale-maint-'));
+    try {
+      const store = new LeagueStore(dir);
+      expect(store.isMaintenance()).toBe(false);
+      store.close();
+
+      const db = new Database(join(dir, 'league.db'));
+      db.prepare("DELETE FROM settings WHERE key = 'maintenance'").run();
+      db.close();
+
+      const reopened = new LeagueStore(dir);
+      expect(reopened.isMaintenance()).toBe(true);
+      reopened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks public league reads and signups while health stays up', async () => {
+    const { app, store } = makeApp();
+    store.setMaintenance(true);
+
+    const health = await request(app).get('/api/health');
+    expect(health.status).toBe(200);
+    expect(health.body.status).toBe('ok');
+
+    const flag = await request(app).get('/api/maintenance');
+    expect(flag.status).toBe(200);
+    expect(flag.body.maintenance).toBe(true);
+
+    const theme = await request(app).get('/api/theme');
+    expect(theme.status).toBe(200);
+
+    const teams = await request(app).get('/api/teams');
+    expect(teams.status).toBe(503);
+    expect(teams.body.maintenance).toBe(true);
+
+    const signup = await request(app).post('/api/auth/register').send({
+      email: 'new@oakdale.local',
+      name: 'New Guy',
+      password: 'longenough',
+    });
+    expect(signup.status).toBe(503);
+
+    const player = store.registerUser({
+      email: 'pat-maint@oakdale.local',
+      name: 'Pat',
+      password: 'longenough',
+    });
+    store.setUserRole(player.id, 'player', TEAM_OWN);
+    const asPlayer = await loginAs(app, 'pat-maint@oakdale.local', 'longenough');
+    const me = await asPlayer.get('/api/auth/me');
+    expect(me.status).toBe(200);
+    expect(me.body.user.email).toBe('pat-maint@oakdale.local');
+    const playerTeams = await asPlayer.get('/api/teams');
+    expect(playerTeams.status).toBe(503);
+  });
+
+  it('lets an admin toggle the site back on', async () => {
+    const { app, store } = makeApp();
+    store.setMaintenance(true);
+    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
+
+    const during = await admin.get('/api/teams');
+    expect(during.status).toBe(200);
+
+    const bad = await admin.put('/api/maintenance').send({ on: 'yes' });
+    expect(bad.status).toBe(400);
+
+    const off = await admin.put('/api/maintenance').send({ on: false });
+    expect(off.status).toBe(200);
+    expect(off.body.maintenance).toBe(false);
+    expect(store.isMaintenance()).toBe(false);
+
+    const publicTeams = await request(app).get('/api/teams');
+    expect(publicTeams.status).toBe(200);
+    expect(publicTeams.body).toHaveLength(8);
   });
 });

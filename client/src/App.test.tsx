@@ -188,6 +188,7 @@ beforeEach(() => {
     vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes('/api/auth/me')) return jsonOk({ user: null });
       if (url.includes('/api/theme')) return jsonOk(theme);
+      if (url.includes('/api/maintenance')) return jsonOk({ maintenance: false });
       if (url.includes('/api/landing')) return jsonOk(landing);
       if (url.includes('/api/standings')) return jsonOk(standings);
       if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
@@ -269,6 +270,57 @@ describe('App', () => {
     expect(screen.getByText(/TODO: add real content/i)).toBeInTheDocument();
     expect(screen.getByText(/Oakdale Mens Softball · Beer league/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+  });
+
+  it('shows a full-screen maintenance page instead of the league app', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: null });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/maintenance')) return jsonOk({ maintenance: true });
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        return jsonOk([]);
+      }),
+    );
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /down for maintenance/i })).toBeInTheDocument();
+    });
+    expect(screen.getByText(/check back after the next keg/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.queryByText('Welcome to the Oakdale Mens Softball League')).not.toBeInTheDocument();
+  });
+
+  it('lets an admin keep using the app while visitors are in maintenance', async () => {
+    const adminUser = {
+      id: 'u-admin',
+      email: 'admin@oakdale.local',
+      name: 'Commish',
+      role: 'admin' as const,
+      teamId: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/auth/me')) return jsonOk({ user: adminUser });
+        if (url.includes('/api/theme')) return jsonOk(theme);
+        if (url.includes('/api/maintenance')) return jsonOk({ maintenance: true });
+        if (url.includes('/api/landing')) return jsonOk(landing);
+        if (url.includes('/api/standings')) return jsonOk(standings);
+        if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
+        if (url.includes('/api/teams')) return jsonOk(teams);
+        return jsonOk([]);
+      }),
+    );
+    renderApp();
+    await waitFor(() => {
+      expect(screen.getByText(/visitors see the down for maintenance page/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole('tab', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument();
   });
 
   it('shows a signed-in player their team, next game, field, time, and check-in', async () => {
