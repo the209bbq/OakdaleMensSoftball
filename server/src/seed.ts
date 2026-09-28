@@ -19,7 +19,7 @@ export function createSeedData(): LeagueData {
     '',
     '1. Ten in the field. Fifteen on the roster. Check in from Home if you are coming.',
     '2. First pitch is the listed time. Managers set the batting order the day before.',
-    '3. Checked-in players and managers keep the live book. One game, one scoreboard.',
+    '3. Players on either team can keep the live book. One game, one scoreboard.',
     '4. Tap beers for the dugout that drank them. The tally is public and updates live.',
     '5. Home team brings a cooler. Visitors bring bats and a better excuse.',
     '6. Disputes stay at the field. If it is still unclear, the next batter hits.',
