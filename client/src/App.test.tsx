@@ -4,7 +4,7 @@ import App from './App';
 import { AuthProvider } from './auth';
 
 const standings = [
-  { teamId: 'tigers', teamName: 'Oakdale Tigers', wins: 2, losses: 0, ties: 0, runsFor: 18, runsAgainst: 8, gamesPlayed: 2, beers: 14 },
+  { teamId: 'tigers', teamName: 'Oakdale Tigers', wins: 2, losses: 0, ties: 0, runsFor: 18, runsAgainst: 8, gamesPlayed: 2 },
 ];
 
 const scheduleGames = [
@@ -262,7 +262,7 @@ describe('App', () => {
       expect(screen.getByRole('heading', { name: "This week's games" })).toBeInTheDocument();
     });
     expect(screen.getByText(/TODO: add real content/i)).toBeInTheDocument();
-    expect(screen.getByText(/Oakdale Mens Softball · Beer league/i)).toBeInTheDocument();
+    expect(screen.getByText('Oakdale Mens Softball')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /league rules, collapsed/i })).toBeInTheDocument();
     expect(screen.queryByText('1. Ten on the field.')).not.toBeInTheDocument();
@@ -287,7 +287,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /down for maintenance/i })).toBeInTheDocument();
     });
-    expect(screen.getByText(/check back after the next keg/i)).toBeInTheDocument();
+    expect(screen.getByText(/check back soon/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
     expect(screen.queryByText('Welcome to the Oakdale Mens Softball League')).not.toBeInTheDocument();
@@ -369,7 +369,7 @@ describe('App', () => {
       expect(screen.getByRole('heading', { name: "This week's games" })).toBeInTheDocument();
     });
     expect(screen.getByText('Hey Pat')).toBeInTheDocument();
-    expect(screen.getByText(/beer league night/i)).toBeInTheDocument();
+    expect(screen.getByText(/wednesday night/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Oakdale Tigers' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit profile' })).toHaveTextContent('PS');
     expect(screen.queryByText('Pat Shortstop')).not.toBeInTheDocument();
@@ -652,9 +652,10 @@ describe('App', () => {
     expect(screen.getByRole('columnheader', { name: 'Runs' })).toHaveAttribute('title', 'Runs scored');
     expect(screen.getByRole('columnheader', { name: 'RA' })).toHaveAttribute('title', 'Runs allowed');
     expect(screen.queryByRole('columnheader', { name: 'RF' })).not.toBeInTheDocument();
-    expect(screen.getByText(/oakdale is a beer league/i)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Beers this season' })).toBeInTheDocument();
-    expect(screen.getByText('14')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'League Standings' })).toBeInTheDocument();
+    expect(screen.queryByText(/oakdale is a beer league/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Beers this season' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Beers drank')).not.toBeInTheDocument();
   });
 
   it('opens a schedule game on its own page', async () => {
@@ -791,9 +792,9 @@ describe('App', () => {
     });
     expect(screen.getByRole('button', { name: 'Increase Oakdale Tigers R' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Increase Oakdale Tigers H' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Increase Oakdale Tigers beers' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Increase Da Beers beers' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Beers drank')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Increase Oakdale Tigers beers' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Increase Da Beers beers' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Beers drank')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Increase Oakdale Tigers inning/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Increase Oakdale Tigers R' }));
     await waitFor(() => {
@@ -1174,7 +1175,7 @@ describe('App', () => {
     expect(screen.getByLabelText('Team record')).toHaveTextContent('W');
     expect(screen.getByLabelText('Team record')).toHaveTextContent('2');
     expect(screen.getByLabelText('Team run totals')).toHaveTextContent('Runs');
-    expect(screen.getByLabelText('Team beers')).toHaveTextContent('14');
+    expect(screen.queryByLabelText('Team beers')).not.toBeInTheDocument();
     expect(screen.getByText('This week')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open this week's game vs da beers/i })).toBeInTheDocument();
     expect(screen.getByText('Roster · 3/15')).toBeInTheDocument();

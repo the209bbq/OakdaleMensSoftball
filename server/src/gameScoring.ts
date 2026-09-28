@@ -7,7 +7,7 @@ export const MANAGER_EARLY_START_MS = 2 * 60 * 60 * 1000;
 
 export type ScoringPhase = 'upcoming' | 'live' | 'grace' | 'locked';
 export type ScoreSide = 'home' | 'away';
-export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs' | 'beers';
+export type ScoreStat = 'runs' | 'hits' | 'walks' | 'outs';
 export type InningHalf = 'top' | 'bottom';
 export const PLAY_RESULTS = ['single', 'double', 'triple', 'homer', 'out', 'strikeout'] as const;
 export type PlayResult = (typeof PLAY_RESULTS)[number];
