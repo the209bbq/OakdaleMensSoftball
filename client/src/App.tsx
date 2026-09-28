@@ -1456,9 +1456,14 @@ function Standings({ onOpenTeam }: { onOpenTeam: (teamId: string) => void }) {
   if (error) return <p className="error">{error}</p>;
 
   return (
-    <section className="card">
-      <h2>League Standings</h2>
-      <p className="muted-copy beer-league-note">
+    <section className="card page-card standings-page">
+      <div className="page-head">
+        <div>
+          <p className="home-week-kicker">Wins and beers</p>
+          <h2>League Standings</h2>
+        </div>
+      </div>
+      <p className="page-blurb beer-league-note">
         Oakdale is a beer league. Wins still count. Beers are the unofficial standings.
       </p>
       <div className="table-scroll">
@@ -1489,7 +1494,7 @@ function Standings({ onOpenTeam }: { onOpenTeam: (teamId: string) => void }) {
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={r.teamId}>
+            <tr key={r.teamId} className={i === 0 ? 'is-leader' : undefined}>
               <td>{i + 1}</td>
               <td className="team-cell">
                 <button type="button" className="team-cell-link" onClick={() => onOpenTeam(r.teamId)}>
@@ -1765,6 +1770,7 @@ function GameRow({ game, onOpen }: { game: Game; onOpen: (id: string) => void })
   const [message, setMessage] = useState<string | null>(null);
   const shown = detail ?? game;
   const shouldPoll = expanded;
+  const live = game.scoring?.phase === 'live';
 
   useEffect(() => {
     if (!expanded) return;
@@ -1796,7 +1802,7 @@ function GameRow({ game, onOpen }: { game: Game; onOpen: (id: string) => void })
   }, [shouldPoll, game.id]);
 
   return (
-    <li className={`game ${game.played ? 'played' : 'upcoming'}${expanded ? ' is-expanded' : ''}`}>
+    <li className={`game ${game.played ? 'played' : 'upcoming'}${expanded ? ' is-expanded' : ''}${live ? ' is-live' : ''}`}>
       <button
         type="button"
         className="game-toggle"
@@ -1804,21 +1810,29 @@ function GameRow({ game, onOpen }: { game: Game; onOpen: (id: string) => void })
         aria-label={`Open game: ${game.awayTeamName} at ${game.homeTeamName} on ${formatGameDate(game.date)}`}
         onClick={() => setExpanded((value) => !value)}
       >
-        <span className="game-date">{formatGameDate(game.date)}</span>
-        <span className="game-teams">
-          <span className="game-team">
-            {game.awayTeamName} <AttendanceChip attendance={game.awayAttendance} />
+        <span className="game-ticket-body">
+          <span className="home-week-names">
+            <span className="home-week-away game-team">
+              {game.awayTeamName} <AttendanceChip attendance={game.awayAttendance} />
+            </span>
+            <span className="home-week-vs">at</span>
+            <span className="home-week-home game-team">
+              {game.homeTeamName} <AttendanceChip attendance={game.homeAttendance} />
+            </span>
           </span>
-          <span className="at">@</span>
-          <span className="game-team">
-            {game.homeTeamName} <AttendanceChip attendance={game.homeAttendance} />
+          <span className="game-ticket-side">
+            <GameScoreLabel game={game} />
+            <span className={`game-chevron${expanded ? ' is-open' : ''}`} aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+            </span>
           </span>
         </span>
-        <GameScoreLabel game={game} />
-        <span className={`game-chevron${expanded ? ' is-open' : ''}`} aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 6l6 6-6 6" />
-          </svg>
+        <span className="home-week-chips">
+          <span className="home-week-chip">{formatGameDate(game.date)}</span>
+          {game.time ? <span className="home-week-chip">{game.time}</span> : null}
+          {game.field ? <span className="home-week-chip">{game.field}</span> : null}
         </span>
       </button>
       {expanded && (
@@ -1895,8 +1909,13 @@ function Schedule({ onOpenGame }: { onOpenGame: (id: string) => void }) {
   if (error) return <p className="error">{error}</p>;
 
   return (
-    <section className="card">
-      <h2>Season Schedule</h2>
+    <section className="card page-card">
+      <div className="page-head">
+        <div>
+          <p className="home-week-kicker">Full season</p>
+          <h2>Season Schedule</h2>
+        </div>
+      </div>
       {isAdmin && (
         <div className="generate-bar">
           <label className="field inline">
@@ -3124,14 +3143,19 @@ function TeamsBoard({ onOpenTeam }: { onOpenTeam: (teamId: string) => void }) {
   }, [loadBoard]);
 
   return (
-    <section className="card">
-      <h2>Teams</h2>
-      <p className="muted-copy">
+    <section className="card page-card">
+      <div className="page-head">
+        <div>
+          <p className="home-week-kicker">This week&apos;s diamond</p>
+          <h2>Teams</h2>
+        </div>
+      </div>
+      <p className="page-blurb">
         Live lineup for this week. Click a team to see who&apos;s checked in.
       </p>
 
       {!board ? (
-        <p className="muted-copy">Loading teams…</p>
+        <p className="page-blurb">Loading teams…</p>
       ) : (
         <ul className="team-board-list">
           {board.teams.map((team) => (
