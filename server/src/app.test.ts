@@ -2208,69 +2208,6 @@ describe('Weekly check-in', () => {
   });
 });
 
-describe('Suggestions', () => {
-  it('lets anyone submit a suggestion and only admins list or delete them', async () => {
-    const { app } = makeApp();
-
-    const empty = await request(app).post('/api/suggestions').send({ text: '   ' });
-    expect(empty.status).toBe(400);
-
-    const created = await request(app)
-      .post('/api/suggestions')
-      .send({ text: '  Add a lights-out rule for weeknights.  ' });
-    expect([200, 201]).toContain(created.status);
-    expect(created.body.text).toBe('Add a lights-out rule for weeknights.');
-    expect(created.body.authorName).toBeNull();
-    expect(created.body.id).toBeTruthy();
-    expect(created.body.createdAt).toBeTruthy();
-
-    const named = await request(app)
-      .post('/api/suggestions')
-      .send({ text: 'More benches', name: '  Sam  ' });
-    expect([200, 201]).toContain(named.status);
-    expect(named.body.authorName).toBe('Sam');
-
-    const player = request.agent(app);
-    await player.post('/api/auth/register').send({
-      email: 'suggester@b.com',
-      name: 'Pat Player',
-      password: 'longenough',
-    });
-    const asPlayer = await player.post('/api/suggestions').send({ text: 'Signed-in idea' });
-    expect([200, 201]).toContain(asPlayer.status);
-    expect(asPlayer.body.authorName).toBe('Pat Player');
-
-    const anonGet = await request(app).get('/api/suggestions');
-    expect(anonGet.status).toBe(401);
-
-    const playerGet = await player.get('/api/suggestions');
-    expect(playerGet.status).toBe(403);
-
-    const admin = await loginAs(app, 'admin@oakdale.local', 'admin-password');
-    const listed = await admin.get('/api/suggestions');
-    expect(listed.status).toBe(200);
-    expect(listed.body.map((s: { text: string }) => s.text)).toEqual([
-      'Signed-in idea',
-      'More benches',
-      'Add a lights-out rule for weeknights.',
-    ]);
-    expect(listed.body[2].authorName).toBeNull();
-
-    const remove = await admin.delete(`/api/suggestions/${created.body.id}`);
-    expect(remove.status).toBe(200);
-    expect(remove.body.ok).toBe(true);
-
-    const after = await admin.get('/api/suggestions');
-    expect(after.body.some((s: { id: string }) => s.id === created.body.id)).toBe(false);
-    expect(after.body).toHaveLength(2);
-
-    const playerDelete = await player.delete(`/api/suggestions/${named.body.id}`);
-    expect(playerDelete.status).toBe(403);
-    const anonDelete = await request(app).delete(`/api/suggestions/${named.body.id}`);
-    expect(anonDelete.status).toBe(401);
-  });
-});
-
 describe('Team group chat', () => {
   it('lets team members and admins post and read; blocks everyone else', async () => {
     const { app, store } = makeApp();
@@ -2332,7 +2269,6 @@ describe('Admin test data simulation', () => {
     store.ensureAdmin('admin@oakdale.local', 'Commish', 'admin-password');
     seedDemoUsers(store);
     store.generateSchedule({ startDate: '2026-05-06' });
-    store.addSuggestion({ text: 'Keep this suggestion' });
     const rulesBefore = store.getRules();
     const landingBefore = store.getLanding();
     const teamIds = store.getTeams().map((t) => t.id);
@@ -2440,8 +2376,6 @@ describe('Admin test data simulation', () => {
     expect(store.getTeams().map((t) => t.id)).toEqual(teamIds);
     expect(store.getRules()).toBe(rulesBefore);
     expect(store.getLanding().headline).toBe(landingBefore.headline);
-    expect(store.listSuggestions()).toHaveLength(1);
-    expect(store.listSuggestions()[0].text).toBe('Keep this suggestion');
     for (const team of store.getTeams()) {
       expect(store.getTeamMessages(team.id)).toHaveLength(0);
     }

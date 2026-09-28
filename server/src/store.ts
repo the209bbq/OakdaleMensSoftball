@@ -23,7 +23,6 @@ import type {
   Role,
   SkillLevel,
   StandingRow,
-  Suggestion,
   Team,
   TeamAttendance,
   TeamBoard,
@@ -108,7 +107,6 @@ export const MAX_PHOTO_URL_CHARS = 800000;
 export const MAX_LANDING_HEADLINE_CHARS = 200;
 export const MAX_LANDING_BODY_CHARS = 5000;
 export const MAX_LANDING_LABEL_CHARS = 80;
-export const MAX_SUGGESTION_CHARS = 2000;
 export const MAX_MESSAGE_CHARS = 2000;
 
 /** Checked-in "in" count that counts as a full weekly lineup. */
@@ -329,7 +327,6 @@ type FaInviteRow = {
   createdAt: string;
 };
 type CheckInRow = { userId: string; week: number; status: string };
-type SuggestionRow = { id: string; text: string; authorName: string | null; createdAt: string };
 type MessageRow = {
   id: string;
   teamId: string;
@@ -660,15 +657,6 @@ function normalizeWaiverUrl(value: unknown): string | null {
     throw new Error(`waiver must be ${MAX_PHOTO_URL_CHARS} characters or fewer`);
   }
   return value;
-}
-
-function suggestionFromRow(row: SuggestionRow): Suggestion {
-  return {
-    id: row.id,
-    text: row.text,
-    authorName: row.authorName,
-    createdAt: row.createdAt,
-  };
 }
 
 function messageFromRow(row: MessageRow): TeamMessage {
@@ -2899,45 +2887,6 @@ export class LeagueStore {
     });
   }
 
-  // ---- Suggestions (public submit; admin reads) --------------------------
-
-  addSuggestion(input: { text: unknown; authorName?: string | null }): Suggestion {
-    if (typeof input.text !== 'string') throw new Error('text is required');
-    const text = clampText(input.text.trim(), MAX_SUGGESTION_CHARS);
-    if (!text) throw new Error('text is required');
-    let authorName: string | null = null;
-    if (typeof input.authorName === 'string') {
-      const trimmed = input.authorName.trim();
-      authorName = trimmed ? clampText(trimmed, 80) : null;
-    }
-    const suggestion: Suggestion = {
-      id: newRowId('s'),
-      text,
-      authorName,
-      createdAt: new Date().toISOString(),
-    };
-    this.db
-      .prepare(
-        'INSERT INTO suggestions (id, text, authorName, createdAt) VALUES (@id, @text, @authorName, @createdAt)',
-      )
-      .run(suggestion);
-    return suggestion;
-  }
-
-  listSuggestions(): Suggestion[] {
-    const rows = this.db
-      .prepare('SELECT id, text, authorName, createdAt FROM suggestions ORDER BY createdAt DESC, rowid DESC')
-      .all() as SuggestionRow[];
-    return rows.map(suggestionFromRow);
-  }
-
-  deleteSuggestion(id: string): void {
-    const result = this.db.prepare('DELETE FROM suggestions WHERE id = ?').run(id);
-    if (result.changes === 0) {
-      throw new Error(`Unknown suggestion: ${id}`);
-    }
-  }
-
   // ---- Team group chat ---------------------------------------------------
 
   getTeamMessages(teamId: string, limit = 200): TeamMessage[] {
@@ -3278,8 +3227,8 @@ export class LeagueStore {
 
   /**
    * Remove every @sim.local guest (and their check-ins/messages) and reset
-   * the season to unplayed. Demo/admin accounts, teams, landing, rules, theme,
-   * and suggestions are left alone.
+   * the season to unplayed. Demo/admin accounts, teams, landing, rules, and theme
+   * are left alone.
    */
   clearTestData(): TestDataClearSummary {
     const run = this.db.transaction(() => {

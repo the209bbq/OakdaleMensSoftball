@@ -738,6 +738,10 @@ body {
   padding: 0 1rem 1rem;
 }
 
+.free-agency-body .rules-text {
+  margin: 0;
+}
+
 .free-agency-body .muted-copy {
   padding: 0;
   margin: 0 0 0.65rem;
@@ -2799,79 +2803,6 @@ body {
   color: var(--muted);
   margin-top: 2rem;
   font-size: 0.85rem;
-}
-
-/* Home suggestions box */
-.suggestions-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.suggestions-form .field textarea,
-.suggestions-form .field input {
-  display: block;
-  width: 100%;
-  margin-top: 0.3rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font: inherit;
-  font-weight: 400;
-  resize: vertical;
-}
-
-.suggestions-form .primary-btn {
-  align-self: flex-start;
-  padding: 0.55rem 1.2rem;
-}
-
-.suggestions-thanks .link-btn {
-  margin-left: 0;
-}
-
-.suggestion-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.suggestion-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.75rem 0.85rem;
-  background: var(--bg);
-  border-radius: 10px;
-}
-
-.suggestion-main {
-  min-width: 0;
-  flex: 1;
-}
-
-.suggestion-text {
-  margin: 0;
-  white-space: pre-wrap;
-  color: var(--heading);
-  font-size: 0.92rem;
-  line-height: 1.45;
-}
-
-.suggestion-meta {
-  margin: 0.35rem 0 0;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-
-.suggestion-row .link-btn {
-  margin-left: 0;
-  flex: none;
 }
 
 /* Team chat panel */

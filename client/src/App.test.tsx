@@ -196,18 +196,7 @@ beforeEach(() => {
         return jsonOk(scheduleGames[0]);
       }
       if (url.includes('/messages')) return jsonOk([]);
-      if (url.includes('/api/suggestions')) {
-        if (init?.method === 'POST') {
-          const body = JSON.parse(String(init.body ?? '{}')) as { text?: string; name?: string };
-          return jsonOk({
-            id: 's1',
-            text: body.text ?? '',
-            authorName: body.name ?? null,
-            createdAt: '2026-09-22T00:00:00.000Z',
-          });
-        }
-        return jsonOk([]);
-      }
+      if (url.includes('/api/rules')) return jsonOk({ rules: '1. Ten on the field.\n2. Fifteen roster spots.' });
       if (url.includes('/api/fa-invites')) return jsonOk([]);
       if (url.includes('/api/players/')) return jsonOk(playerProfile);
       if (url.includes('/api/team-board')) return jsonOk(teamBoard);
@@ -248,13 +237,16 @@ describe('App', () => {
     });
   });
 
-  it('renders bottom tab navigation without an Admin tab when logged out', async () => {
+  it('renders four bottom tabs with Standings on the far right and no Rules tab', async () => {
     renderApp();
     expect(screen.getByRole('tablist')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Home' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Standings' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Schedule' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Teams' })).toBeInTheDocument();
+    expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual([
+      'Home',
+      'Schedule',
+      'Teams',
+      'Standings',
+    ]);
+    expect(screen.queryByRole('tab', { name: 'Rules' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Admin' })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText('Welcome to the Oakdale Mens Softball League')).toBeInTheDocument();
@@ -270,6 +262,8 @@ describe('App', () => {
     expect(screen.getByText(/TODO: add real content/i)).toBeInTheDocument();
     expect(screen.getByText(/Oakdale Mens Softball · Beer league/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /league rules, collapsed/i })).toBeInTheDocument();
+    expect(screen.queryByText('1. Ten on the field.')).not.toBeInTheDocument();
   });
 
   it('shows a full-screen maintenance page instead of the league app', async () => {
@@ -1144,21 +1138,28 @@ describe('App', () => {
     expect(screen.getByLabelText('Full name')).toBeInTheDocument();
   });
 
-  it('shows a public suggestions box and hides the team-chat button when logged out', async () => {
+  it('expands league rules on Home and hides the team-chat button when logged out', async () => {
     renderApp();
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Suggestions' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /league rules, collapsed/i })).toBeInTheDocument();
     });
-    expect(screen.getByLabelText('Suggestion')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /team chat/i })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Suggestion'), {
-      target: { value: 'Add a snack schedule' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(screen.queryByRole('heading', { name: 'Suggestions' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /league rules, collapsed/i }));
+    expect(screen.getByRole('button', { name: /league rules, expanded/i })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(/ten on the field/i)).toBeInTheDocument();
+    expect(screen.getByText(/fifteen roster spots/i)).toBeInTheDocument();
+  });
+
+  it('opens the Home rules fold when visiting /rules', async () => {
+    window.history.replaceState({}, '', '/rules');
+    renderApp();
     await waitFor(() => {
-      expect(screen.getByText('Thanks for the suggestion!')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /league rules, expanded/i })).toBeInTheDocument();
     });
-    expect(screen.queryByText('Add a snack schedule')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Home' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(/ten on the field/i)).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Rules' })).not.toBeInTheDocument();
   });
 
   it('opens team chat from the app-bar button for a signed-in teammate', async () => {
@@ -1204,7 +1205,7 @@ describe('App', () => {
           }
           return jsonOk([...chat]);
         }
-        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/rules')) return jsonOk({ rules: '1. Ten on the field.\n2. Fifteen roster spots.' });
         if (url.includes('/api/team-board')) return jsonOk(teamBoard);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
         if (url.includes('/api/teams')) return jsonOk(teams);
@@ -1395,7 +1396,7 @@ describe('App', () => {
         if (url.includes('/api/admin/test-data/clear') && init?.method === 'POST') {
           return jsonOk({ guestsRemoved: 127, checkInsRemoved: 1309, messagesRemoved: 40, gamesReset: 44 });
         }
-        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/rules')) return jsonOk({ rules: '1. Ten on the field.\n2. Fifteen roster spots.' });
         if (url.includes('/api/manager-emails')) return jsonOk([]);
         if (url.includes('/api/users')) return jsonOk([adminUser]);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
@@ -1479,7 +1480,7 @@ describe('App', () => {
           } as Response;
         }
         if (url.includes('/api/admin/player-stats-sheet')) return jsonOk(sheetStatus);
-        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/rules')) return jsonOk({ rules: '1. Ten on the field.\n2. Fifteen roster spots.' });
         if (url.includes('/api/manager-emails')) return jsonOk([]);
         if (url.includes('/api/users')) return jsonOk([adminUser]);
         if (url.includes('/api/teams')) return jsonOk(teams);
@@ -1552,7 +1553,7 @@ describe('App', () => {
         if (url.includes('/api/landing')) return jsonOk(landing);
         if (url.includes('/api/standings')) return jsonOk(standings);
         if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
-        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/rules')) return jsonOk({ rules: '1. Ten on the field.\n2. Fifteen roster spots.' });
         if (url.includes('/api/manager-emails')) return jsonOk([]);
         if (url.includes('/api/users')) return jsonOk([adminUser]);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
@@ -1616,7 +1617,7 @@ describe('App', () => {
         if (url.includes('/api/landing')) return jsonOk(landing);
         if (url.includes('/api/standings')) return jsonOk(standings);
         if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
-        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/rules')) return jsonOk({ rules: '1. Ten on the field.\n2. Fifteen roster spots.' });
         if (url.includes('/api/manager-emails')) return jsonOk([]);
         if (url.includes('/api/users')) return jsonOk([adminUser, managerUser, playerUser]);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
@@ -1684,7 +1685,7 @@ describe('App', () => {
         if (url.includes('/api/landing')) return jsonOk(landing);
         if (url.includes('/api/standings')) return jsonOk(standings);
         if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
-        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/rules')) return jsonOk({ rules: '1. Ten on the field.\n2. Fifteen roster spots.' });
         if (url.includes('/api/manager-emails')) return jsonOk([]);
         if (url.includes('/api/users')) return jsonOk([adminUser, managerUser, backupUser]);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
@@ -1723,7 +1724,7 @@ describe('App', () => {
         if (url.includes('/api/standings')) return jsonOk(standings);
         if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
         if (url.includes('/messages')) return jsonOk([]);
-        if (url.includes('/api/suggestions')) return jsonOk([]);
+        if (url.includes('/api/rules')) return jsonOk({ rules: '1. Ten on the field.\n2. Fifteen roster spots.' });
         if (url.includes('/api/team-board')) return jsonOk(teamBoard);
         if (url.includes('/roster')) return jsonOk(rosterPayload);
         if (url.includes('/api/teams')) return jsonOk(teams);
@@ -1815,7 +1816,7 @@ describe('App', () => {
       if (url.includes('/api/landing')) return jsonOk(landing);
       if (url.includes('/api/standings')) return jsonOk(standings);
       if (url.includes('/api/schedule')) return jsonOk(scheduleGames);
-      if (url.includes('/api/suggestions')) return jsonOk([]);
+      if (url.includes('/api/rules')) return jsonOk({ rules: '1. Ten on the field.\n2. Fifteen roster spots.' });
       if (url.includes('/api/manager-emails')) return jsonOk([]);
       if (url.includes('/api/users')) return jsonOk([adminUser]);
       if (url.includes('/roster')) return jsonOk(rosterPayload);
