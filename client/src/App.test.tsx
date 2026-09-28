@@ -185,7 +185,7 @@ function jsonOk(data: unknown) {
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string, init?: RequestInit) => {
+    vi.fn(async (url: string) => {
       if (url.includes('/api/auth/me')) return jsonOk({ user: null });
       if (url.includes('/api/theme')) return jsonOk(theme);
       if (url.includes('/api/maintenance')) return jsonOk({ maintenance: false });
